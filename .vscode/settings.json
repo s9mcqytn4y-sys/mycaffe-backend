@@ -58,6 +58,13 @@
     "errorlens.enabled": true,
     "errorlens.fontSize": "12px",
     "terminal.integrated.defaultProfile.windows": "PowerShell",
+    "terminal.integrated.profiles.windows": {
+        "PowerShell": {
+            "source": "PowerShell",
+            "icon": "terminal-powershell",
+            "args": ["-NoLogo"]
+        }
+    },
     "terminal.integrated.fontFamily": "Cascadia Code, Consolas",
     "terminal.integrated.fontSize": 13,
     "files.associations": {
@@ -73,6 +80,9 @@
         "**/.git/objects/**": true,
         "**/.git/subtree-cache/**": true,
         "**/node_modules/**": true,
-        "**/bin/**": true
-    }
+        "**/bin/**": true,
+        "**/.gemini/**": true
+    },
+    "files.trimTrailingWhitespace": true,
+    "files.insertFinalNewline": true
 }

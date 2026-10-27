@@ -57,11 +57,14 @@ func LoadConfig() (*Config, error) {
 		return nil, fmt.Errorf("invalid positive integer for JWT_EXPIRED_HOURS: %w", err)
 	}
 
-	// Strictly normalize APP_ENV (case-insensitive and trimmed)
-	rawAppEnv := getEnv("APP_ENV", "development")
+	// Explicitly require APP_ENV (reject unset and empty values, normalize case/whitespace)
+	rawAppEnv, exists := os.LookupEnv("APP_ENV")
+	if !exists {
+		return nil, errors.New("APP_ENV is not set: environment must be explicitly defined (development, test, staging, production)")
+	}
 	appEnv := strings.ToLower(strings.TrimSpace(rawAppEnv))
 	if appEnv == "" {
-		return nil, errors.New("APP_ENV cannot be empty")
+		return nil, errors.New("APP_ENV cannot be empty: environment must be explicitly defined (development, test, staging, production)")
 	}
 
 	frontendURL := getEnv("FRONTEND_URL", "http://localhost:3000")

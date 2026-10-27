@@ -91,6 +91,43 @@ func TestValidateConfigProductionFailClosed(t *testing.T) {
 }
 
 func TestLoadConfigStrictParsing(t *testing.T) {
+	// Preserve original env
+	origEnv, hasEnv := os.LookupEnv("APP_ENV")
+	defer func() {
+		if hasEnv {
+			os.Setenv("APP_ENV", origEnv)
+		} else {
+			os.Unsetenv("APP_ENV")
+		}
+	}()
+
+	// 1. Unset APP_ENV must fail
+	os.Unsetenv("APP_ENV")
+	if _, err := config.LoadConfig(); err == nil {
+		t.Errorf("expected LoadConfig to fail when APP_ENV is unset, got nil")
+	}
+
+	// 2. Empty APP_ENV must fail
+	os.Setenv("APP_ENV", "")
+	if _, err := config.LoadConfig(); err == nil {
+		t.Errorf("expected LoadConfig to fail when APP_ENV is empty, got nil")
+	}
+
+	// 3. Whitespace-only APP_ENV must fail
+	os.Setenv("APP_ENV", "   ")
+	if _, err := config.LoadConfig(); err == nil {
+		t.Errorf("expected LoadConfig to fail when APP_ENV is whitespace only, got nil")
+	}
+
+	// 4. Invalid APP_ENV enum must fail
+	os.Setenv("APP_ENV", "custom_sandbox_env")
+	if _, err := config.LoadConfig(); err == nil {
+		t.Errorf("expected LoadConfig to fail when APP_ENV is unknown enum, got nil")
+	}
+
+	// Set valid APP_ENV for subsequent strict parsing tests
+	os.Setenv("APP_ENV", "development")
+
 	// Invalid MIDTRANS_IS_PRODUCTION boolean must return error
 	os.Setenv("MIDTRANS_IS_PRODUCTION", "not_a_boolean")
 	defer os.Unsetenv("MIDTRANS_IS_PRODUCTION")

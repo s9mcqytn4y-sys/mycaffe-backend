@@ -33,3 +33,4 @@ This repository (`mycaffe-backend`) is the Go backend for Kafe Senja Vibe — a 
 - Run `govulncheck ./...` with pinned version to verify dependency security.
 - Scan for leaked credentials with `gitleaks git --verbose`.
 - Never claim a build, test, migration, or CI succeeded without inspecting actual command output.
+

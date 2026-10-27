@@ -253,5 +253,16 @@ CREATE INDEX IF NOT EXISTS idx_notif_logs_order_number ON payment_notification_l
 CREATE INDEX IF NOT EXISTS idx_audit_logs_store_created ON audit_logs(store_id, created_at DESC);
 
 -- SECURITY: RESTRICT DIRECT ACCESS FROM UNTRUSTED ROLES (ADR-001)
-REVOKE ALL ON ALL TABLES IN SCHEMA public FROM anon, authenticated;
-GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO service_role;
+-- Applied conditionally so standard PostgreSQL (e.g. local / CI Docker container) does not fail if Supabase roles do not exist.
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+        REVOKE ALL ON ALL TABLES IN SCHEMA public FROM anon;
+    END IF;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+        REVOKE ALL ON ALL TABLES IN SCHEMA public FROM authenticated;
+    END IF;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
+        GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO service_role;
+    END IF;
+END $$;

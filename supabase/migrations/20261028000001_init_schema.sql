@@ -1,9 +1,19 @@
 -- 20261028000001_init_schema.sql
 -- Multi-Tenant PostgreSQL Schema for Kafe Senja Vibe POS
 -- Hardened with tenant composite foreign keys, column-specific ON DELETE SET NULL, basis points (BPS), and durable webhook idempotency.
+-- ADR-001 Compliant: Strict store retention, aligned state machines, atomic queue sequences, and explicit security grants.
 
 -- Enable UUID extension
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+-- 0. UPDATED_AT TRIGGER FUNCTION
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
 
 -- 1. STORES (Tenants)
 CREATE TABLE IF NOT EXISTS stores (
@@ -12,7 +22,9 @@ CREATE TABLE IF NOT EXISTS stores (
     name VARCHAR(255) NOT NULL,
     address TEXT,
     phone VARCHAR(50),
+    timezone VARCHAR(50) NOT NULL DEFAULT 'Asia/Jakarta',
     is_active BOOLEAN NOT NULL DEFAULT true,
+    deleted_at TIMESTAMPTZ DEFAULT NULL,            -- Soft-delete timestamp
     tax_bps BIGINT NOT NULL DEFAULT 1000,           -- 1000 bps = 10.00% PB1 (Configurable per store)
     service_bps BIGINT NOT NULL DEFAULT 0,          -- Service charge in bps (e.g. 500 = 5.00%)
     qris_mdr_bps BIGINT NOT NULL DEFAULT 70,        -- 70 bps = 0.70% QRIS MDR (Configurable per store)
@@ -23,6 +35,10 @@ CREATE TABLE IF NOT EXISTS stores (
     CONSTRAINT chk_stores_service_bps CHECK (service_bps >= 0 AND service_bps <= 10000),
     CONSTRAINT chk_stores_qris_mdr_bps CHECK (qris_mdr_bps >= 0 AND qris_mdr_bps <= 10000)
 );
+
+CREATE TRIGGER trg_stores_updated_at
+BEFORE UPDATE ON stores
+FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- 2. USERS / STAFF
 CREATE TABLE IF NOT EXISTS users (
@@ -40,6 +56,10 @@ CREATE TABLE IF NOT EXISTS users (
     CONSTRAINT chk_users_role CHECK (role IN ('owner', 'manager', 'cashier', 'barista', 'kitchen'))
 );
 
+CREATE TRIGGER trg_users_updated_at
+BEFORE UPDATE ON users
+FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
 -- 3. MENU CATEGORIES
 CREATE TABLE IF NOT EXISTS categories (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -51,6 +71,10 @@ CREATE TABLE IF NOT EXISTS categories (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT uq_categories_store_id UNIQUE(store_id, id)
 );
+
+CREATE TRIGGER trg_categories_updated_at
+BEFORE UPDATE ON categories
+FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- 4. PRODUCTS
 -- Money amounts: Whole integer Indonesian Rupiah (e.g. 25000 = Rp 25.000; NO fractional cents)
@@ -73,23 +97,37 @@ CREATE TABLE IF NOT EXISTS products (
     CONSTRAINT chk_products_stock_quantity CHECK (stock_quantity >= 0)
 );
 
--- 5. ORDERS
+CREATE TRIGGER trg_products_updated_at
+BEFORE UPDATE ON products
+FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- 5. STORE DAILY SEQUENCES (Atomic Queue Number Allocation)
+CREATE TABLE IF NOT EXISTS store_daily_sequences (
+    store_id UUID NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
+    business_date DATE NOT NULL,
+    last_seq INT NOT NULL DEFAULT 0,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (store_id, business_date)
+);
+
+-- 6. ORDERS
 -- Money amounts: Whole integer Indonesian Rupiah (e.g. 50000 = Rp 50.000)
+-- Financial history protection: store_id references stores(id) ON DELETE RESTRICT
 CREATE TABLE IF NOT EXISTS orders (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    store_id UUID NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
-    order_number VARCHAR(50) NOT NULL,                  -- Display ID: e.g. ORD-20261028-001
+    store_id UUID NOT NULL REFERENCES stores(id) ON DELETE RESTRICT,
+    order_number VARCHAR(50) NOT NULL,                  -- Display/Business ID: e.g. ORD-20261028-001
     queue_number VARCHAR(20) NOT NULL,                  -- Display Queue: e.g. A01
     table_number VARCHAR(50) NOT NULL DEFAULT '',
     customer_name VARCHAR(100) NOT NULL,
     customer_phone VARCHAR(50) DEFAULT '',
     order_type VARCHAR(30) NOT NULL DEFAULT 'dine_in',
-    status VARCHAR(50) NOT NULL DEFAULT 'placed',
+    status VARCHAR(50) NOT NULL DEFAULT 'pending_payment',
     payment_status VARCHAR(50) NOT NULL DEFAULT 'pending',
 
     subtotal_amount BIGINT NOT NULL DEFAULT 0,          -- Whole integer IDR
     discount_amount BIGINT NOT NULL DEFAULT 0,          -- Whole integer IDR
-    tax_amount BIGINT NOT NULL DEFAULT 0,               -- Whole integer IDR
+    tax_amount BIGINT NOT NULL DEFAULT 0,               -- Whole integer IDR (PB1 Restaurant Tax)
     service_charge_amount BIGINT NOT NULL DEFAULT 0,    -- Whole integer IDR
     total_amount BIGINT NOT NULL DEFAULT 0,             -- Whole integer IDR
 
@@ -99,8 +137,8 @@ CREATE TABLE IF NOT EXISTS orders (
     CONSTRAINT uq_orders_store_id UNIQUE(store_id, id),
     CONSTRAINT uq_orders_store_order_number UNIQUE(store_id, order_number),
     CONSTRAINT chk_orders_order_type CHECK (order_type IN ('dine_in', 'takeaway')),
-    CONSTRAINT chk_orders_status CHECK (status IN ('placed', 'queued', 'preparing', 'ready', 'completed', 'cancelled')),
-    CONSTRAINT chk_orders_payment_status CHECK (payment_status IN ('pending', 'paid', 'failed', 'expired', 'refunded')),
+    CONSTRAINT chk_orders_status CHECK (status IN ('pending_payment', 'queued', 'preparing', 'ready', 'completed', 'cancelled')),
+    CONSTRAINT chk_orders_payment_status CHECK (payment_status IN ('pending', 'paid', 'failed', 'expired', 'partially_refunded', 'refunded')),
     CONSTRAINT chk_orders_subtotal CHECK (subtotal_amount >= 0),
     CONSTRAINT chk_orders_discount CHECK (discount_amount >= 0),
     CONSTRAINT chk_orders_tax CHECK (tax_amount >= 0),
@@ -108,7 +146,11 @@ CREATE TABLE IF NOT EXISTS orders (
     CONSTRAINT chk_orders_total CHECK (total_amount >= 0)
 );
 
--- 6. ORDER ITEMS (Tenant-isolated snapshot of item, modifiers, price)
+CREATE TRIGGER trg_orders_updated_at
+BEFORE UPDATE ON orders
+FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- 7. ORDER ITEMS (Tenant-isolated snapshot of item, modifiers, price)
 -- When a product is deleted, preserve historical receipt line by nulling product_id only
 CREATE TABLE IF NOT EXISTS order_items (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -129,11 +171,12 @@ CREATE TABLE IF NOT EXISTS order_items (
     CONSTRAINT chk_order_items_subtotal CHECK (subtotal_amount >= 0)
 );
 
--- 7. PAYMENTS (Tenant-isolated payment ledger)
+-- 8. PAYMENTS (Tenant-isolated payment ledger)
 CREATE TABLE IF NOT EXISTS payments (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    store_id UUID NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
+    store_id UUID NOT NULL REFERENCES stores(id) ON DELETE RESTRICT,
     order_id UUID NOT NULL,
+    provider_order_id VARCHAR(100) NOT NULL,            -- Stable provider order id (matched with Midtrans order_id)
     amount BIGINT NOT NULL,                             -- Whole integer IDR
     method VARCHAR(50) NOT NULL,
     status VARCHAR(50) NOT NULL DEFAULT 'pending',
@@ -146,12 +189,17 @@ CREATE TABLE IF NOT EXISTS payments (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT fk_payments_order FOREIGN KEY (store_id, order_id) REFERENCES orders(store_id, id) ON DELETE CASCADE,
+    CONSTRAINT uq_payments_provider_order UNIQUE (store_id, provider_order_id),
     CONSTRAINT chk_payments_amount CHECK (amount > 0),
     CONSTRAINT chk_payments_method CHECK (method IN ('qris', 'bank_transfer', 'cash')),
-    CONSTRAINT chk_payments_status CHECK (status IN ('pending', 'paid', 'failed', 'expired', 'refunded'))
+    CONSTRAINT chk_payments_status CHECK (status IN ('pending', 'paid', 'failed', 'expired', 'partially_refunded', 'refunded'))
 );
 
--- 8. PAYMENT NOTIFICATION LOGS (Durable Webhook Inbox & Idempotency)
+CREATE TRIGGER trg_payments_updated_at
+BEFORE UPDATE ON payments
+FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- 9. PAYMENT NOTIFICATION LOGS (Durable Webhook Inbox & Idempotency)
 -- Matched accurately to Midtrans Core API payload fields
 CREATE TABLE IF NOT EXISTS payment_notification_logs (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -159,7 +207,7 @@ CREATE TABLE IF NOT EXISTS payment_notification_logs (
     order_id UUID,                                      -- Nullable in durable inbox before order resolution
     provider VARCHAR(50) NOT NULL DEFAULT 'midtrans',
     transaction_id VARCHAR(150) NOT NULL,              -- Midtrans transaction_id
-    order_number VARCHAR(100) NOT NULL,                 -- Midtrans order_id mapped to store order_number
+    order_number VARCHAR(100) NOT NULL,                 -- Midtrans order_id mapped to store order_number / provider_order_id
     status_code VARCHAR(10) NOT NULL,                   -- Midtrans status_code (e.g. '200')
     transaction_status VARCHAR(50) NOT NULL,            -- e.g. settlement, pending, expire, cancel
     gross_amount BIGINT NOT NULL,                       -- Whole integer IDR
@@ -176,10 +224,10 @@ CREATE TABLE IF NOT EXISTS payment_notification_logs (
     )
 );
 
--- 9. AUDIT LOGS (Operational tracking with strict tenant boundary)
+-- 10. AUDIT LOGS (Operational tracking with strict tenant boundary)
 CREATE TABLE IF NOT EXISTS audit_logs (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    store_id UUID NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
+    store_id UUID NOT NULL REFERENCES stores(id) ON DELETE RESTRICT,
     actor_id UUID,
     actor_name VARCHAR(255) NOT NULL,
     action VARCHAR(100) NOT NULL,
@@ -199,6 +247,11 @@ CREATE INDEX IF NOT EXISTS idx_orders_store_payment_status ON orders(store_id, p
 CREATE INDEX IF NOT EXISTS idx_order_items_store_order ON order_items(store_id, order_id);
 CREATE INDEX IF NOT EXISTS idx_payments_store_order ON payments(store_id, order_id);
 CREATE INDEX IF NOT EXISTS idx_payments_transaction_id ON payments(transaction_id);
+CREATE INDEX IF NOT EXISTS idx_payments_provider_order ON payments(store_id, provider_order_id);
 CREATE INDEX IF NOT EXISTS idx_notif_logs_lookup ON payment_notification_logs(provider, transaction_id, transaction_status);
 CREATE INDEX IF NOT EXISTS idx_notif_logs_order_number ON payment_notification_logs(order_number);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_store_created ON audit_logs(store_id, created_at DESC);
+
+-- SECURITY: RESTRICT DIRECT ACCESS FROM UNTRUSTED ROLES (ADR-001)
+REVOKE ALL ON ALL TABLES IN SCHEMA public FROM anon, authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO service_role;

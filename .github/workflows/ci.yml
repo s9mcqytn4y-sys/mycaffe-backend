@@ -99,22 +99,39 @@ jobs:
         run: |
           psql -h localhost -p 5432 -U mycaffe_user -d mycaffe_test -v ON_ERROR_STOP=1 -f supabase/migrations/20261028000001_init_schema.sql
 
-      - name: Verify Schema Constraints & Triggers
+      - name: Verify Schema Constraints, Triggers & Atomic Sequences
         env:
           PGPASSWORD: mycaffe_password
         run: |
           psql -h localhost -p 5432 -U mycaffe_user -d mycaffe_test -v ON_ERROR_STOP=1 -f scripts/verify_schema_constraints.sql
 
-      - name: Test Migration Rollback
+      - name: Test Migration Rollback (Disposable Database Teardown)
         env:
           PGPASSWORD: mycaffe_password
         run: |
           psql -h localhost -p 5432 -U mycaffe_user -d mycaffe_test -v ON_ERROR_STOP=1 -f scripts/rollback/20261028000001_init_schema.down.sql
 
-      - name: Re-apply Migration and Seed Database
+      - name: Re-apply Migration
         env:
           PGPASSWORD: mycaffe_password
         run: |
           psql -h localhost -p 5432 -U mycaffe_user -d mycaffe_test -v ON_ERROR_STOP=1 -f supabase/migrations/20261028000001_init_schema.sql
+
+      - name: Test Idempotent Seed Execution (Run Twice)
+        env:
+          PGPASSWORD: mycaffe_password
+        run: |
+          echo "Executing Seed (Run 1)..."
           psql -h localhost -p 5432 -U mycaffe_user -d mycaffe_test -v ON_ERROR_STOP=1 -f supabase/seed.sql
-          echo "Migration and Idempotent Seed successfully executed on PostgreSQL 17."
+          
+          echo "Executing Seed (Run 2 - Idempotency Verification)..."
+          psql -h localhost -p 5432 -U mycaffe_user -d mycaffe_test -v ON_ERROR_STOP=1 -f supabase/seed.sql
+
+          echo "Verifying row stability after double seed..."
+          STORE_COUNT=$(psql -h localhost -p 5432 -U mycaffe_user -d mycaffe_test -t -A -c "SELECT COUNT(*) FROM stores;")
+          ORDER_COUNT=$(psql -h localhost -p 5432 -U mycaffe_user -d mycaffe_test -t -A -c "SELECT COUNT(*) FROM orders;")
+          if [ "$STORE_COUNT" != "2" ] || [ "$ORDER_COUNT" != "1" ]; then
+            echo "Seed idempotency failed! Expected 2 stores and 1 order, got $STORE_COUNT stores and $ORDER_COUNT orders."
+            exit 1
+          fi
+          echo "Idempotent Seed verified successfully (Stores: $STORE_COUNT, Orders: $ORDER_COUNT)."

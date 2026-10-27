@@ -5,10 +5,10 @@
 -- Idempotent non-destructive seeding using ON CONFLICT DO NOTHING
 
 -- 1. STORES (TENANTS)
-INSERT INTO stores (id, slug, name, address, phone, is_active, tax_bps, service_bps, qris_mdr_bps, currency)
+INSERT INTO stores (id, slug, name, address, phone, timezone, is_active, tax_bps, service_bps, qris_mdr_bps, currency)
 VALUES 
-    ('11111111-1111-4111-8111-111111111111', 'senja-utama', 'Kafe Senja Vibe — Grand Galaxy', 'Jl. Galaxy Raya No. 12, Bekasi', '081234567890', true, 1000, 500, 70, 'IDR'),
-    ('22222222-2222-4222-8222-222222222222', 'senja-cabang', 'Kafe Senja Vibe — Harapan Indah', 'Ruko Sentra Niaga Blok B-05, Bekasi', '081298765432', true, 1000, 0, 70, 'IDR')
+    ('11111111-1111-4111-8111-111111111111', 'senja-utama', 'Kafe Senja Vibe — Grand Galaxy', 'Jl. Galaxy Raya No. 12, Bekasi', '081234567890', 'Asia/Jakarta', true, 1000, 500, 70, 'IDR'),
+    ('22222222-2222-4222-8222-222222222222', 'senja-cabang', 'Kafe Senja Vibe — Harapan Indah', 'Ruko Sentra Niaga Blok B-05, Bekasi', '081298765432', 'Asia/Jakarta', true, 1000, 0, 70, 'IDR')
 ON CONFLICT (id) DO NOTHING;
 
 -- 2. USERS (STAFF)
@@ -43,7 +43,13 @@ VALUES
     ('d0000006-0000-4000-8000-000000000006', '22222222-2222-4222-8222-222222222222', 'c0000005-0000-4000-8000-000000000005', 'Kopi Susu Senja Cabang', 'Espresso and authentic gula aren syrup', 22000, true, false, 0)
 ON CONFLICT (id) DO NOTHING;
 
--- 5. ORDERS (Sample completed order)
+-- 5. STORE DAILY SEQUENCES
+INSERT INTO store_daily_sequences (store_id, business_date, last_seq)
+VALUES
+    ('11111111-1111-4111-8111-111111111111', CURRENT_DATE, 1)
+ON CONFLICT (store_id, business_date) DO NOTHING;
+
+-- 6. ORDERS (Sample completed order)
 INSERT INTO orders (
     id, store_id, order_number, queue_number, table_number, customer_name, customer_phone,
     order_type, status, payment_status, subtotal_amount, discount_amount, tax_amount, service_charge_amount, total_amount, notes
@@ -54,7 +60,7 @@ INSERT INTO orders (
 )
 ON CONFLICT (id) DO NOTHING;
 
--- 6. ORDER ITEMS (Snapshots of purchased products)
+-- 7. ORDER ITEMS (Snapshots of purchased products)
 INSERT INTO order_items (
     id, store_id, order_id, product_id, snapshot_name, snapshot_price, quantity, subtotal_amount, selected_options, notes
 ) VALUES
@@ -62,16 +68,16 @@ INSERT INTO order_items (
     ('f0000002-0000-4000-8000-000000000002', '11111111-1111-4111-8111-111111111111', 'e0000001-0000-4000-8000-000000000001', 'd0000002-0000-4000-8000-000000000002', 'Caffe Latte', 26000, 1, 26000, '[{"group":"Milk","choice":"Fresh Milk"}]'::jsonb, '')
 ON CONFLICT (id) DO NOTHING;
 
--- 7. PAYMENTS
+-- 8. PAYMENTS
 INSERT INTO payments (
-    id, store_id, order_id, amount, method, status, transaction_id, payment_type, qr_string, paid_at
+    id, store_id, order_id, provider_order_id, amount, method, status, transaction_id, payment_type, qr_string, paid_at
 ) VALUES (
     'b0000001-0000-4000-8000-000000000001', '11111111-1111-4111-8111-111111111111', 'e0000001-0000-4000-8000-000000000001',
-    55200, 'qris', 'paid', 'midtrans-mock-tx-001', 'qris', '00020101021226...MOCKQRIS...', NOW()
+    'ORD-20261028-001', 55200, 'qris', 'paid', 'midtrans-mock-tx-001', 'qris', '00020101021226...MOCKQRIS...', NOW()
 )
 ON CONFLICT (id) DO NOTHING;
 
--- 8. AUDIT LOGS
+-- 9. AUDIT LOGS
 INSERT INTO audit_logs (
     id, store_id, actor_id, actor_name, action, reason, reference_id, metadata
 ) VALUES (

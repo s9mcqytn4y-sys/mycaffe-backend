@@ -34,11 +34,17 @@ func NewClient(cfg *config.Config) *Client {
 }
 
 // ChargeQRIS initiates a dynamic QRIS payment using Midtrans Core API
+// Uses stable order.OrderNumber as ProviderOrderID
 func (c *Client) ChargeQRIS(order *domain.Order) (*coreapi.ChargeResponse, error) {
+	providerOrderID := order.OrderNumber
+	if providerOrderID == "" {
+		providerOrderID = order.ID.String()
+	}
+
 	req := &coreapi.ChargeReq{
 		PaymentType: coreapi.PaymentTypeQris,
 		TransactionDetails: midtrans.TransactionDetails{
-			OrderID:  order.ID.String(),
+			OrderID:  providerOrderID,
 			GrossAmt: order.TotalAmount,
 		},
 		Qris: &coreapi.QrisDetails{
@@ -55,6 +61,7 @@ func (c *Client) ChargeQRIS(order *domain.Order) (*coreapi.ChargeResponse, error
 }
 
 // ChargeBankTransfer initiates a VA bank transfer using Midtrans Core API
+// Uses stable order.OrderNumber as ProviderOrderID
 func (c *Client) ChargeBankTransfer(order *domain.Order, bank string) (*coreapi.ChargeResponse, error) {
 	var midtransBank midtrans.Bank
 	switch strings.ToLower(bank) {
@@ -72,10 +79,15 @@ func (c *Client) ChargeBankTransfer(order *domain.Order, bank string) (*coreapi.
 		return nil, errors.New("unsupported bank transfer: " + bank)
 	}
 
+	providerOrderID := order.OrderNumber
+	if providerOrderID == "" {
+		providerOrderID = order.ID.String()
+	}
+
 	req := &coreapi.ChargeReq{
 		PaymentType: coreapi.PaymentTypeBankTransfer,
 		TransactionDetails: midtrans.TransactionDetails{
-			OrderID:  order.ID.String(),
+			OrderID:  providerOrderID,
 			GrossAmt: order.TotalAmount,
 		},
 		BankTransfer: &coreapi.BankTransferDetails{
@@ -116,9 +128,13 @@ func MapMidtransStatus(transactionStatus, fraudStatus string) domain.PaymentStat
 		return domain.PaymentStatusPaid
 	case "pending":
 		return domain.PaymentStatusPending
-	case "deny", "cancel", "expire":
+	case "deny", "cancel":
 		return domain.PaymentStatusFailed
-	case "refund", "partial_refund":
+	case "expire":
+		return domain.PaymentStatusExpired
+	case "partial_refund":
+		return domain.PaymentStatusPartiallyRefunded
+	case "refund":
 		return domain.PaymentStatusRefunded
 	default:
 		return domain.PaymentStatusPending

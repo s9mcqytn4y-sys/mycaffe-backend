@@ -92,7 +92,7 @@ func (h *OrderHandler) CreateOrder(c *gin.Context) {
 		CustomerName:        req.CustomerName,
 		CustomerPhone:       req.CustomerPhone,
 		OrderType:           req.OrderType,
-		Status:              domain.OrderStatusPlaced,
+		Status:              domain.OrderStatusPendingPayment,
 		PaymentStatus:       domain.PaymentStatusPending,
 		SubtotalAmount:      subtotal,
 		DiscountAmount:      0,

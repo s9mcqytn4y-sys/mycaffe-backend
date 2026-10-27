@@ -256,3 +256,4 @@ type Product struct {
 3. **Automated Verification**: GitHub Actions CI menjalankan siklus:
    $$\text{Migrate Up} \longrightarrow \text{Verify Constraints} \longrightarrow \text{Rollback Down} \longrightarrow \text{Migrate Up Again} \longrightarrow \text{Seed}$$
    untuk memverifikasi bahwa perubahan skema bersifat simetris dan dapat dipulihkan kapan saja.
+

@@ -1,0 +1,2 @@
+-- Minimal local seed file for development
+-- Data will be populated in Phase 02 when database repository and catalog tables are active.

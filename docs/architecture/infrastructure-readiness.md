@@ -25,3 +25,4 @@
 ## 5. Backup & Disaster Recovery
 - Automated database backups must not rely solely on GitHub Actions cron triggers.
 - Production backup strategy must include automated daily pg_dump / WAL archiving, retention policies (30 days), encryption at rest, and periodic restore testing drills.
+

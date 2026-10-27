@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -108,7 +109,7 @@ func (h *Hub) BroadcastEvent(eventType, storeID string, payload interface{}) err
 	return nil
 }
 
-// ServeWS upgrades the HTTP connection to WebSocket with origin check and tenant verification
+// ServeWS upgrades the HTTP connection to WebSocket with strict origin check and tenant verification
 func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request, authenticatedStoreID string) {
 	if authenticatedStoreID == "" {
 		http.Error(w, "Unauthorized: missing or invalid tenant authentication", http.StatusUnauthorized)
@@ -119,11 +120,11 @@ func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request, authenticatedStore
 		CheckOrigin: func(req *http.Request) bool {
 			origin := req.Header.Get("Origin")
 			if origin == "" {
-				// Direct non-browser client (e.g. native app / local terminal test)
-				return true
+				// Reject originless browser requests if Origin header is expected
+				return false
 			}
 			for _, allowed := range h.allowedOrigins {
-				if allowed == "*" || allowed == origin {
+				if strings.EqualFold(strings.TrimRight(allowed, "/"), strings.TrimRight(origin, "/")) {
 					return true
 				}
 			}
@@ -133,7 +134,7 @@ func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request, authenticatedStore
 
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Printf("[REALTIME] WebSocket upgrade error: %v", err)
+		log.Printf("[REALTIME] WebSocket upgrade rejected or error: %v", err)
 		return
 	}
 

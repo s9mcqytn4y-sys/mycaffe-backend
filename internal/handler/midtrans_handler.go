@@ -8,10 +8,11 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/domain"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/midtrans"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/realtime"
 )
+
+const MaxWebhookBodyBytes = 64 * 1024 // 64 KB maximum payload size
 
 type MidtransHandler struct {
 	midtransClient *midtrans.Client
@@ -27,32 +28,36 @@ func NewMidtransHandler(client *midtrans.Client, hub *realtime.Hub) *MidtransHan
 
 type MidtransNotificationPayload struct {
 	TransactionTime   string `json:"transaction_time"`
-	TransactionStatus string `json:"transaction_status"`
+	TransactionStatus string `json:"transaction_status" binding:"required"`
 	TransactionID     string `json:"transaction_id"`
 	StatusMessage     string `json:"status_message"`
-	StatusCode        string `json:"status_code"`
-	SignatureKey      string `json:"signature_key"`
+	StatusCode        string `json:"status_code" binding:"required"`
+	SignatureKey      string `json:"signature_key" binding:"required"`
 	PaymentType       string `json:"payment_type"`
-	OrderID           string `json:"order_id"`
-	GrossAmount       string `json:"gross_amount"`
+	OrderID           string `json:"order_id" binding:"required"`
+	GrossAmount       string `json:"gross_amount" binding:"required"`
 	FraudStatus       string `json:"fraud_status"`
 	Currency          string `json:"currency"`
 }
 
 // HandleWebhook processes incoming Midtrans payment notifications
 // @Summary Midtrans Webhook Callback
-// @Description Secure, idempotent webhook callback endpoint for Midtrans Core API
+// @Description Secure webhook endpoint for Midtrans Core API. Fails-closed with 503 until durable DB persistence repository is active.
 // @Tags Payments
 // @Accept json
 // @Produce json
 // @Success 200 {object} map[string]interface{}
 // @Failure 400 {object} map[string]interface{}
 // @Failure 401 {object} map[string]interface{}
+// @Failure 413 {object} map[string]interface{}
+// @Failure 503 {object} map[string]interface{}
 // @Router /api/v1/payments/midtrans/webhook [post]
 func (h *MidtransHandler) HandleWebhook(c *gin.Context) {
+	// 1. Strict maximum body size limit to prevent resource exhaustion / DoS
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, MaxWebhookBodyBytes)
 	body, err := io.ReadAll(c.Request.Body)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "unable to read payload"})
+		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "payload too large or unreadable"})
 		return
 	}
 
@@ -62,7 +67,20 @@ func (h *MidtransHandler) HandleWebhook(c *gin.Context) {
 		return
 	}
 
-	// 1. Verify Midtrans signature: SHA512(order_id + status_code + gross_amount + server_key)
+	// 2. Validate mandatory notification fields
+	if notif.OrderID == "" || notif.StatusCode == "" || notif.GrossAmount == "" || notif.SignatureKey == "" || notif.TransactionStatus == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "missing required notification fields"})
+		return
+	}
+
+	// 3. Validate Order ID format (must be valid UUID)
+	orderUUID, err := uuid.Parse(notif.OrderID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "malformed order_id: must be a valid UUID"})
+		return
+	}
+
+	// 4. Verify Midtrans signature: SHA512(order_id + status_code + gross_amount + server_key)
 	isValid := h.midtransClient.VerifySignature(
 		notif.OrderID,
 		notif.StatusCode,
@@ -76,26 +94,15 @@ func (h *MidtransHandler) HandleWebhook(c *gin.Context) {
 		return
 	}
 
-	// 2. Validate Order UUID
-	orderUUID, err := uuid.Parse(notif.OrderID)
-	if err != nil {
-		log.Printf("[WARN] Non-UUID order_id from Midtrans: %s", notif.OrderID)
-	}
+	// 5. P0 Fail-Closed / Durable Storage Enforcement:
+	// The database repository is not yet connected to execute ACID transaction updates on payments & orders.
+	// Returning HTTP 200 would falsely acknowledge receipt and lose state permanently.
+	// We return HTTP 503 Service Unavailable with a Retry-After header so Midtrans gateway safely retries delivery.
+	log.Printf("[WEBHOOK AUDIT] Valid signature for order %s, status: %s. Durable DB storage uncommitted.", orderUUID, notif.TransactionStatus)
 
-	// 3. Map status
-	paymentStatus := midtrans.MapMidtransStatus(notif.TransactionStatus, notif.FraudStatus)
-	log.Printf("[PAYMENT WEBHOOK VERIFIED] Order %s status: %s (payment_status: %s)", notif.OrderID, notif.TransactionStatus, paymentStatus)
-
-	// 4. P0 Security Check: Never broadcast events without an authenticated storeID
-	// In the next phase (database repository integration), storeID is retrieved from the order DB record.
-	// We explicitly prevent any empty storeID broadcast here to eliminate multi-tenant leak risk.
-	if paymentStatus == domain.PaymentStatusPaid {
-		log.Printf("[AUDIT] Payment received for order %s. Database state update queued (awaiting DB repository module).", orderUUID)
-	}
-
-	// 5. Always return 200 OK to acknowledge receipt to Midtrans gateway
-	c.JSON(http.StatusOK, gin.H{
-		"status":  "success",
-		"message": "notification signature verified and audited",
+	c.Header("Retry-After", "60")
+	c.JSON(http.StatusServiceUnavailable, gin.H{
+		"status":  "deferred",
+		"message": "Signature verified, but durable payment storage transaction is uncommitted. Returning 503 to trigger gateway retry.",
 	})
 }

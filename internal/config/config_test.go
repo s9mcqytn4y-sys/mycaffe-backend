@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"os"
 	"testing"
 
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/config"
@@ -10,13 +11,13 @@ func TestValidateConfigProductionFailClosed(t *testing.T) {
 	// Weak JWT Secret in production must fail
 	cfg := &config.Config{
 		AppEnv:         "production",
-		JWTSecret:      "default_secret_key_change_me_in_production",
-		DatabaseURL:    "postgresql://postgres:pass@localhost:5432/db",
+		JWTSecret:      "some_insecure_key_change_me_later_please",
+		DatabaseURL:    "postgresql://postgres:pass@remote.db.com:5432/db",
 		AllowedOrigins: []string{"https://mycaffe.com"},
 	}
 
 	if err := config.ValidateConfig(cfg); err == nil {
-		t.Errorf("expected ValidateConfig to fail for weak JWT secret in production, got nil")
+		t.Errorf("expected ValidateConfig to fail for change_me JWT secret in production, got nil")
 	}
 
 	// Empty DatabaseURL in production must fail
@@ -27,17 +28,51 @@ func TestValidateConfigProductionFailClosed(t *testing.T) {
 	}
 
 	// Midtrans sandbox key with MidtransIsProduction=true must fail
-	cfg.DatabaseURL = "postgresql://postgres:pass@localhost:5432/db"
+	cfg.DatabaseURL = "postgresql://postgres:pass@remote.db.com:5432/db"
 	cfg.MidtransIsProduction = true
 	cfg.MidtransServerKey = "SB-Mid-server-xxxx"
 	if err := config.ValidateConfig(cfg); err == nil {
 		t.Errorf("expected ValidateConfig to fail for sandbox key when MidtransIsProduction is true, got nil")
 	}
 
-	// Valid production configuration must pass
+	// Wildcard '*' origin in production must fail
 	cfg.MidtransServerKey = "Mid-server-production-valid-key-999"
+	cfg.AllowedOrigins = []string{"*"}
+	if err := config.ValidateConfig(cfg); err == nil {
+		t.Errorf("expected ValidateConfig to fail for wildcard '*' origin in production, got nil")
+	}
+
+	// Localhost origin in production must fail
+	cfg.AllowedOrigins = []string{"http://localhost:3000"}
+	if err := config.ValidateConfig(cfg); err == nil {
+		t.Errorf("expected ValidateConfig to fail for localhost origin in production, got nil")
+	}
+
+	// Valid production configuration must pass
+	cfg.AllowedOrigins = []string{"https://app.kafesenja.com", "https://pos.kafesenja.com"}
 	if err := config.ValidateConfig(cfg); err != nil {
 		t.Errorf("expected valid production config to pass, got error: %v", err)
+	}
+}
+
+func TestLoadConfigStrictParsing(t *testing.T) {
+	// Invalid MIDTRANS_IS_PRODUCTION boolean must return error
+	os.Setenv("MIDTRANS_IS_PRODUCTION", "not_a_boolean")
+	defer os.Unsetenv("MIDTRANS_IS_PRODUCTION")
+
+	_, err := config.LoadConfig()
+	if err == nil {
+		t.Errorf("expected LoadConfig to fail on invalid boolean string, got nil")
+	}
+
+	// Invalid JWT_EXPIRED_HOURS integer must return error
+	os.Setenv("MIDTRANS_IS_PRODUCTION", "false")
+	os.Setenv("JWT_EXPIRED_HOURS", "-5")
+	defer os.Unsetenv("JWT_EXPIRED_HOURS")
+
+	_, err = config.LoadConfig()
+	if err == nil {
+		t.Errorf("expected LoadConfig to fail on negative JWT_EXPIRED_HOURS, got nil")
 	}
 }
 

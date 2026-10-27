@@ -3,12 +3,14 @@ package handler
 import (
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/config"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/domain"
+	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/auth"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/midtrans"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/realtime"
 )
@@ -109,24 +111,43 @@ func (h *OrderHandler) CreateOrder(c *gin.Context) {
 	})
 }
 
-// HandleWebSocket upgrades connection for KDS / TV Queue display with tenant authorization
+// HandleWebSocket upgrades connection for KDS / TV Queue display with cryptographic token authorization
 func (h *OrderHandler) HandleWebSocket(c *gin.Context) {
-	// P0 Containment: Never trust raw query parameter without tenant authorization
+	// P0 Fail-Closed: Production disables unauthenticated/unvetted WebSocket endpoint
+	if h.cfg.AppEnv == "production" {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"error": "[P0 CONTAINMENT] Production WebSocket endpoint is currently disabled until staff authentication and session ticket validation are deployed in Phase 03.",
+		})
+		return
+	}
+
+	// Extract token from Authorization header or short-lived query ticket
+	var tokenStr string
 	authHeader := c.GetHeader("Authorization")
-	queryToken := c.Query("token")
-	storeID := c.Query("store_id")
+	if strings.HasPrefix(authHeader, "Bearer ") {
+		tokenStr = strings.TrimPrefix(authHeader, "Bearer ")
+	} else {
+		tokenStr = c.Query("token")
+	}
 
-	// In full implementation, validate JWT bearer token or staff session
-	// For audit readiness, reject connections without authorization or valid store_id
-	if storeID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "store_id parameter is required"})
+	if tokenStr == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized: missing authentication token or ticket"})
 		return
 	}
 
-	if h.cfg.AppEnv == "production" && authHeader == "" && queryToken == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized WebSocket connection: missing token"})
+	claims, err := auth.ValidateToken(tokenStr, h.cfg.JWTSecret)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized: " + err.Error()})
 		return
 	}
 
-	h.realtimeHub.ServeWS(c.Writer, c.Request, storeID)
+	// Multi-tenant check: if client also provided store_id query param, it MUST match claims.StoreID
+	clientQueryStoreID := c.Query("store_id")
+	if clientQueryStoreID != "" && !strings.EqualFold(clientQueryStoreID, claims.StoreID) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Forbidden: store_id mismatch with authenticated token claims"})
+		return
+	}
+
+	// Serve WebSocket with authenticated tenant StoreID derived exclusively from trusted claims
+	h.realtimeHub.ServeWS(c.Writer, c.Request, claims.StoreID)
 }

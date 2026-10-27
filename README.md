@@ -23,6 +23,19 @@ Backend RESTful API dan Realtime Hub untuk platform white-label QR Table Orderin
 
 ---
 
+## 📊 Feature Implementation Status
+
+| Feature / Endpoint | Status | Description |
+| :--- | :--- | :--- |
+| **Authentication & Token Validator** (`internal/pkg/auth`) | **Implemented** | JWT HMAC-SHA256 dengan validasi ketat: masa berlaku (`exp`), issuer (`kafe-senja-backend`), audience (`kafe-senja-pos`), UUID store & user, serta validasi role. |
+| **Realtime WebSocket Hub** (`/ws`) | **Implemented** | Tenant-scoped event distribution. Wajib menyertakan token JWT autentik dan `store_id` yang cocok. Fail-closed di production jika token tidak valid. |
+| **Order Creation** (`POST /api/v1/orders`) | **Guarded / Simulation** | Menjalankan validasi input format dan kalkulasi total IDR di memori. Belum terhubung ke tabel persistensi database (akan diimplementasikan pada task service catalog). |
+| **Payment Webhook** (`POST /api/v1/payments/midtrans-webhook`) | **Guarded / Fail-Closed** | Memvalidasi HMAC SHA512 signature Midtrans. Sengaja mengembalikan `503 Service Unavailable (Retry-After: 60)` sebelum persistensi database dihubungkan, agar gateway Midtrans mengantrekan retry dan tidak kehilangan event pembayaran. |
+| **Catalog & Menu Management** | **Planned** | CRUD kategori, produk, modifier groups, dan kontrol stok per tenant. |
+| **Payment Ledger & Reconciliation** | **Planned** | Transaksi ACID database untuk idempotency log, payment update, dan auto-kds dispatch. |
+
+---
+
 ## 🛠️ Local Development Setup
 
 ### 1. Prasyarat

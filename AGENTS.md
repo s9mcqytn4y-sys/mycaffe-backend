@@ -54,5 +54,24 @@ This workspace is currently `myCaffe-backend`. Treat it as the backend repositor
 - For changes affecting the frontend contract, update the API contract or docs and identify required frontend work.
 - Keep commits small and descriptive. Do not commit secrets, generated binaries, local caches, or production data.
 
+## Bounded autonomy & decision making
+The agent must adhere to explicit decision boundaries:
+- **Autonomous (No confirmation required):**
+  - Creating new unit/integration tests and expanding test coverage.
+  - Fixing linter warnings, typos, and formatting (`gofmt`).
+  - Adding defensive validation and edge-case handling.
+  - Refactoring internal implementations that do not break or alter public API contracts.
+  - Creating or updating technical documentation, ADRs, and comments.
+- **Approval Gate (Explicit confirmation required):**
+  - Making destructive or breaking changes to database schemas or migrations.
+  - Altering public API request/response contracts or WebSocket message formats.
+  - Modifying the authentication/authorization model or permission definitions.
+  - Introducing heavy new external dependencies or CGO-dependent modules.
+  - Modifying production deployment configurations, infrastructure manifests, or DNS.
+  - Executing secret/credential rotation or editing live `.env` files.
+- **Free-Tier Governance:**
+  - All development, staging, CI, and test services must strictly operate within Free-Tier limits (Supabase Free Tier, Midtrans Sandbox, Cloudflare R2 Free Tier, Sentry Developer Tier).
+  - Do not recommend, provision, or migrate to paid services or credit card-linked tiers without explicit, written authorization from the owner/PM.
+
 ## Communication
 Respond to the owner in Bahasa Indonesia unless English is needed for code/API terminology. Be direct about risks, trade-offs, assumptions, and unverified facts. Distinguish implemented behavior from a proposal.

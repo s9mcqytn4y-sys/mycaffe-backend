@@ -21,8 +21,23 @@
   - Store PB1 tax (restaurant tax) and service charge must remain configurable per tenant.
 - **Fail-Closed Baseline**: Order creation and payment charge initiation are blocked in production until the database repository module validates catalog prices, stock availability, and persists the order before contacting Midtrans.
 - **Webhook Reconciliation**: Must verify SHA512 signature, check duplicate event logs, and update payment state inside an ACID database transaction before acknowledging HTTP 200 OK to Midtrans.
+- **Fail-Closed Hook Design**: During current pre-database phase, the webhook handler returns HTTP 503 (`Retry-After: 60`) upon successful signature verification. This signals Midtrans to retry delivering notifications until database persistence is online, avoiding dropped payment acknowledgements.
 
-## 5. Backup & Disaster Recovery
+## 5. Implementation Status & Boundary Classification
+- **Implemented**:
+  - `internal/config`: Fail-closed validation for production environment, strict boolean/integer parsing, CORS HTTPS origins.
+  - `internal/pkg/auth`: Cryptographic JWT validator enforcing HS256, mandatory expiration, issuer, audience, tenant store_id UUID, user_id UUID, and role whitelist.
+  - `internal/realtime`: Multi-tenant gorilla/websocket hub scoped by store UUID.
+  - `supabase/migrations`: Tenant-isolated relational schema with composite foreign keys, BPS-based fee/tax units, and DB-level check constraints.
+- **Guarded / Simulation**:
+  - `POST /api/v1/orders`: Simulates price calculation without database persistence.
+  - `POST /api/v1/payments/midtrans-webhook`: Verifies signature; responds 503 to force gateway retry until ACID persistence is active.
+- **Planned**:
+  - Catalog & menu management with stock locks.
+  - DB transaction repository for orders and payments.
+  - Midtrans charge initiation with idempotent transaction IDs.
+
+## 6. Backup & Disaster Recovery
 - Automated database backups must not rely solely on GitHub Actions cron triggers.
 - Production backup strategy must include automated daily pg_dump / WAL archiving, retention policies (30 days), encryption at rest, and periodic restore testing drills.
 

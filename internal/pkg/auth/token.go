@@ -3,11 +3,19 @@ package auth
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 )
+
+const (
+	ExpectedIssuer   = "kafe-senja-backend"
+	ExpectedAudience = "kafe-senja-pos"
+)
+
+var ValidRoles = []string{"owner", "manager", "cashier", "barista", "kitchen"}
 
 type CustomClaims struct {
 	StoreID string `json:"store_id"`
@@ -17,11 +25,16 @@ type CustomClaims struct {
 }
 
 var (
-	ErrTokenMissing   = errors.New("authentication token is missing")
-	ErrTokenMalformed = errors.New("token format is malformed")
-	ErrTokenExpired   = errors.New("authentication token has expired")
-	ErrTokenInvalid   = errors.New("token signature or claims are invalid")
-	ErrStoreIDMissing = errors.New("token does not contain a valid tenant store_id")
+	ErrTokenMissing    = errors.New("authentication token is missing")
+	ErrTokenMalformed  = errors.New("token format is malformed")
+	ErrTokenExpired    = errors.New("authentication token has expired")
+	ErrTokenInvalid    = errors.New("token signature or claims are invalid")
+	ErrStoreIDMissing  = errors.New("token does not contain a valid tenant store_id")
+	ErrUserIDMissing   = errors.New("token does not contain a valid user_id")
+	ErrRoleInvalid     = errors.New("token does not contain a valid authorized role")
+	ErrIssuerInvalid   = errors.New("token issuer is invalid")
+	ErrAudienceInvalid = errors.New("token audience is invalid")
+	ErrExpMissing      = errors.New("token expiration claim is required")
 )
 
 // ValidateToken cryptographically verifies a JWT token and returns authenticated claims
@@ -34,8 +47,9 @@ func ValidateToken(tokenString, secretKey string) (*CustomClaims, error) {
 	}
 
 	token, err := jwt.ParseWithClaims(tokenString, &CustomClaims{}, func(t *jwt.Token) (interface{}, error) {
-		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
+		// Strictly enforce HS256 algorithm
+		if t.Method.Alg() != jwt.SigningMethodHS256.Alg() {
+			return nil, fmt.Errorf("unexpected signing method alg: %v, strictly require HS256", t.Header["alg"])
 		}
 		return []byte(secretKey), nil
 	})
@@ -47,7 +61,7 @@ func ValidateToken(tokenString, secretKey string) (*CustomClaims, error) {
 		if errors.Is(err, jwt.ErrTokenMalformed) {
 			return nil, ErrTokenMalformed
 		}
-		return nil, fmt.Errorf("%w: %v", ErrTokenInvalid, err)
+		return nil, ErrTokenInvalid
 	}
 
 	claims, ok := token.Claims.(*CustomClaims)
@@ -55,12 +69,40 @@ func ValidateToken(tokenString, secretKey string) (*CustomClaims, error) {
 		return nil, ErrTokenInvalid
 	}
 
+	// 1. Mandatory Expiration Claim
+	if claims.ExpiresAt == nil {
+		return nil, ErrExpMissing
+	}
+
+	// 2. Issuer Validation
+	if claims.Issuer != ExpectedIssuer {
+		return nil, ErrIssuerInvalid
+	}
+
+	// 3. Audience Validation
+	if !slices.Contains(claims.Audience, ExpectedAudience) {
+		return nil, ErrAudienceInvalid
+	}
+
+	// 4. Store ID UUID Validation
 	if claims.StoreID == "" {
 		return nil, ErrStoreIDMissing
 	}
-
 	if _, err := uuid.Parse(claims.StoreID); err != nil {
-		return nil, fmt.Errorf("invalid store_id in token claims: %w", err)
+		return nil, ErrStoreIDMissing
+	}
+
+	// 5. User ID UUID Validation
+	if claims.UserID == "" {
+		return nil, ErrUserIDMissing
+	}
+	if _, err := uuid.Parse(claims.UserID); err != nil {
+		return nil, ErrUserIDMissing
+	}
+
+	// 6. Role Enum Validation
+	if !slices.Contains(ValidRoles, claims.Role) {
+		return nil, ErrRoleInvalid
 	}
 
 	return claims, nil
@@ -75,8 +117,8 @@ func GenerateTestToken(storeID, userID, role, secretKey string, duration time.Du
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(duration)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
-			Issuer:    "kafe-senja-backend",
-			Audience:  jwt.ClaimStrings{"kafe-senja-pos"},
+			Issuer:    ExpectedIssuer,
+			Audience:  jwt.ClaimStrings{ExpectedAudience},
 		},
 	}
 

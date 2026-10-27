@@ -27,12 +27,25 @@ func TestValidateConfigProductionFailClosed(t *testing.T) {
 		t.Errorf("expected ValidateConfig to fail for empty DatabaseURL in production, got nil")
 	}
 
-	// Midtrans sandbox key with MidtransIsProduction=true must fail
+	// MidtransIsProduction=false in production must fail
 	cfg.DatabaseURL = "postgresql://postgres:pass@remote.db.com:5432/db"
+	cfg.MidtransIsProduction = false
+	cfg.MidtransServerKey = "Mid-server-production-valid-key-999"
+	if err := config.ValidateConfig(cfg); err == nil {
+		t.Errorf("expected ValidateConfig to fail when MidtransIsProduction is false in production, got nil")
+	}
+
+	// Midtrans sandbox key with MidtransIsProduction=true must fail
 	cfg.MidtransIsProduction = true
 	cfg.MidtransServerKey = "SB-Mid-server-xxxx"
 	if err := config.ValidateConfig(cfg); err == nil {
 		t.Errorf("expected ValidateConfig to fail for sandbox key when MidtransIsProduction is true, got nil")
+	}
+
+	// Empty Midtrans server key in production must fail
+	cfg.MidtransServerKey = ""
+	if err := config.ValidateConfig(cfg); err == nil {
+		t.Errorf("expected ValidateConfig to fail for empty Midtrans server key in production, got nil")
 	}
 
 	// Wildcard '*' origin in production must fail

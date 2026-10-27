@@ -50,6 +50,11 @@ jobs:
       - name: Run Go Vet (Static Analysis)
         run: go vet ./...
 
+      - name: Vulnerability Check (Govulncheck)
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+
       - name: Run Tests with Race Detector
         run: go test -v -race -timeout 5m ./...
 

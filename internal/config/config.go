@@ -124,10 +124,11 @@ func ValidateConfig(cfg *Config) error {
 			return errors.New("[SECURITY FAIL-CLOSED] production requires a valid DATABASE_URL")
 		}
 
-		if cfg.MidtransIsProduction {
-			if cfg.MidtransServerKey == "" || strings.HasPrefix(cfg.MidtransServerKey, "SB-") {
-				return errors.New("[SECURITY FAIL-CLOSED] production cannot run with empty or sandbox Midtrans server key")
-			}
+		if !cfg.MidtransIsProduction {
+			return errors.New("[SECURITY FAIL-CLOSED] production requires MIDTRANS_IS_PRODUCTION=true")
+		}
+		if cfg.MidtransServerKey == "" || strings.HasPrefix(cfg.MidtransServerKey, "SB-") {
+			return errors.New("[SECURITY FAIL-CLOSED] production cannot run with empty or sandbox Midtrans server key")
 		}
 
 		if len(cfg.AllowedOrigins) == 0 {

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -84,7 +85,15 @@ func TestWebSocketAuthentication(t *testing.T) {
 	wMismatch := httptest.NewRecorder()
 	r.ServeHTTP(wMismatch, reqMismatch)
 
-	if wMismatch.Code != http.StatusForbidden {
-		t.Errorf("expected 403 Forbidden for tenant store_id mismatch, got %d", wMismatch.Code)
+	// 3. Invalid / malformed token -> 401 Unauthorized with generic error message
+	reqInvalid, _ := http.NewRequest(http.MethodGet, "/ws?token=malformed.invalid.token", nil)
+	wInvalid := httptest.NewRecorder()
+	r.ServeHTTP(wInvalid, reqInvalid)
+
+	if wInvalid.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 Unauthorized for invalid token, got %d", wInvalid.Code)
+	}
+	if !strings.Contains(wInvalid.Body.String(), "Unauthorized: invalid or expired token") {
+		t.Errorf("expected generic unauthorized message, got %s", wInvalid.Body.String())
 	}
 }

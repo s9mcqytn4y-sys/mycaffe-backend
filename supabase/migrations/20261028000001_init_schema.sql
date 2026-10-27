@@ -1,6 +1,6 @@
 -- 20261028000001_init_schema.sql
 -- Multi-Tenant PostgreSQL Schema for Kafe Senja Vibe POS
--- Hardened with tenant composite foreign keys, basis points (BPS), and strict check constraints.
+-- Hardened with tenant composite foreign keys, column-specific ON DELETE SET NULL, basis points (BPS), and durable webhook idempotency.
 
 -- Enable UUID extension
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
@@ -13,9 +13,9 @@ CREATE TABLE IF NOT EXISTS stores (
     address TEXT,
     phone VARCHAR(50),
     is_active BOOLEAN NOT NULL DEFAULT true,
-    tax_bps BIGINT NOT NULL DEFAULT 1000,           -- 1000 bps = 10.00% PB1
-    service_bps BIGINT NOT NULL DEFAULT 0,          -- Service Charge in bps (e.g. 500 = 5%)
-    qris_mdr_bps BIGINT NOT NULL DEFAULT 70,        -- 70 bps = 0.70% QRIS MDR
+    tax_bps BIGINT NOT NULL DEFAULT 1000,           -- 1000 bps = 10.00% PB1 (Configurable per store)
+    service_bps BIGINT NOT NULL DEFAULT 0,          -- Service charge in bps (e.g. 500 = 5.00%)
+    qris_mdr_bps BIGINT NOT NULL DEFAULT 70,        -- 70 bps = 0.70% QRIS MDR (Configurable per store)
     currency VARCHAR(10) NOT NULL DEFAULT 'IDR',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS users (
     is_active BOOLEAN NOT NULL DEFAULT true,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_users_store_id UNIQUE(store_id, id),
     CONSTRAINT uq_users_store_email UNIQUE(store_id, email),
     CONSTRAINT chk_users_role CHECK (role IN ('owner', 'manager', 'cashier', 'barista', 'kitchen'))
 );
@@ -52,13 +53,14 @@ CREATE TABLE IF NOT EXISTS categories (
 );
 
 -- 4. PRODUCTS
+-- Money amounts: Whole integer Indonesian Rupiah (e.g. 25000 = Rp 25.000; NO fractional cents)
 CREATE TABLE IF NOT EXISTS products (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     store_id UUID NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
     category_id UUID,
     name VARCHAR(255) NOT NULL,
     description TEXT,
-    base_price BIGINT NOT NULL,                         -- Integer IDR (minor units)
+    base_price BIGINT NOT NULL,                         -- Whole integer IDR
     image_url TEXT,
     is_available BOOLEAN NOT NULL DEFAULT true,
     track_stock BOOLEAN NOT NULL DEFAULT false,
@@ -66,12 +68,13 @@ CREATE TABLE IF NOT EXISTS products (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT uq_products_store_id UNIQUE(store_id, id),
-    CONSTRAINT fk_products_category FOREIGN KEY (store_id, category_id) REFERENCES categories(store_id, id) ON DELETE SET NULL,
+    CONSTRAINT fk_products_category FOREIGN KEY (store_id, category_id) REFERENCES categories(store_id, id) ON DELETE SET NULL (category_id),
     CONSTRAINT chk_products_base_price CHECK (base_price >= 0),
     CONSTRAINT chk_products_stock_quantity CHECK (stock_quantity >= 0)
 );
 
 -- 5. ORDERS
+-- Money amounts: Whole integer Indonesian Rupiah (e.g. 50000 = Rp 50.000)
 CREATE TABLE IF NOT EXISTS orders (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     store_id UUID NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
@@ -84,11 +87,11 @@ CREATE TABLE IF NOT EXISTS orders (
     status VARCHAR(50) NOT NULL DEFAULT 'placed',
     payment_status VARCHAR(50) NOT NULL DEFAULT 'pending',
 
-    subtotal_amount BIGINT NOT NULL DEFAULT 0,          -- IDR minor unit
-    discount_amount BIGINT NOT NULL DEFAULT 0,          -- IDR minor unit
-    tax_amount BIGINT NOT NULL DEFAULT 0,               -- IDR minor unit
-    service_charge_amount BIGINT NOT NULL DEFAULT 0,    -- IDR minor unit
-    total_amount BIGINT NOT NULL DEFAULT 0,             -- IDR minor unit
+    subtotal_amount BIGINT NOT NULL DEFAULT 0,          -- Whole integer IDR
+    discount_amount BIGINT NOT NULL DEFAULT 0,          -- Whole integer IDR
+    tax_amount BIGINT NOT NULL DEFAULT 0,               -- Whole integer IDR
+    service_charge_amount BIGINT NOT NULL DEFAULT 0,    -- Whole integer IDR
+    total_amount BIGINT NOT NULL DEFAULT 0,             -- Whole integer IDR
 
     notes TEXT DEFAULT '',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -106,20 +109,21 @@ CREATE TABLE IF NOT EXISTS orders (
 );
 
 -- 6. ORDER ITEMS (Tenant-isolated snapshot of item, modifiers, price)
+-- When a product is deleted, preserve historical receipt line by nulling product_id only
 CREATE TABLE IF NOT EXISTS order_items (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     store_id UUID NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
     order_id UUID NOT NULL,
     product_id UUID,
     snapshot_name VARCHAR(255) NOT NULL,
-    snapshot_price BIGINT NOT NULL,
+    snapshot_price BIGINT NOT NULL,                     -- Whole integer IDR
     quantity INT NOT NULL DEFAULT 1,
-    subtotal_amount BIGINT NOT NULL,
+    subtotal_amount BIGINT NOT NULL,                    -- Whole integer IDR
     selected_options JSONB NOT NULL DEFAULT '[]'::jsonb,
     notes TEXT DEFAULT '',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT fk_order_items_order FOREIGN KEY (store_id, order_id) REFERENCES orders(store_id, id) ON DELETE CASCADE,
-    CONSTRAINT fk_order_items_product FOREIGN KEY (store_id, product_id) REFERENCES products(store_id, id) ON DELETE SET NULL,
+    CONSTRAINT fk_order_items_product FOREIGN KEY (store_id, product_id) REFERENCES products(store_id, id) ON DELETE SET NULL (product_id),
     CONSTRAINT chk_order_items_price CHECK (snapshot_price >= 0),
     CONSTRAINT chk_order_items_quantity CHECK (quantity > 0),
     CONSTRAINT chk_order_items_subtotal CHECK (subtotal_amount >= 0)
@@ -130,7 +134,7 @@ CREATE TABLE IF NOT EXISTS payments (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     store_id UUID NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
     order_id UUID NOT NULL,
-    amount BIGINT NOT NULL,
+    amount BIGINT NOT NULL,                             -- Whole integer IDR
     method VARCHAR(50) NOT NULL,
     status VARCHAR(50) NOT NULL DEFAULT 'pending',
     transaction_id VARCHAR(100) DEFAULT '',
@@ -147,37 +151,43 @@ CREATE TABLE IF NOT EXISTS payments (
     CONSTRAINT chk_payments_status CHECK (status IN ('pending', 'paid', 'failed', 'expired', 'refunded'))
 );
 
--- 8. PAYMENT NOTIFICATION LOGS (Audit & Idempotency)
+-- 8. PAYMENT NOTIFICATION LOGS (Durable Webhook Inbox & Idempotency)
+-- Matched accurately to Midtrans Core API payload fields
 CREATE TABLE IF NOT EXISTS payment_notification_logs (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    store_id UUID REFERENCES stores(id) ON DELETE CASCADE,
-    order_id UUID,
+    store_id UUID,                                      -- Nullable in durable inbox before store resolution
+    order_id UUID,                                      -- Nullable in durable inbox before order resolution
     provider VARCHAR(50) NOT NULL DEFAULT 'midtrans',
-    notification_id VARCHAR(150) NOT NULL,
-    status_code VARCHAR(10) NOT NULL,
-    transaction_status VARCHAR(50) NOT NULL,
-    raw_payload TEXT NOT NULL,
+    transaction_id VARCHAR(150) NOT NULL,              -- Midtrans transaction_id
+    order_number VARCHAR(100) NOT NULL,                 -- Midtrans order_id mapped to store order_number
+    status_code VARCHAR(10) NOT NULL,                   -- Midtrans status_code (e.g. '200')
+    transaction_status VARCHAR(50) NOT NULL,            -- e.g. settlement, pending, expire, cancel
+    gross_amount BIGINT NOT NULL,                       -- Whole integer IDR
+    raw_payload JSONB NOT NULL,
     is_processed BOOLEAN NOT NULL DEFAULT false,
     processed_at TIMESTAMPTZ DEFAULT NULL,
+    error_message TEXT DEFAULT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    CONSTRAINT uq_notif_logs_provider_id UNIQUE(provider, notification_id),
-    CONSTRAINT chk_notif_logs_processed_state CHECK (
+    CONSTRAINT uq_notif_logs_event UNIQUE(provider, transaction_id, transaction_status, status_code),
+    CONSTRAINT fk_notif_logs_order FOREIGN KEY (store_id, order_id) REFERENCES orders(store_id, id) ON DELETE SET NULL (order_id),
+    CONSTRAINT chk_notif_logs_processed CHECK (
         (is_processed = false AND processed_at IS NULL) OR
         (is_processed = true AND processed_at IS NOT NULL)
     )
 );
 
--- 9. AUDIT LOGS (Operational tracking: void, refund, stock override, price change, shift discrepancy)
+-- 9. AUDIT LOGS (Operational tracking with strict tenant boundary)
 CREATE TABLE IF NOT EXISTS audit_logs (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     store_id UUID NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
-    actor_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    actor_id UUID,
     actor_name VARCHAR(255) NOT NULL,
     action VARCHAR(100) NOT NULL,
     reason TEXT NOT NULL,
     reference_id VARCHAR(100),
     metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT fk_audit_logs_actor FOREIGN KEY (store_id, actor_id) REFERENCES users(store_id, id) ON DELETE SET NULL (actor_id),
     CONSTRAINT chk_audit_logs_action CHECK (action IN ('VOID_ORDER', 'REFUND', 'STOCK_OVERRIDE', 'PRICE_CHANGE', 'SHIFT_CLOSE', 'ROLE_CHANGE'))
 );
 
@@ -189,5 +199,6 @@ CREATE INDEX IF NOT EXISTS idx_orders_store_payment_status ON orders(store_id, p
 CREATE INDEX IF NOT EXISTS idx_order_items_store_order ON order_items(store_id, order_id);
 CREATE INDEX IF NOT EXISTS idx_payments_store_order ON payments(store_id, order_id);
 CREATE INDEX IF NOT EXISTS idx_payments_transaction_id ON payments(transaction_id);
-CREATE INDEX IF NOT EXISTS idx_notif_logs_provider_id ON payment_notification_logs(provider, notification_id);
+CREATE INDEX IF NOT EXISTS idx_notif_logs_lookup ON payment_notification_logs(provider, transaction_id, transaction_status);
+CREATE INDEX IF NOT EXISTS idx_notif_logs_order_number ON payment_notification_logs(order_number);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_store_created ON audit_logs(store_id, created_at DESC);

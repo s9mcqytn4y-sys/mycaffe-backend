@@ -57,7 +57,13 @@ func LoadConfig() (*Config, error) {
 		return nil, fmt.Errorf("invalid positive integer for JWT_EXPIRED_HOURS: %w", err)
 	}
 
-	appEnv := getEnv("APP_ENV", "development")
+	// Strictly normalize APP_ENV (case-insensitive and trimmed)
+	rawAppEnv := getEnv("APP_ENV", "development")
+	appEnv := strings.ToLower(strings.TrimSpace(rawAppEnv))
+	if appEnv == "" {
+		return nil, errors.New("APP_ENV cannot be empty")
+	}
+
 	frontendURL := getEnv("FRONTEND_URL", "http://localhost:3000")
 
 	// Strict origin parsing
@@ -105,6 +111,20 @@ func LoadConfig() (*Config, error) {
 
 // ValidateConfig enforces fail-closed security rules without embedding actual secrets in code
 func ValidateConfig(cfg *Config) error {
+	// Whitelist valid environments
+	cfg.AppEnv = strings.ToLower(strings.TrimSpace(cfg.AppEnv))
+	validEnvs := []string{"development", "test", "staging", "production"}
+	isValidEnv := false
+	for _, env := range validEnvs {
+		if cfg.AppEnv == env {
+			isValidEnv = true
+			break
+		}
+	}
+	if !isValidEnv {
+		return fmt.Errorf("[SECURITY FAIL-CLOSED] invalid APP_ENV %q: allowed values are development, test, staging, production", cfg.AppEnv)
+	}
+
 	// Generic validation: reject obviously insecure patterns
 	secretLower := strings.ToLower(cfg.JWTSecret)
 	if strings.Contains(secretLower, "change_me") ||

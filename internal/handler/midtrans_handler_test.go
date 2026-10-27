@@ -65,21 +65,21 @@ func TestMidtransWebhookEdgeCases(t *testing.T) {
 		t.Errorf("expected 400 Bad Request for malformed json, got %d", wBadJSON.Code)
 	}
 
-	// 3. Malformed non-UUID order_id must fail with 400 Bad Request
-	payloadNonUUID := map[string]string{
-		"order_id":           "not-a-valid-uuid",
+	// 3. Invalid order_id length (< 3 chars) must fail with 400 Bad Request
+	payloadInvalidOrderID := map[string]string{
+		"order_id":           "x",
 		"status_code":        "200",
 		"gross_amount":       "10000.00",
 		"signature_key":      "fake-sig",
 		"transaction_status": "settlement",
 	}
-	bodyNonUUID, _ := json.Marshal(payloadNonUUID)
-	reqNonUUID, _ := http.NewRequest(http.MethodPost, "/api/v1/payments/midtrans/webhook", bytes.NewBuffer(bodyNonUUID))
-	reqNonUUID.Header.Set("Content-Type", "application/json")
-	wNonUUID := httptest.NewRecorder()
-	r.ServeHTTP(wNonUUID, reqNonUUID)
-	if wNonUUID.Code != http.StatusBadRequest {
-		t.Errorf("expected 400 Bad Request for non-UUID order_id, got %d", wNonUUID.Code)
+	bodyInvalidOrderID, _ := json.Marshal(payloadInvalidOrderID)
+	reqInvalidOrderID, _ := http.NewRequest(http.MethodPost, "/api/v1/payments/midtrans/webhook", bytes.NewBuffer(bodyInvalidOrderID))
+	reqInvalidOrderID.Header.Set("Content-Type", "application/json")
+	wInvalidOrderID := httptest.NewRecorder()
+	r.ServeHTTP(wInvalidOrderID, reqInvalidOrderID)
+	if wInvalidOrderID.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 Bad Request for short order_id, got %d", wInvalidOrderID.Code)
 	}
 
 	// 4. Invalid signature must fail with 401 Unauthorized

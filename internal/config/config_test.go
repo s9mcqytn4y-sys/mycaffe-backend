@@ -8,6 +8,28 @@ import (
 )
 
 func TestValidateConfigProductionFailClosed(t *testing.T) {
+	// Unknown APP_ENV must fail
+	cfgUnknown := &config.Config{
+		AppEnv: "uat_environment_unsupported",
+	}
+	if err := config.ValidateConfig(cfgUnknown); err == nil {
+		t.Errorf("expected ValidateConfig to fail on unknown APP_ENV, got nil")
+	}
+
+	// Normalized variations of production must pass environment check and enforce production security
+	cfgVariations := []string{"Production", "  production  ", "PRODUCTION"}
+	for _, envVar := range cfgVariations {
+		cfg := &config.Config{
+			AppEnv:         envVar,
+			JWTSecret:      "weak_key",
+			DatabaseURL:    "postgresql://postgres:pass@remote.db.com:5432/db",
+			AllowedOrigins: []string{"https://mycaffe.com"},
+		}
+		if err := config.ValidateConfig(cfg); err == nil {
+			t.Errorf("expected ValidateConfig to fail for weak JWT in %q environment, got nil", envVar)
+		}
+	}
+
 	// Weak JWT Secret in production must fail
 	cfg := &config.Config{
 		AppEnv:         "production",

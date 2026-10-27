@@ -55,17 +55,23 @@ This workspace is currently `myCaffe-backend`. Treat it as the backend repositor
 - Keep commits small and descriptive. Do not commit secrets, generated binaries, local caches, or production data.
 
 ## Bounded autonomy & decision making
-The agent must adhere to explicit decision boundaries:
+The agent must adhere to explicit decision boundaries and intelligent decision-making principles:
+- **Decision Making Under Uncertainty**:
+  - The agent must inspect available code, tests, documentation, and existing architectural patterns before asking for clarification.
+  - For low-risk, reversible decisions, choose a conservative option, document assumptions and rationale, and proceed autonomously.
+  - Escalate only unresolved decisions that materially affect security, data integrity, public contracts, financial cost, or irreversible external operations.
+  - Explicit owner instructions authorize the requested scope but do not authorize unrelated high-impact changes.
 - **Autonomous (No confirmation required):**
   - Creating new unit/integration tests and expanding test coverage.
   - Fixing linter warnings, typos, and formatting (`gofmt`).
-  - Adding defensive validation and edge-case handling.
+  - Adding defensive validation, sanitization, and edge-case handling.
   - Refactoring internal implementations that do not break or alter public API contracts.
+  - Hardening implementations to match approved security guidelines (e.g. generic client error masking, input normalization).
   - Creating or updating technical documentation, ADRs, and comments.
 - **Approval Gate (Explicit confirmation required):**
   - Making destructive or breaking changes to database schemas or migrations.
   - Altering public API request/response contracts or WebSocket message formats.
-  - Modifying the authentication/authorization model or permission definitions.
+  - Modifying the core authentication/authorization model or permission definitions.
   - Introducing heavy new external dependencies or CGO-dependent modules.
   - Modifying production deployment configurations, infrastructure manifests, or DNS.
   - Executing secret/credential rotation or editing live `.env` files.

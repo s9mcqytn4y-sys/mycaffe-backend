@@ -5,9 +5,9 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/midtrans"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/realtime"
 )
@@ -73,10 +73,10 @@ func (h *MidtransHandler) HandleWebhook(c *gin.Context) {
 		return
 	}
 
-	// 3. Validate Order ID format (must be valid UUID)
-	orderUUID, err := uuid.Parse(notif.OrderID)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "malformed order_id: must be a valid UUID"})
+	// 3. Validate Order ID format (non-empty, max 100 chars, alphanumeric/hyphen/underscore)
+	trimmedOrderID := strings.TrimSpace(notif.OrderID)
+	if len(trimmedOrderID) < 3 || len(trimmedOrderID) > 100 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid order_id length: must be between 3 and 100 characters"})
 		return
 	}
 
@@ -98,7 +98,7 @@ func (h *MidtransHandler) HandleWebhook(c *gin.Context) {
 	// The database repository is not yet connected to execute ACID transaction updates on payments & orders.
 	// Returning HTTP 200 would falsely acknowledge receipt and lose state permanently.
 	// We return HTTP 503 Service Unavailable with a Retry-After header so Midtrans gateway safely retries delivery.
-	log.Printf("[WEBHOOK AUDIT] Valid signature for order %s, status: %s. Durable DB storage uncommitted.", orderUUID, notif.TransactionStatus)
+	log.Printf("[WEBHOOK AUDIT] Valid signature for order %s, status: %s. Durable DB storage uncommitted.", trimmedOrderID, notif.TransactionStatus)
 
 	c.Header("Retry-After", "60")
 	c.JSON(http.StatusServiceUnavailable, gin.H{

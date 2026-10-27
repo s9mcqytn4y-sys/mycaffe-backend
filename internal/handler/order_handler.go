@@ -2,6 +2,7 @@ package handler
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -137,7 +138,8 @@ func (h *OrderHandler) HandleWebSocket(c *gin.Context) {
 
 	claims, err := auth.ValidateToken(tokenStr, h.cfg.JWTSecret)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized: " + err.Error()})
+		log.Printf("[AUTH] WebSocket token validation failed for IP %s: %v", c.ClientIP(), err)
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized: invalid or expired token"})
 		return
 	}
 

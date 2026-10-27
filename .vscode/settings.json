@@ -28,6 +28,10 @@
         "editor.tabSize": 4,
         "editor.formatOnSave": true
     },
+    "[sql]": {
+        "editor.tabSize": 4,
+        "editor.insertSpaces": true
+    },
     "[json]": {
         "editor.defaultFormatter": "esbenp.prettier-vscode",
         "editor.insertSpaces": true,
@@ -46,11 +50,20 @@
     "go.lintOnSave": "package",
     "go.formatTool": "gofmt",
     "go.toolsManagement.autoUpdate": true,
+    "go.testFlags": [
+        "-v",
+        "-race"
+    ],
+    "go.testTimeout": "60s",
     "errorlens.enabled": true,
     "errorlens.fontSize": "12px",
     "terminal.integrated.defaultProfile.windows": "PowerShell",
     "terminal.integrated.fontFamily": "Cascadia Code, Consolas",
     "terminal.integrated.fontSize": 13,
+    "files.associations": {
+        ".env*": "dotenv",
+        "*.sql": "sql"
+    },
     "files.exclude": {
         "**/.git": true,
         "**/.DS_Store": true,
@@ -63,4 +76,3 @@
         "**/bin/**": true
     }
 }
-

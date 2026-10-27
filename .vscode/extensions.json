@@ -1,0 +1,19 @@
+{
+    "recommendations": [
+        "golang.go",
+        "google.google-antigravity",
+        "dracula-theme.theme-dracula",
+        "pkief.material-icon-theme",
+        "usernamehw.errorlens",
+        "eamodio.gitlens",
+        "mtxr.sqltools",
+        "mtxr.sqltools-driver-pg",
+        "humao.rest-client",
+        "mikestead.dotenv",
+        "yzhang.markdown-all-in-one",
+        "esbenp.prettier-vscode",
+        "editorconfig.editorconfig",
+        "skeinllc.anti-slop"
+    ]
+}
+

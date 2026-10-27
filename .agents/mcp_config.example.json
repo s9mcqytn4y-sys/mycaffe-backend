@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "supabase-dev-readonly": {
+      "serverUrl": "https://mcp.supabase.com/mcp?project_ref=REPLACE_WITH_DEV_PROJECT_REF&read_only=true",
+      "timeoutSeconds": 180
+    }
+  }
+}

@@ -1,0 +1,29 @@
+# Local secrets and environment files
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Antigravity local MCP config can contain project identifiers/auth config
+.agents/mcp_config.json
+
+# Frontend/build outputs (useful if any tooling runs in this repo)
+node_modules/
+.next/
+out/
+dist/
+build/
+coverage/
+
+# Go build/test outputs
+/bin/
+/coverage.out
+*.test
+*.prof
+*.exe
+
+# Local/editor/OS noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

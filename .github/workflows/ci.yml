@@ -1,0 +1,39 @@
+name: CI - Quality Gates & Security Checks
+
+on:
+  push:
+    branches: [ main, staging, "feature/**" ]
+  pull_request:
+    branches: [ main, staging ]
+
+jobs:
+  build-and-test:
+    name: Go Lint, Vet, Test, and Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4.2.2
+
+      - name: Set up Go
+        uses: actions/setup-go@v5.3.0
+        with:
+          go-version: '1.27.x'
+          cache: true
+
+      - name: Check code formatting (gofmt)
+        run: |
+          diffs=$(gofmt -l .)
+          if [ -n "$diffs" ]; then
+            echo "The following files are not formatted properly:"
+            echo "$diffs"
+            exit 1
+          fi
+
+      - name: Run Go Vet (Static Analysis)
+        run: go vet ./...
+
+      - name: Run Tests with Race Detector
+        run: go test -v -race -timeout 3m ./...
+
+      - name: Compile Application (Go Build)
+        run: go build -v ./...

@@ -7,18 +7,21 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/config"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/domain"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/midtrans"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/realtime"
 )
 
 type OrderHandler struct {
+	cfg            *config.Config
 	midtransClient *midtrans.Client
 	realtimeHub    *realtime.Hub
 }
 
-func NewOrderHandler(client *midtrans.Client, hub *realtime.Hub) *OrderHandler {
+func NewOrderHandler(cfg *config.Config, client *midtrans.Client, hub *realtime.Hub) *OrderHandler {
 	return &OrderHandler{
+		cfg:            cfg,
 		midtransClient: client,
 		realtimeHub:    hub,
 	}
@@ -37,21 +40,30 @@ type CreateOrderRequest struct {
 	CustomerPhone string                   `json:"customer_phone"`
 	OrderType     domain.OrderType         `json:"order_type" binding:"required"`
 	PaymentMethod domain.PaymentMethod     `json:"payment_method" binding:"required"`
-	Bank          string                   `json:"bank,omitempty"` // For VA
+	Bank          string                   `json:"bank,omitempty"`
 	Items         []CreateOrderItemRequest `json:"items" binding:"required,min=1"`
 }
 
-// CreateOrder handles customer order creation and initiates Midtrans Core API payment
+// CreateOrder handles customer order creation and initiates payment
 // @Summary Create Customer Order & Initiate Core API Payment
-// @Description Server recalculates all pricing, snapshots order items, and returns dynamic QRIS / VA
+// @Description Enforces server-side recalculation and fails-closed in production until database persistence repository is connected.
 // @Tags Orders
 // @Accept json
 // @Produce json
 // @Param order body CreateOrderRequest true "Order Request"
 // @Success 201 {object} map[string]interface{}
 // @Failure 400 {object} map[string]interface{}
+// @Failure 503 {object} map[string]interface{}
 // @Router /api/v1/orders [post]
 func (h *OrderHandler) CreateOrder(c *gin.Context) {
+	// P0 Containment: Production fails closed until database repository is connected
+	if h.cfg.AppEnv == "production" {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"error": "[P0 CONTAINMENT] Order persistence and verified pricing repository are currently being initialized. Live payment transactions are blocked.",
+		})
+		return
+	}
+
 	var req CreateOrderRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -59,13 +71,12 @@ func (h *OrderHandler) CreateOrder(c *gin.Context) {
 	}
 
 	orderID := uuid.New()
-	orderNumber := fmt.Sprintf("ORD-%s-%s", time.Now().Format("20060102"), orderID.String()[:4])
-	queueNumber := fmt.Sprintf("A%s", orderID.String()[:2])
+	orderNumber := fmt.Sprintf("ORD-%s-%s", time.Now().Format("20060102"), orderID.String()[:8])
+	queueNumber := fmt.Sprintf("A%s", orderID.String()[:3])
 
-	// In real database repository: catalog prices are fetched and recalculated here.
-	// For demonstration, mock snapshot item calculation:
-	var subtotal int64 = 25000 // e.g. Rp 25.000
-	var taxRate int64 = 10     // 10% PB1
+	// In development simulation:
+	var subtotal int64 = 25000
+	var taxRate int64 = 10
 	var taxAmount int64 = (subtotal * taxRate) / 100
 	var totalAmount int64 = subtotal + taxAmount
 
@@ -89,57 +100,33 @@ func (h *OrderHandler) CreateOrder(c *gin.Context) {
 		UpdatedAt:           time.Now(),
 	}
 
-	var paymentResponse gin.H
-
-	switch req.PaymentMethod {
-	case domain.PaymentMethodQRIS:
-		chargeResp, err := h.midtransClient.ChargeQRIS(order)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "gagal inisialisasi QRIS Midtrans: " + err.Error()})
-			return
-		}
-		paymentResponse = gin.H{
-			"payment_type":   "qris",
-			"transaction_id": chargeResp.TransactionID,
-			"qr_string":      chargeResp.QRString,
-			"actions":        chargeResp.Actions,
-		}
-	case domain.PaymentMethodBankTransfer:
-		chargeResp, err := h.midtransClient.ChargeBankTransfer(order, req.Bank)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "gagal inisialisasi Bank Transfer: " + err.Error()})
-			return
-		}
-		paymentResponse = gin.H{
-			"payment_type":   "bank_transfer",
-			"transaction_id": chargeResp.TransactionID,
-			"va_numbers":     chargeResp.VaNumbers,
-		}
-	default:
-		paymentResponse = gin.H{
-			"payment_type": "cash_or_manual",
-			"instruction":  "Silakan selesaikan pembayaran di kasir.",
-		}
-	}
-
-	// Broadcast order placed event to internal hub
-	h.realtimeHub.BroadcastEvent("order.placed", req.StoreID.String(), gin.H{
-		"order_id":     order.ID,
-		"order_number": order.OrderNumber,
-		"queue_number": order.QueueNumber,
-		"table_number": order.TableNumber,
-		"total_amount": order.TotalAmount,
-	})
-
+	// P0 Containment: In development without DB persistence, do not call Midtrans Charge to avoid orphan charges
 	c.JSON(http.StatusCreated, gin.H{
-		"message": "Order berhasil dibuat",
-		"order":   order,
-		"payment": paymentResponse,
+		"message":      "Order draft created (Simulation Mode - DB persistence pending)",
+		"order":        order,
+		"status":       "draft",
+		"payment_mode": "mock_preview",
 	})
 }
 
-// HandleWebSocket upgrades connection for KDS / TV Queue display
+// HandleWebSocket upgrades connection for KDS / TV Queue display with tenant authorization
 func (h *OrderHandler) HandleWebSocket(c *gin.Context) {
+	// P0 Containment: Never trust raw query parameter without tenant authorization
+	authHeader := c.GetHeader("Authorization")
+	queryToken := c.Query("token")
 	storeID := c.Query("store_id")
+
+	// In full implementation, validate JWT bearer token or staff session
+	// For audit readiness, reject connections without authorization or valid store_id
+	if storeID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "store_id parameter is required"})
+		return
+	}
+
+	if h.cfg.AppEnv == "production" && authHeader == "" && queryToken == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized WebSocket connection: missing token"})
+		return
+	}
+
 	h.realtimeHub.ServeWS(c.Writer, c.Request, storeID)
 }

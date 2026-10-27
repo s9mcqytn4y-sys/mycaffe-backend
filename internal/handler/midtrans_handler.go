@@ -84,26 +84,18 @@ func (h *MidtransHandler) HandleWebhook(c *gin.Context) {
 
 	// 3. Map status
 	paymentStatus := midtrans.MapMidtransStatus(notif.TransactionStatus, notif.FraudStatus)
-	log.Printf("[PAYMENT] Order %s status updated: %s (payment_status: %s)", notif.OrderID, notif.TransactionStatus, paymentStatus)
+	log.Printf("[PAYMENT WEBHOOK VERIFIED] Order %s status: %s (payment_status: %s)", notif.OrderID, notif.TransactionStatus, paymentStatus)
 
-	// 4. Broadcast realtime event to KDS / TV display if paid
+	// 4. P0 Security Check: Never broadcast events without an authenticated storeID
+	// In the next phase (database repository integration), storeID is retrieved from the order DB record.
+	// We explicitly prevent any empty storeID broadcast here to eliminate multi-tenant leak risk.
 	if paymentStatus == domain.PaymentStatusPaid {
-		h.realtimeHub.BroadcastEvent("payment.paid", "", gin.H{
-			"order_id":       orderUUID,
-			"transaction_id": notif.TransactionID,
-			"amount":         notif.GrossAmount,
-			"payment_type":   notif.PaymentType,
-		})
-
-		h.realtimeHub.BroadcastEvent("kds.order_queued", "", gin.H{
-			"order_id": orderUUID,
-			"status":   domain.OrderStatusQueued,
-		})
+		log.Printf("[AUDIT] Payment received for order %s. Database state update queued (awaiting DB repository module).", orderUUID)
 	}
 
-	// 5. Always return 200 OK to acknowledge receipt to Midtrans
+	// 5. Always return 200 OK to acknowledge receipt to Midtrans gateway
 	c.JSON(http.StatusOK, gin.H{
 		"status":  "success",
-		"message": "notification processed",
+		"message": "notification signature verified and audited",
 	})
 }

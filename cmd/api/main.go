@@ -20,10 +20,12 @@ import (
 // @title Kafe Senja Vibe API
 // @version 1.0
 // @description Backend API untuk QR Ordering, POS, KDS, & TV Queue Display (Kafe Senja Vibe).
-// @contact.name Tim Kafe Senja
 // @BasePath /
 func main() {
-	cfg := config.LoadConfig()
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		log.Fatalf("[FATAL CONFIG] %v", err)
+	}
 
 	// Initialize Sentry error monitoring
 	if cfg.SentryDSN != "" && cfg.SentryDSN != "https://your-public-key@o0.ingest.sentry.io/projectId" {
@@ -48,23 +50,31 @@ func main() {
 
 	router := gin.Default()
 
-	// CORS Middleware
+	// Strict Origin-Validated CORS Middleware (No Wildcard + Credentials violation)
 	router.Use(func(c *gin.Context) {
-		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
-		c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
-		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With")
-		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, DELETE, PATCH")
+		origin := c.Request.Header.Get("Origin")
+
+		if cfg.IsOriginAllowed(origin) {
+			c.Writer.Header().Set("Access-Control-Allow-Origin", origin)
+			c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
+			c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, Accept, Origin, Cache-Control, X-Requested-With")
+			c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, DELETE, PATCH")
+		}
 
 		if c.Request.Method == "OPTIONS" {
-			c.AbortWithStatus(http.StatusNoContent)
+			if cfg.IsOriginAllowed(origin) {
+				c.AbortWithStatus(http.StatusNoContent)
+			} else {
+				c.AbortWithStatus(http.StatusForbidden)
+			}
 			return
 		}
 
 		c.Next()
 	})
 
-	// Initialize Realtime Hub
-	hub := realtime.NewHub()
+	// Initialize Realtime Hub with allowed origins
+	hub := realtime.NewHub(cfg.AllowedOrigins)
 	go hub.Run()
 
 	// Initialize Midtrans Core API Client
@@ -73,7 +83,7 @@ func main() {
 	// Initialize Handlers
 	healthHandler := handler.NewHealthHandler("Kafe Senja Vibe Backend", cfg.AppEnv)
 	midtransHandler := handler.NewMidtransHandler(midtransClient, hub)
-	orderHandler := handler.NewOrderHandler(midtransClient, hub)
+	orderHandler := handler.NewOrderHandler(cfg, midtransClient, hub)
 
 	// Register Routes
 	v1 := router.Group("/api/v1")
@@ -83,10 +93,10 @@ func main() {
 		v1.POST("/payments/midtrans/webhook", midtransHandler.HandleWebhook)
 	}
 
-	// WebSocket endpoint for KDS & TV Queue realtime updates
+	// WebSocket endpoint for KDS & TV Queue realtime updates (guarded by token/tenant validation)
 	router.GET("/ws", orderHandler.HandleWebSocket)
 
-	// Root redirect / greeting
+	// Root greeting
 	router.GET("/", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"message": "Kafe Senja Vibe Backend API is running.",

@@ -50,7 +50,9 @@ func TestMapMidtransStatus(t *testing.T) {
 		{"capture challenge is pending", "capture", "challenge", domain.PaymentStatusPending},
 		{"pending is pending", "pending", "", domain.PaymentStatusPending},
 		{"cancel is failed", "cancel", "", domain.PaymentStatusFailed},
-		{"expire is failed", "expire", "", domain.PaymentStatusFailed},
+		{"deny is failed", "deny", "", domain.PaymentStatusFailed},
+		{"expire is expired", "expire", "", domain.PaymentStatusExpired},
+		{"partial_refund is partially_refunded", "partial_refund", "", domain.PaymentStatusPartiallyRefunded},
 		{"refund is refunded", "refund", "", domain.PaymentStatusRefunded},
 	}
 

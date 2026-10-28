@@ -1,0 +1,137 @@
+name: CI - Quality Gates & Security Checks
+
+on:
+  push:
+    branches: [ main, staging, feature/infra-audit-baseline ]
+  pull_request:
+    branches: [ main, staging ]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Go Lint, Vet, Security, Test, and Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@f111f3307d8850f501ac008e886eec1fd1932a34 # v5.3.0
+        with:
+          go-version: '1.27.x'
+          cache: true
+
+      - name: Secret Scan (Gitleaks with Checksum Verification)
+        run: |
+          curl -sSL -O https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz
+          curl -sSL -O https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_checksums.txt
+          sha256sum --ignore-missing --check gitleaks_8.24.3_checksums.txt
+          sudo tar -xz -C /usr/local/bin -f gitleaks_8.24.3_linux_x64.tar.gz gitleaks
+          rm -f gitleaks_8.24.3_*
+          gitleaks git --verbose
+
+      - name: Check code formatting (gofmt)
+        run: |
+          diffs=$(gofmt -l .)
+          if [ -n "$diffs" ]; then
+            echo "The following files are not formatted properly:"
+            echo "$diffs"
+            exit 1
+          fi
+
+      - name: Check Go Module Tidy
+        run: go mod tidy -diff
+
+      - name: Run Go Vet (Static Analysis)
+        run: go vet ./...
+
+      - name: Vulnerability Check (Govulncheck Pinned v1.9.0)
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
+          govulncheck ./...
+
+      - name: Run Tests with Race Detector
+        run: go test -v -race -timeout 5m ./...
+
+      - name: Compile Application (Go Build)
+        run: go build -v ./...
+
+  database-migration-test:
+    name: PostgreSQL 17 Migration, Verification, Rollback & Seed
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: mycaffe_user
+          POSTGRES_PASSWORD: mycaffe_password
+          POSTGRES_DB: mycaffe_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Install PostgreSQL Client
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client
+
+      - name: Apply Initial Schema Migration
+        env:
+          PGPASSWORD: mycaffe_password
+        run: |
+          psql -h localhost -p 5432 -U mycaffe_user -d mycaffe_test -v ON_ERROR_STOP=1 -f supabase/migrations/20261028000001_init_schema.sql
+
+      - name: Verify Schema Constraints, Triggers & Atomic Sequences
+        env:
+          PGPASSWORD: mycaffe_password
+        run: |
+          psql -h localhost -p 5432 -U mycaffe_user -d mycaffe_test -v ON_ERROR_STOP=1 -f scripts/verify_schema_constraints.sql
+
+      - name: Test Migration Rollback (Disposable Database Teardown)
+        env:
+          PGPASSWORD: mycaffe_password
+        run: |
+          psql -h localhost -p 5432 -U mycaffe_user -d mycaffe_test -v ON_ERROR_STOP=1 -f scripts/rollback/20261028000001_init_schema.down.sql
+
+      - name: Re-apply Migration
+        env:
+          PGPASSWORD: mycaffe_password
+        run: |
+          psql -h localhost -p 5432 -U mycaffe_user -d mycaffe_test -v ON_ERROR_STOP=1 -f supabase/migrations/20261028000001_init_schema.sql
+
+      - name: Test Idempotent Seed Execution (Run Twice)
+        env:
+          PGPASSWORD: mycaffe_password
+        run: |
+          echo "Executing Seed (Run 1)..."
+          psql -h localhost -p 5432 -U mycaffe_user -d mycaffe_test -v ON_ERROR_STOP=1 -f supabase/seed.sql
+          
+          echo "Executing Seed (Run 2 - Idempotency Verification)..."
+          psql -h localhost -p 5432 -U mycaffe_user -d mycaffe_test -v ON_ERROR_STOP=1 -f supabase/seed.sql
+
+          echo "Verifying row stability after double seed..."
+          STORE_COUNT=$(psql -h localhost -p 5432 -U mycaffe_user -d mycaffe_test -t -A -c "SELECT COUNT(*) FROM stores;")
+          ORDER_COUNT=$(psql -h localhost -p 5432 -U mycaffe_user -d mycaffe_test -t -A -c "SELECT COUNT(*) FROM orders;")
+          if [ "$STORE_COUNT" != "2" ] || [ "$ORDER_COUNT" != "1" ]; then
+            echo "Seed idempotency failed! Expected 2 stores and 1 order, got $STORE_COUNT stores and $ORDER_COUNT orders."
+            exit 1
+          fi
+          echo "Idempotent Seed verified successfully (Stores: $STORE_COUNT, Orders: $ORDER_COUNT)."

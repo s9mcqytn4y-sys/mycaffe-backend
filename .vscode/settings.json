@@ -28,6 +28,10 @@
         "editor.tabSize": 4,
         "editor.formatOnSave": true
     },
+    "[sql]": {
+        "editor.tabSize": 4,
+        "editor.insertSpaces": true
+    },
     "[json]": {
         "editor.defaultFormatter": "esbenp.prettier-vscode",
         "editor.insertSpaces": true,
@@ -46,11 +50,27 @@
     "go.lintOnSave": "package",
     "go.formatTool": "gofmt",
     "go.toolsManagement.autoUpdate": true,
+    "go.testFlags": [
+        "-v",
+        "-race"
+    ],
+    "go.testTimeout": "60s",
     "errorlens.enabled": true,
     "errorlens.fontSize": "12px",
     "terminal.integrated.defaultProfile.windows": "PowerShell",
+    "terminal.integrated.profiles.windows": {
+        "PowerShell": {
+            "source": "PowerShell",
+            "icon": "terminal-powershell",
+            "args": ["-NoLogo"]
+        }
+    },
     "terminal.integrated.fontFamily": "Cascadia Code, Consolas",
     "terminal.integrated.fontSize": 13,
+    "files.associations": {
+        ".env*": "dotenv",
+        "*.sql": "sql"
+    },
     "files.exclude": {
         "**/.git": true,
         "**/.DS_Store": true,
@@ -60,7 +80,9 @@
         "**/.git/objects/**": true,
         "**/.git/subtree-cache/**": true,
         "**/node_modules/**": true,
-        "**/bin/**": true
-    }
+        "**/bin/**": true,
+        "**/.gemini/**": true
+    },
+    "files.trimTrailingWhitespace": true,
+    "files.insertFinalNewline": true
 }
-

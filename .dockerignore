@@ -1,0 +1,39 @@
+# Git & version control
+.git
+.gitignore
+.gitattributes
+.github
+
+# Secrets & environment files (CRITICAL: never send to Docker daemon)
+.env
+.env.*
+*.pem
+*.key
+*.crt
+*.enc
+
+# Editor & AI agent directories
+.vscode
+.idea
+.agents
+.gemini
+
+# Documentation, templates, and deployment manifests not needed to compile Go binary
+docs/
+templates/
+deploy/
+scripts/
+README*.md
+AGENTS.md
+GEMINI.md
+
+# Local build & test artifacts
+bin/
+dist/
+build/
+coverage/
+*.exe
+*.test
+*.prof
+*.out
+

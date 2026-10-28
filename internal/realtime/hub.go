@@ -2,46 +2,46 @@ package realtime
 
 import (
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/gorilla/websocket"
 )
 
-var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool {
-		return true // Configurable per FRONTEND_URL in production
-	},
-}
-
 type EventMessage struct {
 	Type    string      `json:"type"`     // e.g. "order.created", "order.status_changed", "payment.paid"
-	StoreID string      `json:"store_id"` // Multi-tenant scoping
+	StoreID string      `json:"store_id"` // Multi-tenant scoping: must NEVER be empty when broadcasting tenant events
 	Payload interface{} `json:"payload"`
 }
 
 type Client struct {
-	hub     *Hub
-	conn    *websocket.Conn
-	send    chan []byte
-	storeID string
+	hub      *Hub
+	conn     *websocket.Conn
+	send     chan []byte
+	storeID  string
+	isClosed int32 // atomic flag to avoid multiple channel close
 }
 
 type Hub struct {
-	clients    map[*Client]bool
-	broadcast  chan *EventMessage
-	register   chan *Client
-	unregister chan *Client
-	mu         sync.RWMutex
+	clients        map[*Client]bool
+	broadcast      chan *EventMessage
+	register       chan *Client
+	unregister     chan *Client
+	mu             sync.RWMutex
+	allowedOrigins []string
 }
 
-func NewHub() *Hub {
+func NewHub(allowedOrigins []string) *Hub {
 	return &Hub{
-		broadcast:  make(chan *EventMessage, 256),
-		register:   make(chan *Client),
-		unregister: make(chan *Client),
-		clients:    make(map[*Client]bool),
+		broadcast:      make(chan *EventMessage, 256),
+		register:       make(chan *Client),
+		unregister:     make(chan *Client),
+		clients:        make(map[*Client]bool),
+		allowedOrigins: allowedOrigins,
 	}
 }
 
@@ -53,13 +53,14 @@ func (h *Hub) Run() {
 			h.clients[client] = true
 			h.mu.Unlock()
 		case client := <-h.unregister:
-			h.mu.Lock()
-			if _, ok := h.clients[client]; ok {
-				delete(h.clients, client)
-				close(client.send)
-			}
-			h.mu.Unlock()
+			h.removeClient(client)
 		case message := <-h.broadcast:
+			// Multi-tenant isolation: Never broadcast empty store_id to all tenants!
+			if message.StoreID == "" {
+				log.Println("[SECURITY WARNING] Dropped broadcast with empty StoreID to prevent cross-tenant leak")
+				continue
+			}
+
 			data, err := json.Marshal(message)
 			if err != nil {
 				log.Printf("[REALTIME] Error marshaling event: %v", err)
@@ -68,13 +69,13 @@ func (h *Hub) Run() {
 
 			h.mu.RLock()
 			for client := range h.clients {
-				// Only deliver events to matching store (tenant isolation)
-				if client.storeID == message.StoreID || message.StoreID == "" {
+				// Strict tenant isolation: client must strictly match message.StoreID
+				if client.storeID == message.StoreID {
 					select {
 					case client.send <- data:
 					default:
-						close(client.send)
-						delete(h.clients, client)
+						// Slow client or blocked channel: safely unregister
+						go h.removeClient(client)
 					}
 				}
 			}
@@ -83,26 +84,66 @@ func (h *Hub) Run() {
 	}
 }
 
-func (h *Hub) BroadcastEvent(eventType, storeID string, payload interface{}) {
+func (h *Hub) removeClient(client *Client) {
+	h.mu.Lock()
+	if _, ok := h.clients[client]; ok {
+		delete(h.clients, client)
+		if atomic.CompareAndSwapInt32(&client.isClosed, 0, 1) {
+			close(client.send)
+		}
+	}
+	h.mu.Unlock()
+}
+
+// BroadcastEvent broadcasts an event strictly to the designated storeID
+func (h *Hub) BroadcastEvent(eventType, storeID string, payload interface{}) error {
+	if storeID == "" {
+		return errors.New("cannot broadcast event without explicit storeID (tenant isolation violation)")
+	}
+
 	h.broadcast <- &EventMessage{
 		Type:    eventType,
 		StoreID: storeID,
 		Payload: payload,
 	}
+	return nil
 }
 
-func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request, storeID string) {
+// ServeWS upgrades the HTTP connection to WebSocket with strict origin check and tenant verification
+func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request, authenticatedStoreID string) {
+	if authenticatedStoreID == "" {
+		http.Error(w, "Unauthorized: missing or invalid tenant authentication", http.StatusUnauthorized)
+		return
+	}
+
+	upgrader := websocket.Upgrader{
+		CheckOrigin: func(req *http.Request) bool {
+			origin := req.Header.Get("Origin")
+			if origin == "" {
+				// Reject originless browser requests if Origin header is expected
+				return false
+			}
+			for _, allowed := range h.allowedOrigins {
+				if strings.EqualFold(strings.TrimRight(allowed, "/"), strings.TrimRight(origin, "/")) {
+					return true
+				}
+			}
+			return false
+		},
+	}
+
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Printf("[REALTIME] WebSocket upgrade error: %v", err)
+		log.Printf("[REALTIME] WebSocket upgrade rejected or error: %v", err)
 		return
 	}
 
 	client := &Client{
-		hub:     h,
-		conn:    conn,
-		send:    make(chan []byte, 64),
-		storeID: storeID,
+		hub:      h,
+		conn:     conn,
+		send:     make(chan []byte, 64),
+		storeID:  authenticatedStoreID,
+		isClosed: 0,
 	}
 	client.hub.register <- client
 
@@ -113,7 +154,7 @@ func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request, storeID string) {
 func (c *Client) readPump() {
 	defer func() {
 		c.hub.unregister <- c
-		c.conn.Close()
+		_ = c.conn.Close()
 	}()
 
 	for {
@@ -126,7 +167,7 @@ func (c *Client) readPump() {
 
 func (c *Client) writePump() {
 	defer func() {
-		c.conn.Close()
+		_ = c.conn.Close()
 	}()
 
 	for message := range c.send {
@@ -134,13 +175,13 @@ func (c *Client) writePump() {
 		if err != nil {
 			return
 		}
-		w.Write(message)
+		_, _ = w.Write(message)
 
 		// Flush queued messages to optimize frames
 		n := len(c.send)
 		for i := 0; i < n; i++ {
-			w.Write([]byte{'\n'})
-			w.Write(<-c.send)
+			_, _ = w.Write([]byte{'\n'})
+			_, _ = w.Write(<-c.send)
 		}
 
 		if err := w.Close(); err != nil {

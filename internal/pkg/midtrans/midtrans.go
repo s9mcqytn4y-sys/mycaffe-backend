@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/midtrans/midtrans-go"
@@ -33,12 +34,18 @@ func NewClient(cfg *config.Config) *Client {
 	}
 }
 
-// ChargeQRIS initiates a dynamic QRIS payment using Midtrans Core API
+// ChargeQRIS initiates a dynamic QRIS payment using Midtrans Core API.
+// Uses stable order.OrderNumber as ProviderOrderID.
 func (c *Client) ChargeQRIS(order *domain.Order) (*coreapi.ChargeResponse, error) {
+	providerOrderID := order.OrderNumber
+	if providerOrderID == "" {
+		providerOrderID = order.ID.String()
+	}
+
 	req := &coreapi.ChargeReq{
 		PaymentType: coreapi.PaymentTypeQris,
 		TransactionDetails: midtrans.TransactionDetails{
-			OrderID:  order.ID.String(),
+			OrderID:  providerOrderID,
 			GrossAmt: order.TotalAmount,
 		},
 		Qris: &coreapi.QrisDetails{
@@ -54,7 +61,8 @@ func (c *Client) ChargeQRIS(order *domain.Order) (*coreapi.ChargeResponse, error
 	return resp, nil
 }
 
-// ChargeBankTransfer initiates a VA bank transfer using Midtrans Core API
+// ChargeBankTransfer initiates a VA bank transfer using Midtrans Core API.
+// Uses stable order.OrderNumber as ProviderOrderID.
 func (c *Client) ChargeBankTransfer(order *domain.Order, bank string) (*coreapi.ChargeResponse, error) {
 	var midtransBank midtrans.Bank
 	switch strings.ToLower(bank) {
@@ -72,10 +80,15 @@ func (c *Client) ChargeBankTransfer(order *domain.Order, bank string) (*coreapi.
 		return nil, errors.New("unsupported bank transfer: " + bank)
 	}
 
+	providerOrderID := order.OrderNumber
+	if providerOrderID == "" {
+		providerOrderID = order.ID.String()
+	}
+
 	req := &coreapi.ChargeReq{
 		PaymentType: coreapi.PaymentTypeBankTransfer,
 		TransactionDetails: midtrans.TransactionDetails{
-			OrderID:  order.ID.String(),
+			OrderID:  providerOrderID,
 			GrossAmt: order.TotalAmount,
 		},
 		BankTransfer: &coreapi.BankTransferDetails{
@@ -91,7 +104,7 @@ func (c *Client) ChargeBankTransfer(order *domain.Order, bank string) (*coreapi.
 	return resp, nil
 }
 
-// VerifySignature verifies Midtrans notification signature key
+// VerifySignature verifies Midtrans notification signature key using the raw gross_amount string.
 // Formula: SHA512(order_id + status_code + gross_amount + server_key)
 func (c *Client) VerifySignature(orderID, statusCode, grossAmount, incomingSignature string) bool {
 	raw := orderID + statusCode + grossAmount + c.serverKey
@@ -102,25 +115,90 @@ func (c *Client) VerifySignature(orderID, statusCode, grossAmount, incomingSigna
 	return strings.EqualFold(expectedSignature, incomingSignature)
 }
 
-// MapMidtransStatus maps Midtrans transaction status to internal domain.PaymentStatus
-func MapMidtransStatus(transactionStatus, fraudStatus string) domain.PaymentStatus {
-	switch transactionStatus {
-	case "capture":
-		if fraudStatus == "challenge" {
-			return domain.PaymentStatusPending
-		} else if fraudStatus == "accept" {
-			return domain.PaymentStatusPaid
+// ParseGrossAmountIDR parses a Midtrans gross_amount string (e.g. "58905.00" or "58905")
+// into exact integer Indonesian Rupiah (int64) without using floating-point arithmetic.
+// Rejects non-zero fractional cents, negative/zero values, and malformed strings.
+func ParseGrossAmountIDR(grossAmount string) (int64, error) {
+	trimmed := strings.TrimSpace(grossAmount)
+	if trimmed == "" {
+		return 0, errors.New("gross_amount cannot be empty")
+	}
+
+	parts := strings.Split(trimmed, ".")
+	if len(parts) > 2 {
+		return 0, fmt.Errorf("invalid gross_amount format: %q", grossAmount)
+	}
+
+	intPart := parts[0]
+	if intPart == "" {
+		return 0, fmt.Errorf("missing integer part in gross_amount: %q", grossAmount)
+	}
+
+	if len(parts) == 2 {
+		fracPart := parts[1]
+		if fracPart == "" {
+			return 0, fmt.Errorf("empty fractional part in gross_amount: %q", grossAmount)
 		}
-		return domain.PaymentStatusPending
+		for i := 0; i < len(fracPart); i++ {
+			if fracPart[i] != '0' {
+				return 0, fmt.Errorf("non-zero fractional IDR cents are not allowed in gross_amount: %q", grossAmount)
+			}
+		}
+	}
+
+	val, err := strconv.ParseInt(intPart, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("invalid integer in gross_amount %q: %w", grossAmount, err)
+	}
+	if val <= 0 {
+		return 0, fmt.Errorf("gross_amount must be strictly positive, got %d", val)
+	}
+
+	return val, nil
+}
+
+// MapMidtransStatus maps Midtrans transaction_status and fraud_status to internal domain.PaymentStatus.
+// Returns an explicit error for unknown or unmapped statuses instead of silently defaulting to pending.
+func MapMidtransStatus(transactionStatus, fraudStatus string) (domain.PaymentStatus, error) {
+	txStatus := strings.ToLower(strings.TrimSpace(transactionStatus))
+	fStatus := strings.ToLower(strings.TrimSpace(fraudStatus))
+
+	switch txStatus {
+	case "authorize":
+		return domain.PaymentStatusAuthorized, nil
+	case "capture":
+		switch fStatus {
+		case "challenge":
+			return domain.PaymentStatusPending, nil
+		case "accept":
+			return domain.PaymentStatusPaid, nil
+		case "deny":
+			return domain.PaymentStatusFailed, nil
+		default:
+			return "", fmt.Errorf("unsupported fraud_status %q for capture transaction", fraudStatus)
+		}
 	case "settlement":
-		return domain.PaymentStatusPaid
+		if fStatus == "deny" {
+			return domain.PaymentStatusFailed, nil
+		}
+		return domain.PaymentStatusPaid, nil
 	case "pending":
-		return domain.PaymentStatusPending
-	case "deny", "cancel", "expire":
-		return domain.PaymentStatusFailed
-	case "refund", "partial_refund":
-		return domain.PaymentStatusRefunded
+		return domain.PaymentStatusPending, nil
+	case "deny", "failure":
+		return domain.PaymentStatusFailed, nil
+	case "cancel":
+		return domain.PaymentStatusCancelled, nil
+	case "expire":
+		return domain.PaymentStatusExpired, nil
+	case "partial_refund":
+		return domain.PaymentStatusPartiallyRefunded, nil
+	case "refund":
+		return domain.PaymentStatusRefunded, nil
+	case "partial_chargeback":
+		return domain.PaymentStatusPartialChargeback, nil
+	case "chargeback":
+		return domain.PaymentStatusChargeback, nil
 	default:
-		return domain.PaymentStatusPending
+		return "", fmt.Errorf("unknown midtrans transaction_status: %q", transactionStatus)
 	}
 }

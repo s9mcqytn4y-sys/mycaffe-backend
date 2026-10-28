@@ -1,0 +1,85 @@
+# MyCaffe POS Platform - Local Development & CI Docker Compose
+# Uses official PostgreSQL 18 volume layout (/var/lib/postgresql) and HTTP :80 reverse proxy.
+# For production VPS deployment, use deploy/docker/docker-compose.prod.yml.
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    container_name: mycaffe-postgres-dev
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:-mycaffe_dev}
+      POSTGRES_USER: ${DB_SUPERUSER:-postgres}
+      POSTGRES_PASSWORD: ${DB_SUPERUSER_PASSWORD:-mycaffe_local_super_password}
+      DB_MIGRATOR_USER: ${DB_MIGRATOR_USER:-mycaffe_migrator}
+      DB_MIGRATOR_PASSWORD: ${DB_MIGRATOR_PASSWORD:-mycaffe_local_migrator_password}
+      DB_APP_USER: ${DB_APP_USER:-mycaffe_app}
+      DB_APP_PASSWORD: ${DB_APP_PASSWORD:-mycaffe_local_app_password}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql
+      - ../postgres/00-init-roles.sh:/docker-entrypoint-initdb.d/00-init-roles.sh:ro
+    networks:
+      - mycaffe-internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_MIGRATOR_USER:-mycaffe_migrator} -d ${DB_NAME:-mycaffe_dev}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  api:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+    container_name: mycaffe-api-dev
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PORT: "8080"
+      APP_ENV: ${APP_ENV:-development}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+      DATABASE_URL: postgres://${DB_APP_USER:-mycaffe_app}:${DB_APP_PASSWORD:-mycaffe_local_app_password}@postgres:5432/${DB_NAME:-mycaffe_dev}?sslmode=disable
+      DATABASE_MIGRATION_URL: postgres://${DB_MIGRATOR_USER:-mycaffe_migrator}:${DB_MIGRATOR_PASSWORD:-mycaffe_local_migrator_password}@postgres:5432/${DB_NAME:-mycaffe_dev}?sslmode=disable
+      DB_APP_USER: ${DB_APP_USER:-mycaffe_app}
+      DB_APP_PASSWORD: ${DB_APP_PASSWORD:-mycaffe_local_app_password}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-dev-local-jwt-secret-key-minimum-32-chars}
+      JWT_EXPIRED_HOURS: ${JWT_EXPIRED_HOURS:-24}
+      MIDTRANS_MERCHANT_ID: ${MIDTRANS_MERCHANT_ID:-G000000000}
+      MIDTRANS_SERVER_KEY: ${MIDTRANS_SERVER_KEY:-SB-Mid-server-local-dev-key}
+      MIDTRANS_CLIENT_KEY: ${MIDTRANS_CLIENT_KEY:-SB-Mid-client-local-dev-key}
+      MIDTRANS_IS_PRODUCTION: "false"
+    networks:
+      - mycaffe-internal
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health/ready"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: mycaffe-nginx-dev
+    restart: unless-stopped
+    ports:
+      - "${HTTP_PORT:-80}:80"
+    volumes:
+      - ../nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - mycaffe-internal
+
+volumes:
+  pgdata:
+    driver: local
+
+networks:
+  mycaffe-internal:
+    driver: bridge

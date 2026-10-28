@@ -11,19 +11,23 @@ import (
 
 	"github.com/getsentry/sentry-go"
 	"github.com/gin-gonic/gin"
+	"github.com/jmoiron/sqlx"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/config"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/handler"
+	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/database"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/midtrans"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/realtime"
 )
 
-// @title Kafe Senja Vibe API
+// @title MyCaffe Core POS API
 // @version 1.0
-// @description Backend API untuk QR Ordering, POS, KDS, & TV Queue Display (Kafe Senja Vibe).
-// @contact.name Tim Kafe Senja
+// @description Backend API untuk Multi-Tenant QR Ordering, POS, KDS, & TV Queue Display (MyCaffe Platform).
 // @BasePath /
 func main() {
-	cfg := config.LoadConfig()
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		log.Fatalf("[FATAL CONFIG] %v", err)
+	}
 
 	// Initialize Sentry error monitoring
 	if cfg.SentryDSN != "" && cfg.SentryDSN != "https://your-public-key@o0.ingest.sentry.io/projectId" {
@@ -39,6 +43,24 @@ func main() {
 		}
 	}
 
+	// Initialize PostgreSQL 18 Connection Pool
+	var db *sqlx.DB
+	if cfg.DatabaseURL != "" {
+		dbConn, err := database.NewPostgresDB(cfg)
+		if err != nil {
+			log.Fatalf("[FATAL DATABASE] %v", err)
+		}
+		db = dbConn
+		defer func() {
+			if err := db.Close(); err != nil {
+				log.Printf("[DATABASE] Error closing pool: %v", err)
+			}
+		}()
+		log.Println("[DATABASE] PostgreSQL pool initialized and verified")
+	} else if cfg.AppEnv == "production" || cfg.AppEnv == "staging" {
+		log.Fatalf("[FATAL DATABASE] DATABASE_URL is required in %s environment", cfg.AppEnv)
+	}
+
 	// Set Gin mode
 	if cfg.AppEnv == "production" {
 		gin.SetMode(gin.ReleaseMode)
@@ -48,32 +70,40 @@ func main() {
 
 	router := gin.Default()
 
-	// CORS Middleware
+	// Strict Origin-Validated CORS Middleware (No Wildcard + Credentials violation)
 	router.Use(func(c *gin.Context) {
-		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
-		c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
-		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With")
-		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, DELETE, PATCH")
+		origin := c.Request.Header.Get("Origin")
+
+		if cfg.IsOriginAllowed(origin) {
+			c.Writer.Header().Set("Access-Control-Allow-Origin", origin)
+			c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
+			c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, Accept, Origin, Cache-Control, X-Requested-With")
+			c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, DELETE, PATCH")
+		}
 
 		if c.Request.Method == "OPTIONS" {
-			c.AbortWithStatus(http.StatusNoContent)
+			if cfg.IsOriginAllowed(origin) {
+				c.AbortWithStatus(http.StatusNoContent)
+			} else {
+				c.AbortWithStatus(http.StatusForbidden)
+			}
 			return
 		}
 
 		c.Next()
 	})
 
-	// Initialize Realtime Hub
-	hub := realtime.NewHub()
+	// Initialize Realtime Hub with allowed origins
+	hub := realtime.NewHub(cfg.AllowedOrigins)
 	go hub.Run()
 
 	// Initialize Midtrans Core API Client
 	midtransClient := midtrans.NewClient(cfg)
 
 	// Initialize Handlers
-	healthHandler := handler.NewHealthHandler("Kafe Senja Vibe Backend", cfg.AppEnv)
+	healthHandler := handler.NewHealthHandler("MyCaffe POS Backend", cfg.AppEnv, db)
 	midtransHandler := handler.NewMidtransHandler(midtransClient, hub)
-	orderHandler := handler.NewOrderHandler(midtransClient, hub)
+	orderHandler := handler.NewOrderHandler(cfg, midtransClient, hub)
 
 	// Register Routes
 	v1 := router.Group("/api/v1")
@@ -83,13 +113,18 @@ func main() {
 		v1.POST("/payments/midtrans/webhook", midtransHandler.HandleWebhook)
 	}
 
-	// WebSocket endpoint for KDS & TV Queue realtime updates
+	// Health check endpoints for Docker / LB probes
+	router.GET("/health", healthHandler.Check)
+	router.GET("/health/live", healthHandler.Liveness)
+	router.GET("/health/ready", healthHandler.Check)
+
+	// WebSocket endpoint for KDS & TV Queue realtime updates (guarded by token/tenant validation)
 	router.GET("/ws", orderHandler.HandleWebSocket)
 
-	// Root redirect / greeting
+	// Root greeting
 	router.GET("/", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
-			"message": "Kafe Senja Vibe Backend API is running.",
+			"message": "MyCaffe Core POS Backend API is running.",
 			"version": "1.0.0",
 			"docs":    "/swagger/index.html",
 		})
@@ -105,7 +140,7 @@ func main() {
 
 	// Graceful shutdown setup
 	go func() {
-		log.Printf("[SERVER] Starting Kafe Senja Backend on port :%s (env: %s)", cfg.Port, cfg.AppEnv)
+		log.Printf("[SERVER] Starting MyCaffe Backend on port :%s (env: %s)", cfg.Port, cfg.AppEnv)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("[SERVER] Listen error: %s\n", err)
 		}

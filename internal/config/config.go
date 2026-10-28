@@ -1,20 +1,27 @@
 package config
 
 import (
-	"log"
+	"errors"
+	"fmt"
+	"net/url"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/joho/godotenv"
 )
 
 type Config struct {
-	AppEnv         string
-	Port           string
-	FrontendURL    string
-	DatabaseURL    string
-	JWTSecret      string
-	JWTExpiryHours int
+	AppEnv               string
+	Port                 string
+	FrontendURL          string
+	AllowedOrigins       []string
+	DatabaseURL          string
+	DatabaseMigrationURL string
+	DBAppUser            string
+	DBAppPassword        string
+	JWTSecret            string
+	JWTExpiryHours       int
 
 	// Midtrans Core API
 	MidtransMerchantID   string
@@ -35,19 +42,60 @@ type Config struct {
 	SentryEnvironment string
 }
 
-func LoadConfig() *Config {
-	// Load .env if present (ignored in production if env is injected)
+func LoadConfig() (*Config, error) {
+	// Load .env if present (ignored in production if injected via container/host)
 	_ = godotenv.Load()
 
-	isProd, _ := strconv.ParseBool(getEnv("MIDTRANS_IS_PRODUCTION", "false"))
-	jwtHours, _ := strconv.Atoi(getEnv("JWT_EXPIRED_HOURS", "24"))
+	// Strict boolean parsing for MIDTRANS_IS_PRODUCTION
+	midtransProdStr := getEnv("MIDTRANS_IS_PRODUCTION", "false")
+	isProd, err := strconv.ParseBool(midtransProdStr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid boolean for MIDTRANS_IS_PRODUCTION: %w", err)
+	}
+
+	// Strict integer parsing for JWT_EXPIRED_HOURS
+	jwtHoursStr := getEnv("JWT_EXPIRED_HOURS", "24")
+	jwtHours, err := strconv.Atoi(jwtHoursStr)
+	if err != nil || jwtHours <= 0 {
+		return nil, fmt.Errorf("invalid positive integer for JWT_EXPIRED_HOURS: %w", err)
+	}
+
+	// Explicitly require APP_ENV (reject unset and empty values, normalize case/whitespace)
+	rawAppEnv, exists := os.LookupEnv("APP_ENV")
+	if !exists {
+		return nil, errors.New("APP_ENV is not set: environment must be explicitly defined (development, test, staging, production)")
+	}
+	appEnv := strings.ToLower(strings.TrimSpace(rawAppEnv))
+	if appEnv == "" {
+		return nil, errors.New("APP_ENV cannot be empty: environment must be explicitly defined (development, test, staging, production)")
+	}
+
+	frontendURL := getEnv("FRONTEND_URL", "http://localhost:3000")
+
+	// Strict origin parsing
+	allowedOriginsRaw := getEnv("ALLOWED_ORIGINS", "")
+	var allowedOrigins []string
+	if allowedOriginsRaw != "" {
+		for _, o := range strings.Split(allowedOriginsRaw, ",") {
+			trimmed := strings.TrimSpace(o)
+			if trimmed != "" {
+				allowedOrigins = append(allowedOrigins, trimmed)
+			}
+		}
+	} else if appEnv != "production" {
+		allowedOrigins = append(allowedOrigins, frontendURL)
+	}
 
 	cfg := &Config{
-		AppEnv:               getEnv("APP_ENV", "development"),
+		AppEnv:               appEnv,
 		Port:                 getEnv("PORT", "8080"),
-		FrontendURL:          getEnv("FRONTEND_URL", "http://localhost:3000"),
+		FrontendURL:          frontendURL,
+		AllowedOrigins:       allowedOrigins,
 		DatabaseURL:          getEnv("DATABASE_URL", ""),
-		JWTSecret:            getEnv("JWT_SECRET_KEY", "default_secret_key_change_me_in_production"),
+		DatabaseMigrationURL: getEnv("DATABASE_MIGRATION_URL", getEnv("DATABASE_URL", "")),
+		DBAppUser:            getEnv("DB_APP_USER", "mycaffe_app"),
+		DBAppPassword:        getEnv("DB_APP_PASSWORD", ""),
+		JWTSecret:            getEnv("JWT_SECRET_KEY", ""),
 		JWTExpiryHours:       jwtHours,
 		MidtransMerchantID:   getEnv("MIDTRANS_MERCHANT_ID", ""),
 		MidtransServerKey:    getEnv("MIDTRANS_SERVER_KEY", ""),
@@ -63,11 +111,110 @@ func LoadConfig() *Config {
 		SentryEnvironment:    getEnv("SENTRY_ENVIRONMENT", "development"),
 	}
 
-	if cfg.DatabaseURL == "" {
-		log.Println("[WARN] DATABASE_URL is not set. Database connections may fail.")
+	if err := ValidateConfig(cfg); err != nil {
+		return nil, err
 	}
 
-	return cfg
+	return cfg, nil
+}
+
+// ValidateConfig enforces fail-closed security rules without embedding actual secrets in code
+func ValidateConfig(cfg *Config) error {
+	// Whitelist valid environments
+	cfg.AppEnv = strings.ToLower(strings.TrimSpace(cfg.AppEnv))
+	validEnvs := []string{"development", "test", "staging", "production"}
+	isValidEnv := false
+	for _, env := range validEnvs {
+		if cfg.AppEnv == env {
+			isValidEnv = true
+			break
+		}
+	}
+	if !isValidEnv {
+		return fmt.Errorf("[SECURITY FAIL-CLOSED] invalid APP_ENV %q: allowed values are development, test, staging, production", cfg.AppEnv)
+	}
+
+	// Generic validation: reject obviously insecure patterns in production
+	if cfg.AppEnv == "production" {
+		if containsPlaceholderPattern(cfg.JWTSecret) {
+			return errors.New("[SECURITY FAIL-CLOSED] production requires a genuine, unguessable JWT_SECRET_KEY")
+		}
+		if len(cfg.JWTSecret) < 32 {
+			return errors.New("[SECURITY FAIL-CLOSED] production requires a strong JWT_SECRET_KEY of at least 32 characters")
+		}
+
+		if cfg.DatabaseURL == "" || containsPlaceholderPattern(cfg.DatabaseURL) {
+			return errors.New("[SECURITY FAIL-CLOSED] production requires a valid, non-placeholder DATABASE_URL")
+		}
+		if cfg.DatabaseMigrationURL != "" && containsPlaceholderPattern(cfg.DatabaseMigrationURL) {
+			return errors.New("[SECURITY FAIL-CLOSED] production DATABASE_MIGRATION_URL cannot contain placeholder credentials")
+		}
+
+		if !cfg.MidtransIsProduction {
+			return errors.New("[SECURITY FAIL-CLOSED] production requires MIDTRANS_IS_PRODUCTION=true")
+		}
+		if cfg.MidtransServerKey == "" || strings.HasPrefix(cfg.MidtransServerKey, "SB-") || containsPlaceholderPattern(cfg.MidtransServerKey) {
+			return errors.New("[SECURITY FAIL-CLOSED] production cannot run with empty, placeholder, or sandbox Midtrans server key")
+		}
+		if strings.HasPrefix(cfg.MidtransClientKey, "SB-") || (cfg.MidtransClientKey != "" && containsPlaceholderPattern(cfg.MidtransClientKey)) {
+			return errors.New("[SECURITY FAIL-CLOSED] production cannot run with placeholder or sandbox Midtrans client key")
+		}
+		if cfg.MidtransMerchantID != "" && containsPlaceholderPattern(cfg.MidtransMerchantID) {
+			return errors.New("[SECURITY FAIL-CLOSED] production cannot run with placeholder MIDTRANS_MERCHANT_ID")
+		}
+
+		if len(cfg.AllowedOrigins) == 0 {
+			return errors.New("[SECURITY FAIL-CLOSED] production requires explicit ALLOWED_ORIGINS; cannot be empty")
+		}
+
+		// Validate origins in production: no wildcards, no localhost, must be valid HTTPS
+		for _, origin := range cfg.AllowedOrigins {
+			if origin == "*" {
+				return errors.New("[SECURITY FAIL-CLOSED] wildcard '*' is forbidden in production ALLOWED_ORIGINS")
+			}
+			parsed, err := url.Parse(origin)
+			if err != nil || parsed.Scheme != "https" || parsed.Host == "" {
+				return fmt.Errorf("[SECURITY FAIL-CLOSED] invalid production origin %q: must be a valid https URL", origin)
+			}
+			if strings.EqualFold(parsed.Hostname(), "localhost") || parsed.Hostname() == "127.0.0.1" {
+				return fmt.Errorf("[SECURITY FAIL-CLOSED] localhost origin %q is forbidden in production", origin)
+			}
+		}
+	}
+
+	return nil
+}
+
+func containsPlaceholderPattern(val string) bool {
+	lower := strings.ToLower(strings.TrimSpace(val))
+	patterns := []string{
+		"change_me",
+		"default_secret",
+		"placeholder",
+		"your-",
+		"local-dev",
+		"dev_secret",
+		"example_key",
+	}
+	for _, p := range patterns {
+		if strings.Contains(lower, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// IsOriginAllowed checks if an incoming origin is in the allowed whitelist
+func (c *Config) IsOriginAllowed(origin string) bool {
+	if origin == "" {
+		return false
+	}
+	for _, allowed := range c.AllowedOrigins {
+		if strings.EqualFold(strings.TrimRight(allowed, "/"), strings.TrimRight(origin, "/")) {
+			return true
+		}
+	}
+	return false
 }
 
 func getEnv(key, defaultVal string) string {

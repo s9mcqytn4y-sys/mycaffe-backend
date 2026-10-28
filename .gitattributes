@@ -1,0 +1,20 @@
+# Auto detect text files and perform LF normalization
+* text=auto
+
+# Go source and module files must always use LF
+*.go text eol=lf
+go.mod text eol=lf
+go.sum text eol=lf
+
+# Shell scripts must always use LF
+*.sh text eol=lf
+
+# SQL files
+*.sql text eol=lf
+
+# Configuration and documentation
+*.yml text eol=lf
+*.yaml text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+Dockerfile text eol=lf

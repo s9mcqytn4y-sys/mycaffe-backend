@@ -1,0 +1,131 @@
+# MyCaffe POS Platform — Production Docker Compose
+# Architecture: Single-VPS Modular Monolith (Hostinger KVM 2: 2 vCPU, 8 GB RAM, 100 GB SSD)
+# Target OS: Ubuntu 24.04 LTS
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    container_name: mycaffe-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:-mycaffe_prod}
+      POSTGRES_USER: ${DB_USER:-mycaffe_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Database password must be provided}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    command: >
+      postgres
+      -c shared_buffers=1GB
+      -c effective_cache_size=3GB
+      -c maintenance_work_mem=256MB
+      -c work_mem=16MB
+      -c min_wal_size=1GB
+      -c max_wal_size=4GB
+      -c checkpoint_completion_target=0.9
+      -c wal_buffers=16MB
+      -c default_statistics_target=100
+      -c random_page_cost=1.1
+      -c effective_io_concurrency=200
+      -c log_destination=stderr
+      -c logging_collector=off
+      -c log_min_messages=warning
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ../../db/migrations/20261028000001_init_schema.up.sql:/docker-entrypoint-initdb.d/01_init_schema.sql:ro
+    networks:
+      - mycaffe-internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-mycaffe_user} -d ${DB_NAME:-mycaffe_prod}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.25'
+          memory: 3500M
+        reservations:
+          cpus: '0.5'
+          memory: 1024M
+
+  api:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+    container_name: mycaffe-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - ../../.env
+    environment:
+      PORT: "8080"
+      APP_ENV: ${APP_ENV:-production}
+      DATABASE_URL: postgres://${DB_USER:-mycaffe_user}:${DB_PASSWORD}@postgres:5432/${DB_NAME:-mycaffe_prod}?sslmode=disable
+    networks:
+      - mycaffe-internal
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/v1/health"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1024M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+
+  web:
+    # Frontend Next.js service (configured when frontend is deployed on same VPS)
+    image: ${FRONTEND_IMAGE:-node:22-alpine}
+    container_name: mycaffe-web
+    restart: unless-stopped
+    command: ["node", "-e", "require('http').createServer((req, res) => { res.writeHead(200); res.end('MyCaffe Web Placeholder'); }).listen(3000)"]
+    networks:
+      - mycaffe-internal
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1536M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: mycaffe-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ../nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - certbot-etc:/etc/letsencrypt:ro
+      - certbot-var:/var/lib/letsencrypt:ro
+      - web-root:/var/www/certbot:ro
+    depends_on:
+      - api
+    networks:
+      - mycaffe-internal
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+volumes:
+  pgdata:
+    driver: local
+  certbot-etc:
+  certbot-var:
+  web-root:
+
+networks:
+  mycaffe-internal:
+    driver: bridge

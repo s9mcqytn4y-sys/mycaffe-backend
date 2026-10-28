@@ -17,9 +17,9 @@ import (
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/realtime"
 )
 
-// @title Kafe Senja Vibe API
+// @title MyCaffe Core POS API
 // @version 1.0
-// @description Backend API untuk QR Ordering, POS, KDS, & TV Queue Display (Kafe Senja Vibe).
+// @description Backend API untuk Multi-Tenant QR Ordering, POS, KDS, & TV Queue Display (MyCaffe Platform).
 // @BasePath /
 func main() {
 	cfg, err := config.LoadConfig()
@@ -81,7 +81,7 @@ func main() {
 	midtransClient := midtrans.NewClient(cfg)
 
 	// Initialize Handlers
-	healthHandler := handler.NewHealthHandler("Kafe Senja Vibe Backend", cfg.AppEnv)
+	healthHandler := handler.NewHealthHandler("MyCaffe POS Backend", cfg.AppEnv)
 	midtransHandler := handler.NewMidtransHandler(midtransClient, hub)
 	orderHandler := handler.NewOrderHandler(cfg, midtransClient, hub)
 
@@ -93,13 +93,16 @@ func main() {
 		v1.POST("/payments/midtrans/webhook", midtransHandler.HandleWebhook)
 	}
 
+	// Root health check endpoint for Docker / LB probes
+	router.GET("/health", healthHandler.Check)
+
 	// WebSocket endpoint for KDS & TV Queue realtime updates (guarded by token/tenant validation)
 	router.GET("/ws", orderHandler.HandleWebSocket)
 
 	// Root greeting
 	router.GET("/", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
-			"message": "Kafe Senja Vibe Backend API is running.",
+			"message": "MyCaffe Core POS Backend API is running.",
 			"version": "1.0.0",
 			"docs":    "/swagger/index.html",
 		})
@@ -115,7 +118,7 @@ func main() {
 
 	// Graceful shutdown setup
 	go func() {
-		log.Printf("[SERVER] Starting Kafe Senja Backend on port :%s (env: %s)", cfg.Port, cfg.AppEnv)
+		log.Printf("[SERVER] Starting MyCaffe Backend on port :%s (env: %s)", cfg.Port, cfg.AppEnv)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("[SERVER] Listen error: %s\n", err)
 		}

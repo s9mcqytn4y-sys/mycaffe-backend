@@ -45,6 +45,10 @@
         "editor.defaultFormatter": "yzhang.markdown-all-in-one",
         "editor.wordWrap": "on"
     },
+    "[dockerfile]": {
+        "editor.tabSize": 4,
+        "editor.insertSpaces": true
+    },
     "go.useLanguageServer": true,
     "go.lintTool": "golangci-lint",
     "go.lintOnSave": "package",
@@ -69,7 +73,9 @@
     "terminal.integrated.fontSize": 13,
     "files.associations": {
         ".env*": "dotenv",
-        "*.sql": "sql"
+        "*.sql": "sql",
+        "Dockerfile*": "dockerfile",
+        "docker-compose*.yml": "dockercompose"
     },
     "files.exclude": {
         "**/.git": true,

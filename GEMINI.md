@@ -1,13 +1,14 @@
-# Kafe Senja Vibe — Gemini & Antigravity Instructions
+# MyCaffe Core POS — Gemini & Antigravity Instructions
 
 ## Repository Role
-This repository (`mycaffe-backend`) is the Go backend for Kafe Senja Vibe — a configurable, multi-tenant QR table ordering, POS, KDS, and TV queue display platform. The frontend is a separate Next.js application; do not generate or manage frontend code within this backend repository.
+This repository (`mycaffe-backend`) is the Go backend for MyCaffe — a configurable, multi-tenant QR table ordering, POS, KDS, and TV queue display platform. The frontend is a separate Next.js application; do not generate or manage frontend code within this backend repository.
 
 ## Guiding Principles & Quality Standards
 1. **Multi-Tenant Security**: Every query, mutation, and realtime event must be strictly scoped by the authenticated `store_id` (tenant UUID). Never trust client-provided tenant parameters.
 2. **Payment Integrity**: Prices, modifiers, discounts, taxes, and service charges are calculated exclusively on the server from the official catalog. Money amounts must be whole integer Indonesian Rupiah (`int64` / PostgreSQL `BIGINT`) without floating-point math or fractional cents.
 3. **Fail-Closed Operations**: In production (`APP_ENV=production`), all endpoints must fail-closed if required configuration is missing or insecure.
-4. **Free-Tier Governance**: All development, staging, CI, and test services operate strictly within Free-Tier limits (Supabase Free, Midtrans Sandbox, Cloudflare R2 Free, Sentry Developer).
+4. **Single-VPS Modular Monolith**: Production deployment runs on a single Hostinger KVM 2 VPS (Ubuntu 24.04 LTS) via Docker Compose (`postgres:18-alpine`, Go API backend, Next.js frontend, Nginx reverse proxy). Supabase runtime dependencies are fully superseded (ADR-002).
+5. **Cloudflare R2 Dual-Bucket Storage**: Cloudflare R2 is used with two isolated buckets and separate credentials: `mycaffe-media` (public/CDN product & store media) and `mycaffe-backups` (private GPG AES256+SHA512 encrypted `pg_dump` backups with zero egress fees).
 
 ## Bounded Autonomy for Agents
 - **Autonomous Decisions (No confirmation required)**:
@@ -33,4 +34,3 @@ This repository (`mycaffe-backend`) is the Go backend for Kafe Senja Vibe — a 
 - Run `govulncheck ./...` with pinned version to verify dependency security.
 - Scan for leaked credentials with `gitleaks git --verbose`.
 - Never claim a build, test, migration, or CI succeeded without inspecting actual command output.
-

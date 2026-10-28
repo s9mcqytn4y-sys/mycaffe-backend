@@ -11,11 +11,11 @@ import (
 )
 
 const (
-	ExpectedIssuer   = "kafe-senja-backend"
-	ExpectedAudience = "kafe-senja-pos"
+	ExpectedIssuer   = "mycaffe-backend"
+	ExpectedAudience = "mycaffe-pos"
 )
 
-var ValidRoles = []string{"owner", "manager", "cashier", "barista", "kitchen"}
+var ValidRoles = []string{"owner", "cashier", "barista", "kitchen"}
 
 type CustomClaims struct {
 	StoreID string `json:"store_id"`

@@ -1,259 +1,116 @@
 # Phase 01: Database & Transactional Architecture Contract
-**Kafe Senja Vibe — Multi-Tenant POS, Kitchen Display System (KDS), and Ordering Platform**
+**MyCaffe Core POS: Multi-Tenant POS, QR Table Ordering, Kitchen Display System (KDS), and Queue Platform**
 
 ---
 
 ## 1. Executive Summary & Design Scope
 
-Dokumen ini mendefinisikan arsitektur data dan kontrak transaksional untuk **Kafe Senja Vibe** pada fase fondasi (Phase 01). Tujuannya adalah menjamin:
-- **Tenant Isolation**: Isolasi data per store/outlet secara fisik dan logis tanpa celah kebocoran lintas tenant (*cross-tenant leakage*).
-- **Payment & Financial Integrity**: Perhitungan uang tanpa pembulatan mengambang (menggunakan integer Rupiah / `BIGINT` dan Basis Points / BPS untuk rasio persentase).
-- **Transactional Atomicity & Resiliency**: State machine terpisah untuk pesanan dan pembayaran, atomic queue counter harian tanpa race-condition, dan Outbox Pattern untuk pengiriman event realtime/KDS.
-- **Go Domain Model Alignment**: Pemetaan presisi antara kolom SQL yang nullable dengan Go types (`*string`, `*time.Time`, `sql.Null*`).
+Dokumen ini mendefinisikan arsitektur data dan kontrak transaksional untuk **MyCaffe Core POS** pada Phase 01 (Sub-task 1 & Sub-task 2). Tujuannya adalah menjamin:
+- **Tenant Isolation (Defense-in-Depth)**: Isolasi data per store/tenant menggunakan filter eksplisit `store_id` di Go ditambah PostgreSQL 18 Row-Level Security (`ENABLE ROW LEVEL SECURITY`) dengan runtime role `mycaffe_app` (`NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS`).
+- **Streamlined 4 Operational Roles & Fast-Action Audit**: Empat role operasional (`owner`, `cashier`, `barista`, `kitchen`) tanpa gate persetujuan berlapis yang menghambat kasir. Aksi sensitif kasir dicatat ke `audit_logs` dengan PIN + kode alasan wajib.
+- **Payment & Financial Integrity**: Perhitungan harga, opsi modifier, pajak, service charge, dan split bill menggunakan integer Rupiah (`BIGINT` / `int64`) serta Basis Points (`BPS`) tanpa floating-point (`float64`).
+- **Full Midtrans Core API Custom UI**: Integrasi langsung ke Midtrans Core API (`qris`, `bank_transfer`, `gopay`, `shopeepay`, `card`, `cstore`) ditambah metode kasir (`cash`, `static_qris`, `edc`) tanpa ketergantungan pada tampilan popup Midtrans Snap.
+- **Catalog Modifiers, 1-Level Nested Sub-Addons & Immutable Snapshots**: Dukungan penuh untuk grup opsi kustomisasi produk beserta sub-addon 1 level dan snapshot relasional pada `order_item_options` (`parent_order_item_option_id`).
+- **Split Bill & Multi-Attempt Payment Lifecycle**: Dukungan tagihan penuh maupun terpisah (`full`, `equal`, `by_item`, `custom_amount`) dengan riwayat percobaan pembayaran yang tidak pernah terhapus (`ON DELETE RESTRICT` + pencabutan izin `DELETE` dari `mycaffe_app` pada tabel finansial).
 
 ---
 
-## 2. Multi-Tenant Isolation & Row-Level Security (RLS) Strategy
+## 2. Multi-Tenant Isolation, Triple-Role Separation & Row-Level Security (RLS)
 
-### 2.1 Defense-in-Depth Model
-Kafe Senja Vibe menerapkan arsitektur isolasi berlapis ganda:
-1. **Application-Layer Scoping (Mandatory)**: Setiap query dan mutasi dari backend Go wajib menyertakan filter klausa `WHERE store_id = $1` yang diekstraksi secara ketat dari authenticated context (`*gin.Context` via JWT claim `store_id`). Nilai `store_id` dari payload atau query parameter client tidak pernah dipercaya sebagai otorisasi.
-2. **Database Engine RLS Enforcement**: Row-Level Security diaktifkan pada semua tabel operasional untuk mencegah kebocoran data jika terjadi celah SQL injection atau koneksi langsung via Supabase API (PostgREST / Supabase JS).
+### 2.1 Triple-Role Database Separation (`deploy/postgres/00-init-roles.sh`)
+1. **`postgres` (Container Bootstrap Superuser)**: Hanya digunakan saat inisialisasi container (`initdb`) untuk mengeksekusi `00-init-roles.sh`.
+2. **`mycaffe_migrator` (DDL / Schema Owner Role)**: Role non-superuser (`NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS`) yang menjadi pemilik database dan skema `public`, digunakan khusus oleh CLI `cmd/migrate` (`DATABASE_MIGRATION_URL`) dengan penguncian `pg_advisory_lock`.
+3. **`mycaffe_app` (DML / Runtime API Role)**: Role non-superuser (`NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS`) yang digunakan oleh server Go API (`DATABASE_URL`). Hak izin `DELETE` dicabut (`REVOKE DELETE`) pada seluruh tabel histori finansial dan audit (`stores`, `users`, `orders`, `order_items`, `order_item_options`, `payment_splits`, `payment_split_items`, `payments`, `payment_notification_logs`, `audit_logs`).
 
-### 2.2 RLS Context Setting & Policy Design
-Untuk koneksi pool backend (Go `pgxpool`), backend menyetel session variable lokal per transaksi:
+### 2.2 RLS Context Setting & Webhook Context Resolution
+Setiap transaksi aplikasi yang dijalankan melalui `database.WithTenantTx(ctx, db, storeID, fn)` menyetel session variable lokal:
 ```sql
--- Dijalankan pada awal transaksi database
-SET LOCAL app.current_store_id = '11111111-1111-4111-8111-111111111111';
+SELECT set_config('app.current_store_id', '11111111-1111-4111-8111-111111111111', true);
 ```
 
-RLS Helper Function:
+Fungsi helper RLS:
 ```sql
 CREATE OR REPLACE FUNCTION current_store_id() RETURNS UUID AS $$
     SELECT NULLIF(current_setting('app.current_store_id', true), '')::UUID;
 $$ LANGUAGE sql STABLE;
 ```
 
-Contoh Policy pada Tabel `orders`:
-```sql
-ALTER TABLE orders ENABLE ROW LEVEL SECURITY;
+Untuk webhook Midtrans yang masuk sebelum konteks tenant diketahui, database menyediakan fungsi `SECURITY DEFINER` terbatas (`resolve_payment_webhook_context(p_provider_order_id VARCHAR)`) yang hanya mengembalikan `(store_id, order_id, payment_id)` dari `payments`/`orders` agar handler dapat membuka `WithTenantTx(ctx, db, storeID, ...)` tanpa membuka akses lintas tenant pada tabel utama.
 
-CREATE POLICY store_isolation_orders ON orders
-    FOR ALL
-    USING (store_id = current_store_id())
-    WITH CHECK (store_id = current_store_id());
-```
+Seluruh 17 tabel operasional (`stores`, `users`, `categories`, `products`, `modifier_groups`, `modifier_options`, `product_modifier_groups`, `option_modifier_groups`, `store_daily_sequences`, `orders`, `order_items`, `order_item_options`, `payment_splits`, `payment_split_items`, `payments`, `payment_notification_logs`, `audit_logs`, `outbox_events`) mengaktifkan Row-Level Security (`ENABLE ROW LEVEL SECURITY`).
 
 ---
 
-## 3. Store Lifecycle & Soft Delete Contract
+## 3. Store Lifecycle & Financial Retention Contract
 
-### 3.1 Status & Lifecycle State
-Store/Tenant memiliki status operasional:
-- `is_active` (`BOOLEAN DEFAULT TRUE`): Menandai apakah store dapat menerima pesanan baru.
-- `deleted_at` (`TIMESTAMPTZ NULL`): Soft-delete timestamp.
-
-### 3.2 Implikasi Soft Delete pada Child Tables
-Jika store dihapus secara soft-delete (`deleted_at IS NOT NULL`):
-1. Toko tidak dapat lagi membuat order atau menerima pembayaran baru.
-2. Historical data (orders, payments, audit_logs) **TETAP UTUH** dan tidak di-cascade delete demi kepatuhan audit finansial dan pajak (PB1/UU Harmonisasi Peraturan Perpajakan).
-3. Query operasional wajib menggunakan view atau filter aktif:
-   ```sql
-   SELECT * FROM stores WHERE deleted_at IS NULL AND is_active = TRUE;
-   ```
+1. **Soft Delete pada Store (`stores.deleted_at`) & User (`users.deleted_at`)**: Penutupan store atau penonaktifan staf hanya mengisi kolom `deleted_at` dan menonaktifkan `is_active`.
+2. **Strict `ON DELETE RESTRICT` & `REVOKE DELETE` pada Histori Finansial**:
+   - Relasi `orders.store_id -> stores.id` menggunakan `ON DELETE RESTRICT`.
+   - Relasi `payments.store_id -> stores.id` dan `payments.order_id -> orders.id` menggunakan `ON DELETE RESTRICT`.
+   - Role `mycaffe_app` tidak memiliki hak `DELETE` pada `orders`, `payments`, `payment_splits`, `payment_notification_logs`, dan `audit_logs`.
 
 ---
 
 ## 4. Financial Modeling: Integer Rupiah & Basis Points (BPS)
 
 ### 4.1 Zero Floating-Point Rule
-Untuk mencegah kesalahan akumulasi desimal IEEE 754:
-- Semua nominal mata uang disimpan dalam **integer Rupiah** (`BIGINT` di PostgreSQL / `int64` di Go).
-- Semua tarif persentase (Pajak PB1, Service Charge, MDR QRIS) disimpan dalam **Basis Points (BPS)**:
-  $$1\% = 100\text{ bps}$$
-  $$10\% = 1000\text{ bps}$$
-  $$0.7\% = 70\text{ bps}$$
+- Seluruh nominal uang disimpan dalam **integer Rupiah** (`BIGINT` di PostgreSQL / `int64` di Go).
+- Seluruh tarif persentase (PB1, Service Charge, MDR QRIS) disimpan dalam **Basis Points (BPS)** (`100 bps = 1%`, `1000 bps = 10%`).
+- String `gross_amount` dari webhook Midtrans (misal `"58905.00"`) wajib diverifikasi tanda tangannya (`SHA-512`) menggunakan string mentah asli, kemudian dikonversi ke `int64` menggunakan parser integer murni (`midtrans.ParseGrossAmountIDR`) yang menolak sen desimal tidak nol.
 
-### 4.2 Formula Kalkulasi Finansial Server-Side
-Perhitungan dilakukan secara eksklusif di server Go menggunakan integer arithmetic dengan pembulatan standard (Banker's rounding atau integer round-half-up):
-$$\text{Tax Amount} = \left\lfloor \frac{\text{Taxable Amount} \times \text{tax\_bps} + 5000}{10000} \right\rfloor$$
-$$\text{Service Amount} = \left\lfloor \frac{\text{Subtotal} \times \text{service\_bps} + 5000}{10000} \right\rfloor$$
-$$\text{Gross Total} = \text{Subtotal} - \text{Discount} + \text{Service Amount} + \text{Tax Amount}$$
+### 4.2 Formula Kalkulasi Finansial Server-Side (Round-Half-Up)
+$$\text{Item Unit Price} = \text{Base Price} + \sum (\text{Option Price Delta} \times \text{Option Qty}) + \sum (\text{Sub-Option Price Delta} \times \text{Sub-Option Qty})$$
+$$\text{Service Charge} = \left\lfloor \frac{(\text{Subtotal} - \text{Discount}) \times \text{service\_charge\_bps} + 5000}{10000} \right\rfloor$$
+$$\text{Tax Amount} = \left\lfloor \frac{(\text{Subtotal} - \text{Discount} + \text{Service Charge}) \times \text{tax\_rate\_bps} + 5000}{10000} \right\rfloor$$
+$$\text{Total Amount} = \text{Subtotal} - \text{Discount} + \text{Service Charge} + \text{Tax Amount}$$
 
 ---
 
-## 5. State Machine: Order Status vs. Payment Status
+## 5. Catalog Modifiers, 1-Level Nested Sub-Addons & Order Snapshots
 
-Status pesanan dan pembayaran dimodelkan secara terpisah agar mendukung berbagai skenario kafe (Pay-First vs. Pay-Later / Open Tab):
-
-### 5.1 Order State Machine (`order_status`)
-```mermaid
-stateDiagram-v2
-    [*] --> pending: Order Dibuat
-    pending --> confirmed: Konfirmasi Kasir / Payment Sukses
-    confirmed --> in_preparation: Diterima Barista/Dapur (KDS)
-    in_preparation --> ready: Pesanan Siap Saji
-    ready --> completed: Pesanan Diserahkan ke Pelanggan
-    pending --> cancelled: Dibatalkan (Timeout/Batal)
-    confirmed --> cancelled: Dibatalkan Kasir (Void dengan Audit Log)
-```
-
-### 5.2 Payment State Machine (`payment_status`)
-```mermaid
-stateDiagram-v2
-    [*] --> unpaid: Inisiasi Order
-    unpaid --> pending: QRIS Dibuat / VA Muncul
-    pending --> paid: Webhook Settlement / Kasir Cash
-    pending --> expired: QRIS Expired (15 Menit)
-    pending --> failed: Transaksi Ditolak Gateway
-    paid --> refunded: Pengembalian Dana (Audit Log)
-```
-
-### 5.3 Valid Transitions Matrix
-| Current State | Valid Next States | Trigger Event |
-| :--- | :--- | :--- |
-| `unpaid` | `pending`, `paid`, `cancelled` | Generate Dynamic QRIS, Direct Cash Pay, Cancel Order |
-| `pending` | `paid`, `expired`, `failed` | Midtrans Webhook (`settlement`, `expire`, `deny`) |
-| `paid` | `refunded` | Manager Refund Action with Reason |
-| `confirmed` | `in_preparation`, `cancelled` | KDS Accept, Cashier Void |
+1. **`modifier_groups`**: Mendefinisikan grup kustomisasi per store (`selection_type IN ('single', 'multiple')`, `is_required`, `min_select`, `max_select`, `display_order`).
+2. **`modifier_options`**: Pilihan di dalam grup dengan `price_delta BIGINT`, `track_stock`, `stock_quantity`, `max_quantity`, dan `display_order`.
+3. **`product_modifier_groups`**: Menghubungkan produk ke `modifier_groups` beserta `override_required`.
+4. **`option_modifier_groups`**: Menghubungkan `parent_option_id` ke `child_group_id` untuk mendukung **1-level nested sub-addon** (contoh: memilih opsi *Oat Milk* membuka sub-grup *Takaran Foam*).
+5. **`order_item_options`**: Menyimpan snapshot relasional yang tidak dapat berubah (`snapshot_group_name`, `snapshot_option_name`, `snapshot_price_delta`, `quantity`, `parent_option_id`, dan `parent_order_item_option_id`) saat pesanan dibuat.
 
 ---
 
-## 6. Atomic Daily Queue Counter
+## 6. Split Bill, Payment Attempts & KDS State Machine
 
-### 6.1 Permasalahan Race Condition
-Penggunaan `SELECT COUNT(*) + 1` atau `MAX(queue_number) + 1` rentan terhadap collision jika terjadi pemesanan simultan saat jam sibuk (*rush hour*).
+### 6.1 Order, Split Bill & Payment Attempt Hierarchy
+- **`orders`**: Memiliki `billing_mode` (`pay_first`, `open_tab`, `split_bill`), `idempotency_key`, `total_amount`, `paid_amount`, `refunded_amount`, `status` (`pending_payment`, `queued`, `preparing`, `ready`, `served`, `completed`, `cancelled`), dan `payment_status` (`OrderPaymentStatus`).
+- **`payment_splits`**: Membagi tagihan `orders` ke dalam 1 bagian (`full`) atau beberapa bagian (`equal`, `by_item`, `custom_amount`) dengan invarian $\sum \text{split.total\_amount} = \text{orders.total\_amount}$ yang diverifikasi oleh `domain.ValidateSplitAllocations`.
+- **`payments`**: Mencatat setiap percobaan pembayaran (`attempt_no`, `idempotency_key`) untuk suatu split/order dengan `provider_order_id` berformat `{order_number}-S{split_number}-A{attempt_no}` dan indeks unik `uq_payments_store_idempotency_key` serta `uq_payments_provider_tx_id`.
 
-### 6.2 Solusi Desain: Tabel Sequence Harian Per Toko
-```sql
-CREATE TABLE store_daily_sequences (
-    store_id UUID NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
-    business_date DATE NOT NULL,
-    last_seq INT NOT NULL DEFAULT 0,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    PRIMARY KEY (store_id, business_date)
-);
-```
+### 6.2 Midtrans Core API Status Mapping & Guard
+| Midtrans `transaction_status` | `fraud_status` | Internal `PaymentAttemptStatus` | Keterangan |
+| :--- | :--- | :--- | :--- |
+| `authorize` | `accept` | `authorized` | Pre-auth kartu kredit |
+| `capture` | `accept` | `paid` | Pembayaran kartu berhasil |
+| `capture` | `challenge` | `pending` | Menunggu review FDS |
+| `capture` | `deny` | `failed` | Ditolak FDS |
+| `settlement` | `accept` / `""` | `paid` | Dana terkonfirmasi lunas |
+| `pending` | `*` | `pending` | Menunggu pembayaran pelanggan |
+| `deny` / `failure` | `*` | `failed` | Ditolak / gagal (tidak pernah jatuh ke `pending`) |
+| `cancel` | `*` | `cancelled` | Dibatalkan |
+| `expire` | `*` | `expired` | Melewati batas waktu bayar |
+| `partial_refund` | `*` | `partially_refunded` | Refund sebagian |
+| `refund` | `*` | `refunded` | Refund penuh |
+| `partial_chargeback` | `*` | `partial_chargeback` | Sengketa / chargeback sebagian |
+| `chargeback` | `*` | `chargeback` | Sengketa / chargeback penuh |
 
-### 6.3 Query Atomic Increment
-```sql
-INSERT INTO store_daily_sequences (store_id, business_date, last_seq, updated_at)
-VALUES ($1, CURRENT_DATE, 1, NOW())
-ON CONFLICT (store_id, business_date)
-DO UPDATE SET 
-    last_seq = store_daily_sequences.last_seq + 1,
-    updated_at = NOW()
-RETURNING last_seq;
-```
-Query di atas mengunci baris (*row lock*) untuk toko dan tanggal tersebut secara mikro-detik, menjamin nomor antrean (`A01`, `A02`, dst.) selalu berurutan tanpa jeda atau nomor ganda.
+Fungsi `domain.CanTransitionPaymentStatus(from, to)` memastikan webhook yang datang terlambat (misal `pending` tiba setelah `paid`) diabaikan secara idempoten dan tidak pernah menurunkan status pembayaran yang sudah lunas.
 
 ---
 
-## 7. Event Reliability: Transactional Outbox Pattern
+## 7. Migration CLI & Verification Lifecycle
 
-### 7.1 Mengapa Outbox Pattern Diperlukan?
-Dual-write problem terjadi jika database order berhasil di-commit, namun server crash atau koneksi WebSocket/KDS terputus sebelum event sempat dikirim.
-
-### 7.2 Outbox Schema
-```sql
-CREATE TABLE outbox_events (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    store_id UUID NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
-    event_type VARCHAR(64) NOT NULL, -- 'order.created', 'order.paid', 'kds.ticket_ready'
-    aggregate_type VARCHAR(32) NOT NULL, -- 'order', 'payment'
-    aggregate_id VARCHAR(64) NOT NULL,
-    payload JSONB NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    processed_at TIMESTAMPTZ NULL,
-    retry_count INT NOT NULL DEFAULT 0,
-    last_error TEXT NULL
-);
-
-CREATE INDEX idx_outbox_unprocessed ON outbox_events (created_at) WHERE processed_at IS NULL;
-```
-
-### 7.3 Delivery Flow
-1. Endpoint order/webhook menulis ke tabel operasional (`orders`, `payments`) dan `outbox_events` dalam **satu transaksi database ACID (`BEGIN ... COMMIT`)**.
-2. Background worker Go membaca event yang belum diproses (`processed_at IS NULL`), meneruskannya ke WebSocket Hub (`internal/realtime`), dan menandai `processed_at = NOW()`.
-
----
-
-## 8. Go Domain Model & Nullable SQL Type Alignment
-
-Tipe data Go harus mencerminkan kontrak nullable database secara presisi:
-
-```go
-package domain
-
-import (
-	"database/sql"
-	"time"
-
-	"github.com/google/uuid"
-)
-
-type Store struct {
-	ID          uuid.UUID    `db:"id" json:"id"`
-	Slug        string       `db:"slug" json:"slug"`
-	Name        string       `db:"name" json:"name"`
-	Address     string       `db:"address" json:"address"`
-	Phone       string       `db:"phone" json:"phone"`
-	IsActive    bool         `db:"is_active" json:"is_active"`
-	TaxBps      int64        `db:"tax_bps" json:"tax_bps"`
-	ServiceBps  int64        `db:"service_bps" json:"service_bps"`
-	QrisMdrBps  int64        `db:"qris_mdr_bps" json:"qris_mdr_bps"`
-	Currency    string       `db:"currency" json:"currency"`
-	CreatedAt   time.Time    `db:"created_at" json:"created_at"`
-	UpdatedAt   time.Time    `db:"updated_at" json:"updated_at"`
-	DeletedAt   *time.Time   `db:"deleted_at" json:"deleted_at,omitempty"`
-}
-
-type Order struct {
-	ID                  uuid.UUID      `db:"id" json:"id"`
-	StoreID             uuid.UUID      `db:"store_id" json:"store_id"`
-	OrderNumber         string         `db:"order_number" json:"order_number"`
-	QueueNumber         string         `db:"queue_number" json:"queue_number"`
-	TableNumber         *string        `db:"table_number" json:"table_number,omitempty"`
-	CustomerName        string         `db:"customer_name" json:"customer_name"`
-	CustomerPhone       *string        `db:"customer_phone" json:"customer_phone,omitempty"`
-	OrderType           string         `db:"order_type" json:"order_type"` // 'dine_in' | 'takeaway'
-	Status              string         `db:"status" json:"status"`
-	PaymentStatus       string         `db:"payment_status" json:"payment_status"`
-	SubtotalAmount      int64          `db:"subtotal_amount" json:"subtotal_amount"`
-	DiscountAmount      int64          `db:"discount_amount" json:"discount_amount"`
-	TaxAmount           int64          `db:"tax_amount" json:"tax_amount"`
-	ServiceChargeAmount int64          `db:"service_charge_amount" json:"service_charge_amount"`
-	TotalAmount         int64          `db:"total_amount" json:"total_amount"`
-	Notes               string         `db:"notes" json:"notes"`
-	CreatedBy           *uuid.UUID     `db:"created_by" json:"created_by,omitempty"`
-	CreatedAt           time.Time      `db:"created_at" json:"created_at"`
-	UpdatedAt           time.Time      `db:"updated_at" json:"updated_at"`
-}
-
-type Product struct {
-	ID            uuid.UUID      `db:"id" json:"id"`
-	StoreID       uuid.UUID      `db:"store_id" json:"store_id"`
-	CategoryID    *uuid.UUID     `db:"category_id" json:"category_id,omitempty"`
-	Name          string         `db:"name" json:"name"`
-	Description   string         `db:"description" json:"description"`
-	BasePrice     int64          `db:"base_price" json:"base_price"`
-	ImageURL      *string        `db:"image_url" json:"image_url,omitempty"`
-	IsAvailable   bool           `db:"is_available" json:"is_available"`
-	TrackStock    bool           `db:"track_stock" json:"track_stock"`
-	StockQuantity int            `db:"stock_quantity" json:"stock_quantity"`
-	CreatedAt     time.Time      `db:"created_at" json:"created_at"`
-	UpdatedAt     time.Time      `db:"updated_at" json:"updated_at"`
-}
-```
-
----
-
-## 9. Rollback & Disaster Recovery Strategy
-
-1. **Down Migration Scripts**: Setiap migrasi skema wajib memiliki script rollback berpasangan di direktori `scripts/rollback/` yang diuji secara otomatis pada CI pipeline.
-2. **Non-Destructive Rollbacks**: Rollback tidak boleh menghapus data historis store. Kolom yang di-deprecate diberi tanda `_deprecated` sebelum penghapusan permanen.
-3. **Automated Verification**: GitHub Actions CI menjalankan siklus:
-   $$\text{Migrate Up} \longrightarrow \text{Verify Constraints} \longrightarrow \text{Rollback Down} \longrightarrow \text{Migrate Up Again} \longrightarrow \text{Seed}$$
-   untuk memverifikasi bahwa perubahan skema bersifat simetris dan dapat dipulihkan kapan saja.
-
+Seluruh migrasi database dikelola oleh `cmd/migrate` (`internal/pkg/database/migrator.go`) yang mencatat versi dan checksum SHA-256 pada tabel `schema_migrations`. Pipeline CI menguji siklus penuh pada PostgreSQL 18:
+1. `sh deploy/postgres/00-init-roles.sh` (Inisialisasi non-superuser `mycaffe_migrator` dan `mycaffe_app`)
+2. `go run ./cmd/migrate -action=up` (Fresh Install sebagai `mycaffe_migrator`)
+3. `psql -f scripts/verify/verify_schema_constraints.sql` (Uji FK `RESTRICT`, Check Constraints, Idempotensi Queue, pencabutan `DELETE`, dan Isolasi RLS `mycaffe_app`)
+4. `go run ./cmd/migrate -action=down` (Rollback Teardown)
+5. `go run ./cmd/migrate -action=up` (Re-apply)
+6. `go run ./cmd/migrate -action=seed` dijalankan 2x berturut-turut (Uji Idempotensi Seed Development)
+7. `go test -v -race -run TestDirectAppRoleLoginAndTenantRLS ./internal/pkg/database/...` (Koneksi TCP langsung sebagai `mycaffe_app`)

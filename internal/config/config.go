@@ -12,13 +12,16 @@ import (
 )
 
 type Config struct {
-	AppEnv         string
-	Port           string
-	FrontendURL    string
-	AllowedOrigins []string
-	DatabaseURL    string
-	JWTSecret      string
-	JWTExpiryHours int
+	AppEnv               string
+	Port                 string
+	FrontendURL          string
+	AllowedOrigins       []string
+	DatabaseURL          string
+	DatabaseMigrationURL string
+	DBAppUser            string
+	DBAppPassword        string
+	JWTSecret            string
+	JWTExpiryHours       int
 
 	// Midtrans Core API
 	MidtransMerchantID   string
@@ -89,6 +92,9 @@ func LoadConfig() (*Config, error) {
 		FrontendURL:          frontendURL,
 		AllowedOrigins:       allowedOrigins,
 		DatabaseURL:          getEnv("DATABASE_URL", ""),
+		DatabaseMigrationURL: getEnv("DATABASE_MIGRATION_URL", getEnv("DATABASE_URL", "")),
+		DBAppUser:            getEnv("DB_APP_USER", "mycaffe_app"),
+		DBAppPassword:        getEnv("DB_APP_PASSWORD", ""),
 		JWTSecret:            getEnv("JWT_SECRET_KEY", ""),
 		JWTExpiryHours:       jwtHours,
 		MidtransMerchantID:   getEnv("MIDTRANS_MERCHANT_ID", ""),
@@ -128,30 +134,33 @@ func ValidateConfig(cfg *Config) error {
 		return fmt.Errorf("[SECURITY FAIL-CLOSED] invalid APP_ENV %q: allowed values are development, test, staging, production", cfg.AppEnv)
 	}
 
-	// Generic validation: reject obviously insecure patterns
-	secretLower := strings.ToLower(cfg.JWTSecret)
-	if strings.Contains(secretLower, "change_me") ||
-		strings.Contains(secretLower, "default_secret") ||
-		strings.Contains(secretLower, "placeholder") {
-		if cfg.AppEnv == "production" {
+	// Generic validation: reject obviously insecure patterns in production
+	if cfg.AppEnv == "production" {
+		if containsPlaceholderPattern(cfg.JWTSecret) {
 			return errors.New("[SECURITY FAIL-CLOSED] production requires a genuine, unguessable JWT_SECRET_KEY")
 		}
-	}
-
-	if cfg.AppEnv == "production" {
 		if len(cfg.JWTSecret) < 32 {
 			return errors.New("[SECURITY FAIL-CLOSED] production requires a strong JWT_SECRET_KEY of at least 32 characters")
 		}
 
-		if cfg.DatabaseURL == "" {
-			return errors.New("[SECURITY FAIL-CLOSED] production requires a valid DATABASE_URL")
+		if cfg.DatabaseURL == "" || containsPlaceholderPattern(cfg.DatabaseURL) {
+			return errors.New("[SECURITY FAIL-CLOSED] production requires a valid, non-placeholder DATABASE_URL")
+		}
+		if cfg.DatabaseMigrationURL != "" && containsPlaceholderPattern(cfg.DatabaseMigrationURL) {
+			return errors.New("[SECURITY FAIL-CLOSED] production DATABASE_MIGRATION_URL cannot contain placeholder credentials")
 		}
 
 		if !cfg.MidtransIsProduction {
 			return errors.New("[SECURITY FAIL-CLOSED] production requires MIDTRANS_IS_PRODUCTION=true")
 		}
-		if cfg.MidtransServerKey == "" || strings.HasPrefix(cfg.MidtransServerKey, "SB-") {
-			return errors.New("[SECURITY FAIL-CLOSED] production cannot run with empty or sandbox Midtrans server key")
+		if cfg.MidtransServerKey == "" || strings.HasPrefix(cfg.MidtransServerKey, "SB-") || containsPlaceholderPattern(cfg.MidtransServerKey) {
+			return errors.New("[SECURITY FAIL-CLOSED] production cannot run with empty, placeholder, or sandbox Midtrans server key")
+		}
+		if strings.HasPrefix(cfg.MidtransClientKey, "SB-") || (cfg.MidtransClientKey != "" && containsPlaceholderPattern(cfg.MidtransClientKey)) {
+			return errors.New("[SECURITY FAIL-CLOSED] production cannot run with placeholder or sandbox Midtrans client key")
+		}
+		if cfg.MidtransMerchantID != "" && containsPlaceholderPattern(cfg.MidtransMerchantID) {
+			return errors.New("[SECURITY FAIL-CLOSED] production cannot run with placeholder MIDTRANS_MERCHANT_ID")
 		}
 
 		if len(cfg.AllowedOrigins) == 0 {
@@ -174,6 +183,25 @@ func ValidateConfig(cfg *Config) error {
 	}
 
 	return nil
+}
+
+func containsPlaceholderPattern(val string) bool {
+	lower := strings.ToLower(strings.TrimSpace(val))
+	patterns := []string{
+		"change_me",
+		"default_secret",
+		"placeholder",
+		"your-",
+		"local-dev",
+		"dev_secret",
+		"example_key",
+	}
+	for _, p := range patterns {
+		if strings.Contains(lower, p) {
+			return true
+		}
+	}
+	return false
 }
 
 // IsOriginAllowed checks if an incoming origin is in the allowed whitelist

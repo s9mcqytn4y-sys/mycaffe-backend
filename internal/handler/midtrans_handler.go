@@ -40,9 +40,9 @@ type MidtransNotificationPayload struct {
 	Currency          string `json:"currency"`
 }
 
-// HandleWebhook processes incoming Midtrans payment notifications
+// HandleWebhook processes incoming Midtrans payment notifications.
 // @Summary Midtrans Webhook Callback
-// @Description Secure webhook endpoint for Midtrans Core API. Fails-closed with 503 until durable DB persistence repository is active.
+// @Description Secure webhook endpoint for Midtrans Core API. Verifies SHA-512 signature, parses integer IDR gross_amount, validates status mapping, and fails-closed with 503 until durable DB persistence repository is active.
 // @Tags Payments
 // @Accept json
 // @Produce json
@@ -73,14 +73,15 @@ func (h *MidtransHandler) HandleWebhook(c *gin.Context) {
 		return
 	}
 
-	// 3. Validate Order ID format (non-empty, max 100 chars, alphanumeric/hyphen/underscore)
+	// 3. Validate Order ID format (non-empty, max 100 chars)
 	trimmedOrderID := strings.TrimSpace(notif.OrderID)
 	if len(trimmedOrderID) < 3 || len(trimmedOrderID) > 100 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid order_id length: must be between 3 and 100 characters"})
 		return
 	}
 
-	// 4. Verify Midtrans signature: SHA512(order_id + status_code + gross_amount + server_key)
+	// 4. Verify Midtrans signature using raw gross_amount string:
+	// SHA512(order_id + status_code + gross_amount + server_key)
 	isValid := h.midtransClient.VerifySignature(
 		notif.OrderID,
 		notif.StatusCode,
@@ -94,11 +95,29 @@ func (h *MidtransHandler) HandleWebhook(c *gin.Context) {
 		return
 	}
 
-	// 5. P0 Fail-Closed / Durable Storage Enforcement:
+	// 5. Validate currency (if provided, must be IDR) and parse integer Rupiah gross_amount without float64
+	if notif.Currency != "" && !strings.EqualFold(strings.TrimSpace(notif.Currency), "IDR") {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported currency: only IDR is accepted"})
+		return
+	}
+
+	grossAmountIDR, err := midtrans.ParseGrossAmountIDR(notif.GrossAmount)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid gross_amount format"})
+		return
+	}
+
+	mappedStatus, err := midtrans.MapMidtransStatus(notif.TransactionStatus, notif.FraudStatus)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported transaction_status or fraud_status"})
+		return
+	}
+
+	// 6. P0 Fail-Closed / Durable Storage Enforcement:
 	// The database repository is not yet connected to execute ACID transaction updates on payments & orders.
 	// Returning HTTP 200 would falsely acknowledge receipt and lose state permanently.
 	// We return HTTP 503 Service Unavailable with a Retry-After header so Midtrans gateway safely retries delivery.
-	log.Printf("[WEBHOOK AUDIT] Valid signature for order %s, status: %s. Durable DB storage uncommitted.", trimmedOrderID, notif.TransactionStatus)
+	log.Printf("[WEBHOOK AUDIT] Valid signature for order %s, amount: %d IDR, mapped_status: %s. Durable DB storage uncommitted.", trimmedOrderID, grossAmountIDR, mappedStatus)
 
 	c.Header("Retry-After", "60")
 	c.JSON(http.StatusServiceUnavailable, gin.H{

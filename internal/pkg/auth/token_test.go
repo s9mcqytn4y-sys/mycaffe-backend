@@ -157,7 +157,7 @@ func TestValidateToken(t *testing.T) {
 	tknWrongAlg, _ := jwt.NewWithClaims(jwt.SigningMethodHS512, auth.CustomClaims{
 		StoreID: storeID,
 		UserID:  userID,
-		Role:    "manager",
+		Role:    "owner",
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(1 * time.Hour)),
 			Issuer:    auth.ExpectedIssuer,

@@ -1,46 +1,39 @@
-# Architecture decisions to settle before implementation
+# Architecture Decisions & Resolution Log
 
-This document records decision gates, not assumed facts. Do not silently choose an option when it changes operational risk or recurring cost.
+This document records architectural decision gates and their approved resolutions.
 
-## 1. Production database vs Realtime
+## 1. Production Database vs Realtime
+- **Decision**: **Option B — Native PostgreSQL 18 with In-Memory Go WebSocket Hub** (Resolved in [ADR-002](adr-002-single-vps-docker-topology.md)).
+- **Rationale**: A single Hostinger KVM 2 VPS (2 vCPU, 8 GB RAM, 100 GB SSD) runs PostgreSQL 18 and the Go backend inside Docker Compose. Real-time updates for KDS, POS, and TV queue display are delivered via the authenticated Go WebSocket Hub (`internal/realtime`), scoped strictly by tenant `store_id`. This eliminates external PaaS dependencies and recurring cloud subscription costs.
 
-The current proposal says Development/Staging use Supabase and Production uses native PostgreSQL on a Hostinger VPS. The PRDs also rely on Supabase Realtime for the KDS, customer order tracker, and TV queue. Native PostgreSQL alone does not provide Supabase Realtime.
+## 2. Static QRIS vs Dynamic QRIS
+- **Decision**: **Dynamic Gateway QRIS via Midtrans Core API** is the primary automated payment flow.
+- **Rules**: Static store QRIS is treated strictly as an offline/manual cashier-reconciliation method; automated order status transitions are prohibited for static QRIS unless a verified bank mutation callback is active. Dynamic QRIS initiates a dedicated transaction linked to `order_number` and transitions state upon verified gateway notification.
 
-Choose one before implementing cross-device realtime:
+## 3. Payment State vs Preparation State
+- **Decision**: Modeled as two completely independent state machines in the database schema:
+  - `orders.status`: `pending_payment`, `queued`, `preparing`, `ready`, `completed`, `cancelled`.
+  - `payments.status`: `pending`, `settlement`, `capture`, `deny`, `cancel`, `expire`, `refund`.
+- **Integrity**: Financial order items and prices are snapshotted at creation time. Historical line items remain intact even if catalog items are updated or deleted.
 
-- **Option A — Supabase in all environments for the MVP (recommended for a small team):** one database product and Realtime model across dev/staging/production; reduce VPS operations burden. Review ongoing usage, data location, and provider dependency.
-- **Option B — Native PostgreSQL in production:** implement and operate a Go WebSocket/SSE event layer or another explicitly chosen realtime mechanism. Add TLS, authorization, reconnect/replay behavior, event delivery guarantees, backups, monitoring, restore drills, upgrades, and incident response.
+## 4. Multi-Tenant Foundation
+- **Decision**: Tenant isolation is enforced via `store_id` UUID on every relational table.
+- **Display IDs**:
+  - Human-readable order numbers: `ORD-YYYYMMDD-XXXX` (configurable via `stores.order_prefix`).
+  - Human-readable queue numbers: `A01`, `B02` (configurable via `stores.queue_prefix`).
+  - Atomic sequence generation: Powered by `store_daily_sequences` with row-level locks and `ON CONFLICT DO UPDATE`.
 
-Do not assume that moving a PostgreSQL database to a VPS preserves Supabase Realtime behavior. Record the final decision in an ADR.
+## 5. Taxes, Service Charges, MDR, and Pricing
+- **Decision**: Stored as Basis Points (`BPS`: 1% = 100 BPS) and Integer Rupiah (`BIGINT`).
+- **Policy**: No universal tax or service charge is hardcoded. Store-specific PB1 and service charge rates are read from `stores` settings and snapshotted onto `orders` at checkout time.
 
-## 2. Static QRIS vs dynamic QRIS
+## 6. Staff Authentication & Offline Claims
+- **Decision**: 6-digit PIN with Argon2id / bcrypt hashing, lockout counters, and short-lived stateless JWT tokens containing `store_id`, `user_id`, and `role`.
+- **Policy**: Offline caching does not permit confirming online dynamic QRIS payments. Payments remain pending until online gateway verification occurs.
 
-These are different product modes:
-- Static merchant QRIS: simple to display, but automatic order-to-payment matching must not be promised unless a verified provider/reconciliation integration supports it.
-- Dynamic gateway QRIS: create an order-linked transaction and confirm state through verified provider notifications.
+## 7. Deployment & Backups
+- **Decision**: Docker Compose on Ubuntu 24.04 LTS (Hostinger KVM 2).
+- **Backups**: Daily encrypted `pg_dump` automated via `scripts/backup/backup_to_r2.sh` and uploaded to a Cloudflare R2 bucket with zero egress fees. Retention is set to 30 days.
 
-Store configuration may allow either mode, but the backend must model their verification and reconciliation differences. Test whether target banking/e-wallet apps support importing a saved QR image; provide a second-device or cashier-assisted fallback.
-
-## 3. Payment state vs preparation state
-
-Use separate state machines. Suggested payment states: `pending`, `paid`, `failed`, `expired`, `refunded` (final set must follow gateway behavior). Suggested order states: `placed`, `queued`, `preparing`, `ready`, `completed`, `cancelled`. Define legal transitions and how late/duplicate notifications are handled before coding.
-
-## 4. Multi-tenant foundation
-
-Decide the canonical store/tenant identity and authorization model before creating business tables. All store-owned resources—menu, modifier groups, orders, tables, staff, settings, expenses, audit logs, reports—must be scoped consistently. Human-readable order and queue numbers are display IDs, not database primary keys.
-
-## 5. Taxes, service charges, MDR, HPP, and reporting
-
-Do not hardcode a universal PB1/tax percentage, QRIS MDR, service charge, settlement time, or fee policy. Configure store/provider values, preserve the applied values on each order, and distinguish gross sales, net sales, gross profit estimate, and net profit. A credible net-profit report needs complete expense and cost data; otherwise label it an estimate.
-
-## 6. Staff PIN and offline claims
-
-A 4-digit PIN appears in one PRD and a 6-digit PIN in another. Resolve the policy; default proposal is six digits plus rate limiting, lockout/backoff, salted strong hashing, role checks, and short-lived sessions. A local JWT does not make remote database sync or online payment work offline. Define the offline scope separately and never show a payment as paid while verification is unavailable.
-
-## 7. Deployment and backups
-
-Keep backend and frontend repositories/deployments separate if that remains the selected strategy. Pin third-party GitHub Actions to reviewed versions/SHAs where practical. Do not rely on a GitHub Actions cron as the sole production database backup system; define retention, encryption, restore testing, and monitoring.
-
-## 8. Current workspace boundary
-
-The current workspace is `myCaffe-backend`. Do not create frontend files here unless the owner explicitly asks for a monorepo. Frontend-specific rules are provided as a template under `templates/`.
+## 8. Workspace Boundaries
+- **Decision**: `myCaffe-backend` contains the Go API, PostgreSQL migrations, and Docker infrastructure manifests. The Next.js frontend is maintained in a separate repository and integrated via Docker Compose in production.

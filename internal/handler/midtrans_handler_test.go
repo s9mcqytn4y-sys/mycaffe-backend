@@ -100,7 +100,27 @@ func TestMidtransWebhookEdgeCases(t *testing.T) {
 		t.Errorf("expected 401 Unauthorized for invalid signature, got %d", wInvalidSig.Code)
 	}
 
-	// 5. Valid signature but no durable database persistence yet must return 503 with Retry-After header
+	// 5. Fractional cents in gross_amount must fail with 400 Bad Request even with valid signature
+	fractionalGross := "25000.50"
+	sigFractional := computeSignature(validOrderID, "200", fractionalGross, serverKey)
+	payloadFractional := map[string]string{
+		"order_id":           validOrderID,
+		"status_code":        "200",
+		"gross_amount":       fractionalGross,
+		"signature_key":      sigFractional,
+		"transaction_status": "settlement",
+		"currency":           "IDR",
+	}
+	bodyFractional, _ := json.Marshal(payloadFractional)
+	reqFractional, _ := http.NewRequest(http.MethodPost, "/api/v1/payments/midtrans/webhook", bytes.NewBuffer(bodyFractional))
+	reqFractional.Header.Set("Content-Type", "application/json")
+	wFractional := httptest.NewRecorder()
+	r.ServeHTTP(wFractional, reqFractional)
+	if wFractional.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 Bad Request for fractional IDR gross_amount, got %d", wFractional.Code)
+	}
+
+	// 6. Valid signature but no durable database persistence yet must return 503 with Retry-After header
 	statusCode := "200"
 	grossAmount := "25000.00"
 	validSig := computeSignature(validOrderID, statusCode, grossAmount, serverKey)
@@ -111,6 +131,7 @@ func TestMidtransWebhookEdgeCases(t *testing.T) {
 		"gross_amount":       grossAmount,
 		"signature_key":      validSig,
 		"transaction_status": "settlement",
+		"currency":           "IDR",
 	}
 	bodyValid, _ := json.Marshal(payloadValid)
 	reqValid, _ := http.NewRequest(http.MethodPost, "/api/v1/payments/midtrans/webhook", bytes.NewBuffer(bodyValid))
@@ -123,5 +144,38 @@ func TestMidtransWebhookEdgeCases(t *testing.T) {
 	}
 	if wValid.Header().Get("Retry-After") != "60" {
 		t.Errorf("expected Retry-After header to be '60', got %q", wValid.Header().Get("Retry-After"))
+	}
+}
+
+func TestHealthHandler_LivenessAndReadiness(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+
+	devHealth := handler.NewHealthHandler("MyCaffe POS Backend", "development")
+	prodHealthNoDB := handler.NewHealthHandler("MyCaffe POS Backend", "production")
+
+	r.GET("/dev/health/live", devHealth.Liveness)
+	r.GET("/dev/health/ready", devHealth.Check)
+	r.GET("/prod/health/ready", prodHealthNoDB.Check)
+
+	reqLive, _ := http.NewRequest(http.MethodGet, "/dev/health/live", nil)
+	wLive := httptest.NewRecorder()
+	r.ServeHTTP(wLive, reqLive)
+	if wLive.Code != http.StatusOK {
+		t.Errorf("expected 200 OK for /dev/health/live, got %d", wLive.Code)
+	}
+
+	reqDevReady, _ := http.NewRequest(http.MethodGet, "/dev/health/ready", nil)
+	wDevReady := httptest.NewRecorder()
+	r.ServeHTTP(wDevReady, reqDevReady)
+	if wDevReady.Code != http.StatusOK {
+		t.Errorf("expected 200 OK for /dev/health/ready without DB in dev, got %d", wDevReady.Code)
+	}
+
+	reqProdReady, _ := http.NewRequest(http.MethodGet, "/prod/health/ready", nil)
+	wProdReady := httptest.NewRecorder()
+	r.ServeHTTP(wProdReady, reqProdReady)
+	if wProdReady.Code != http.StatusServiceUnavailable {
+		t.Errorf("expected 503 Service Unavailable for /prod/health/ready when DB is nil in production, got %d", wProdReady.Code)
 	}
 }

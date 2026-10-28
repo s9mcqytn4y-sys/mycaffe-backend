@@ -3,14 +3,14 @@
 Backend RESTful API dan Realtime Hub untuk platform white-label multi-tenant QR Table Ordering, Point of Sale (POS), Kitchen Display System (KDS), dan TV Queue Display untuk kafe dan restoran.
 
 ## 🚀 Tech Stack
-- **Language**: Go 1.27.x
+- **Language**: Go 1.27.3
 - **Web Framework**: Gin Gonic (`v1.12.0`)
 - **Database Driver**: `jackc/pgx/v5` & `jmoiron/sqlx`
-- **Database Engine**: PostgreSQL 18-alpine
-- **Infrastructure**: Docker Compose & Nginx Reverse Proxy (Hostinger KVM 2 / Ubuntu 24.04 LTS)
-- **Payment Gateway**: Midtrans Core API (Direct Dynamic QRIS & Virtual Account)
+- **Database Engine**: PostgreSQL 18-alpine (Native Row-Level Security & Dual Role Isolation)
+- **Infrastructure**: Docker Compose (`docker-compose.yml` & `docker-compose.prod.yml`) & Nginx Reverse Proxy (Hostinger KVM 2 / Ubuntu 24.04 LTS)
+- **Payment Gateway**: Midtrans Core API Custom UI (`qris`, `bank_transfer`, `gopay`, `shopeepay`, `card`, `cstore`) + Cashier Offline (`cash`, `static_qris`, `edc`)
 - **Realtime Hub**: Gorilla WebSocket (`internal/realtime`)
-- **Offsite Backup**: Cloudflare R2 (Encrypted `pg_dump` with zero egress fee)
+- **Cloudflare R2 Storage**: Dual-Bucket (`mycaffe-media` for CDN catalog images & `mycaffe-backups` for GPG AES256+SHA512 encrypted `pg_dump`)
 - **Monitoring & Error Tracking**: Sentry Go SDK
 
 ---
@@ -43,7 +43,7 @@ Backend RESTful API dan Realtime Hub untuk platform white-label multi-tenant QR 
 ## 🛠️ Local Development Setup
 
 ### 1. Prasyarat
-- Go 1.24+ terpasang di PATH
+- Go 1.27.3 terpasang di PATH
 - Docker & Docker Compose
 
 ### 2. Konfigurasi Environment
@@ -51,11 +51,13 @@ Salin template konfigurasi:
 ```powershell
 Copy-Item .env.example .env
 ```
-Sesuaikan nilai `DATABASE_URL` dan `MIDTRANS_SERVER_KEY` untuk environment sandbox lokal.
+Sesuaikan nilai `DATABASE_URL`, `DATABASE_MIGRATION_URL`, dan `MIDTRANS_SERVER_KEY` untuk environment sandbox lokal.
 
-### 3. Menjalankan Database Lokal via Docker
+### 3. Menjalankan Database Lokal & Migrasi via Docker
 ```powershell
 docker compose -f deploy/docker/docker-compose.yml up -d postgres
+go run ./cmd/migrate -action=up
+go run ./cmd/migrate -action=seed
 ```
 
 ### 4. Menjalankan Tes & Linting

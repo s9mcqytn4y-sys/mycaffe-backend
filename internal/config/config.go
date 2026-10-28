@@ -12,13 +12,14 @@ import (
 )
 
 type Config struct {
-	AppEnv         string
-	Port           string
-	FrontendURL    string
-	AllowedOrigins []string
-	DatabaseURL    string
-	JWTSecret      string
-	JWTExpiryHours int
+	AppEnv               string
+	Port                 string
+	FrontendURL          string
+	AllowedOrigins       []string
+	DatabaseURL          string
+	DatabaseMigrationURL string
+	JWTSecret            string
+	JWTExpiryHours       int
 
 	// Midtrans Core API
 	MidtransMerchantID   string
@@ -89,6 +90,7 @@ func LoadConfig() (*Config, error) {
 		FrontendURL:          frontendURL,
 		AllowedOrigins:       allowedOrigins,
 		DatabaseURL:          getEnv("DATABASE_URL", ""),
+		DatabaseMigrationURL: getEnv("DATABASE_MIGRATION_URL", getEnv("DATABASE_URL", "")),
 		JWTSecret:            getEnv("JWT_SECRET_KEY", ""),
 		JWTExpiryHours:       jwtHours,
 		MidtransMerchantID:   getEnv("MIDTRANS_MERCHANT_ID", ""),

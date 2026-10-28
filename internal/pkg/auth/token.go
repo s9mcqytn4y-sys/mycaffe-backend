@@ -11,8 +11,8 @@ import (
 )
 
 const (
-	ExpectedIssuer   = "kafe-senja-backend"
-	ExpectedAudience = "kafe-senja-pos"
+	ExpectedIssuer   = "mycaffe-backend"
+	ExpectedAudience = "mycaffe-pos"
 )
 
 var ValidRoles = []string{"owner", "manager", "cashier", "barista", "kitchen"}

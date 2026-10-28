@@ -11,8 +11,10 @@ import (
 
 	"github.com/getsentry/sentry-go"
 	"github.com/gin-gonic/gin"
+	"github.com/jmoiron/sqlx"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/config"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/handler"
+	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/database"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/midtrans"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/realtime"
 )
@@ -39,6 +41,24 @@ func main() {
 			defer sentry.Flush(2 * time.Second)
 			log.Println("[SENTRY] Initialized successfully")
 		}
+	}
+
+	// Initialize PostgreSQL 18 Connection Pool
+	var db *sqlx.DB
+	if cfg.DatabaseURL != "" {
+		dbConn, err := database.NewPostgresDB(cfg)
+		if err != nil {
+			log.Fatalf("[FATAL DATABASE] %v", err)
+		}
+		db = dbConn
+		defer func() {
+			if err := db.Close(); err != nil {
+				log.Printf("[DATABASE] Error closing pool: %v", err)
+			}
+		}()
+		log.Println("[DATABASE] PostgreSQL pool initialized and verified")
+	} else if cfg.AppEnv == "production" || cfg.AppEnv == "staging" {
+		log.Fatalf("[FATAL DATABASE] DATABASE_URL is required in %s environment", cfg.AppEnv)
 	}
 
 	// Set Gin mode
@@ -81,7 +101,7 @@ func main() {
 	midtransClient := midtrans.NewClient(cfg)
 
 	// Initialize Handlers
-	healthHandler := handler.NewHealthHandler("MyCaffe POS Backend", cfg.AppEnv)
+	healthHandler := handler.NewHealthHandler("MyCaffe POS Backend", cfg.AppEnv, db)
 	midtransHandler := handler.NewMidtransHandler(midtransClient, hub)
 	orderHandler := handler.NewOrderHandler(cfg, midtransClient, hub)
 
@@ -93,8 +113,10 @@ func main() {
 		v1.POST("/payments/midtrans/webhook", midtransHandler.HandleWebhook)
 	}
 
-	// Root health check endpoint for Docker / LB probes
+	// Health check endpoints for Docker / LB probes
 	router.GET("/health", healthHandler.Check)
+	router.GET("/health/live", healthHandler.Liveness)
+	router.GET("/health/ready", healthHandler.Check)
 
 	// WebSocket endpoint for KDS & TV Queue realtime updates (guarded by token/tenant validation)
 	router.GET("/ws", orderHandler.HandleWebSocket)

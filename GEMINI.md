@@ -8,7 +8,7 @@ This repository (`mycaffe-backend`) is the Go backend for MyCaffe — a configur
 2. **Payment Integrity**: Prices, modifiers, discounts, taxes, and service charges are calculated exclusively on the server from the official catalog. Money amounts must be whole integer Indonesian Rupiah (`int64` / PostgreSQL `BIGINT`) without floating-point math or fractional cents.
 3. **Fail-Closed Operations**: In production (`APP_ENV=production`), all endpoints must fail-closed if required configuration is missing or insecure.
 4. **Single-VPS Modular Monolith**: Production deployment runs on a single Hostinger KVM 2 VPS (Ubuntu 24.04 LTS) via Docker Compose (`postgres:18-alpine`, Go API backend, Next.js frontend, Nginx reverse proxy). Supabase runtime dependencies are fully superseded (ADR-002).
-5. **Offsite Encrypted Backup**: Cloudflare R2 is utilized strictly for offsite encrypted `pg_dump` backups with zero egress fees.
+5. **Cloudflare R2 Dual-Bucket Storage**: Cloudflare R2 is used with two isolated buckets and separate credentials: `mycaffe-media` (public/CDN product & store media) and `mycaffe-backups` (private GPG AES256+SHA512 encrypted `pg_dump` backups with zero egress fees).
 
 ## Bounded Autonomy for Agents
 - **Autonomous Decisions (No confirmation required)**:

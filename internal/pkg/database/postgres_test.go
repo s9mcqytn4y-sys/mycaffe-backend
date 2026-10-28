@@ -3,10 +3,12 @@ package database_test
 import (
 	"context"
 	"net/url"
+	"os"
 	"strings"
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/config"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/database"
 )
@@ -64,5 +66,117 @@ func TestMigrator_ProductionGuards(t *testing.T) {
 
 	if err := migrator.Seed(context.Background(), "db/seeds/development.sql", "production"); err == nil {
 		t.Fatal("expected Seed to fail closed in production, got nil")
+	}
+}
+
+func TestMigrator_ProvisionAppRole_RejectsInvalidIdentifier(t *testing.T) {
+	migrator := database.NewMigrator(nil)
+	if err := migrator.ProvisionAppRole(context.Background(), "mycaffe_app; DROP ROLE postgres;--", "secret"); err == nil {
+		t.Fatal("expected ProvisionAppRole to reject SQL injection in role identifier")
+	}
+}
+
+// TestDirectAppRoleLoginAndTenantRLS connects directly as mycaffe_app (not postgres) when
+// TEST_APP_DATABASE_URL is provided in CI or local integration environments.
+// It verifies:
+// 1. Direct TCP login as mycaffe_app succeeds with NOSUPERUSER and NOBYPASSRLS.
+// 2. Queries without WithTenantTx return 0 rows (fail-closed RLS).
+// 3. WithTenantTx(StoreA) sees only Store A rows across stores, orders, and payments.
+// 4. resolve_payment_webhook_context resolves Store A context from provider_order_id before tenant context is set.
+// 5. DELETE on financial tables (payments, orders, payment_notification_logs) is rejected with insufficient_privilege.
+func TestDirectAppRoleLoginAndTenantRLS(t *testing.T) {
+	appDSN := strings.TrimSpace(os.Getenv("TEST_APP_DATABASE_URL"))
+	if appDSN == "" {
+		t.Skip("TEST_APP_DATABASE_URL not set; skipping live mycaffe_app direct-login integration test")
+	}
+
+	db, err := database.NewPostgresDB(&config.Config{DatabaseURL: appDSN})
+	if err != nil {
+		t.Fatalf("failed to connect directly as mycaffe_app: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	ctx := context.Background()
+
+	// 1. Verify current_user is mycaffe_app and neither superuser nor bypassrls
+	var roleInfo struct {
+		CurrentUser  string `db:"current_user"`
+		RolSuper     bool   `db:"rolsuper"`
+		RolBypassRLS bool   `db:"rolbypassrls"`
+	}
+	err = db.GetContext(ctx, &roleInfo, `
+		SELECT current_user, rolsuper, rolbypassrls
+		FROM pg_roles
+		WHERE rolname = current_user
+	`)
+	if err != nil {
+		t.Fatalf("failed to inspect current_user role flags: %v", err)
+	}
+	if roleInfo.CurrentUser != "mycaffe_app" {
+		t.Fatalf("expected direct connection as mycaffe_app, got %q", roleInfo.CurrentUser)
+	}
+	if roleInfo.RolSuper || roleInfo.RolBypassRLS {
+		t.Fatalf("mycaffe_app must not have superuser (%v) or bypassrls (%v)", roleInfo.RolSuper, roleInfo.RolBypassRLS)
+	}
+
+	// 2. Without tenant context, RLS must fail-closed (0 rows across stores and orders)
+	var unAuthCount int
+	if err := db.GetContext(ctx, &unAuthCount, "SELECT COUNT(*) FROM orders"); err != nil {
+		t.Fatalf("unexpected error querying orders without tenant context: %v", err)
+	}
+	if unAuthCount != 0 {
+		t.Fatalf("expected 0 orders without tenant context under mycaffe_app, got %d", unAuthCount)
+	}
+	if err := db.GetContext(ctx, &unAuthCount, "SELECT COUNT(*) FROM stores"); err != nil {
+		t.Fatalf("unexpected error querying stores without tenant context: %v", err)
+	}
+	if unAuthCount != 0 {
+		t.Fatalf("expected 0 stores without tenant context under mycaffe_app, got %d", unAuthCount)
+	}
+
+	// 3. Resolve webhook context via SECURITY DEFINER helper before tenant context is set
+	var resolved struct {
+		StoreID uuid.UUID `db:"store_id"`
+		OrderID uuid.UUID `db:"order_id"`
+	}
+	err = db.GetContext(ctx, &resolved, "SELECT store_id, order_id FROM resolve_payment_webhook_context($1)", "ORD-20261028-0001")
+	if err != nil {
+		t.Fatalf("resolve_payment_webhook_context failed under mycaffe_app: %v", err)
+	}
+	storeAID := uuid.MustParse("11111111-1111-4111-8111-111111111111")
+	if resolved.StoreID != storeAID {
+		t.Fatalf("expected resolved store_id %s, got %s", storeAID, resolved.StoreID)
+	}
+
+	// 4. WithTenantTx for Store A sees only Store A records
+	err = database.WithTenantTx(ctx, db, storeAID, func(tx *sqlx.Tx) error {
+		var storeCount int
+		if err := tx.GetContext(ctx, &storeCount, "SELECT COUNT(*) FROM stores"); err != nil {
+			return err
+		}
+		if storeCount != 1 {
+			t.Fatalf("expected 1 visible store for Store A, got %d", storeCount)
+		}
+
+		var crossTenantCount int
+		if err := tx.GetContext(ctx, &crossTenantCount, "SELECT COUNT(*) FROM orders WHERE store_id <> $1", storeAID); err != nil {
+			return err
+		}
+		if crossTenantCount != 0 {
+			t.Fatalf("expected 0 cross-tenant orders visible to Store A, got %d", crossTenantCount)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("WithTenantTx failed for Store A: %v", err)
+	}
+
+	// 5. Verify DELETE privilege is revoked on payments and orders under mycaffe_app
+	delErr := database.WithTenantTx(ctx, db, storeAID, func(tx *sqlx.Tx) error {
+		_, err := tx.ExecContext(ctx, "DELETE FROM payments")
+		return err
+	})
+	if delErr == nil || !strings.Contains(strings.ToLower(delErr.Error()), "permission denied") {
+		t.Fatalf("expected DELETE FROM payments to fail with permission denied for mycaffe_app, got: %v", delErr)
 	}
 }

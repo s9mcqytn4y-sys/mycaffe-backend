@@ -66,7 +66,7 @@ jobs:
         run: go build -v ./...
 
   docker-build:
-    name: Docker, Compose, Nginx TLS & Backup Script Verification
+    name: Docker, Compose, Nginx TLS Bootstrap & Backup/Restore Script Verification
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
@@ -82,7 +82,7 @@ jobs:
           docker compose -f deploy/docker/docker-compose.yml config >/dev/null
           docker compose --env-file .env.example -f deploy/docker/docker-compose.prod.yml config >/dev/null
 
-      - name: Validate Nginx Configurations (Dev HTTP & Production HTTPS TLS)
+      - name: Validate Nginx Configurations & Empty-Volume TLS Bootstrap Entrypoint
         run: |
           docker run --rm --add-host=api:127.0.0.1 \
             -v "$PWD/deploy/nginx/nginx.conf:/etc/nginx/nginx.conf:ro" \
@@ -90,22 +90,27 @@ jobs:
 
           docker run --rm --add-host=api:127.0.0.1 --add-host=web:127.0.0.1 \
             -v "$PWD/deploy/nginx/nginx.prod.conf:/etc/nginx/nginx.conf:ro" \
-            nginx:1.27-alpine sh -c "apk add --no-cache openssl >/dev/null && mkdir -p /etc/letsencrypt/live/mycaffe && openssl req -x509 -nodes -days 1 -newkey rsa:2048 -keyout /etc/letsencrypt/live/mycaffe/privkey.pem -out /etc/letsencrypt/live/mycaffe/fullchain.pem -subj '/CN=localhost' 2>/dev/null && nginx -t"
+            -v "$PWD/deploy/nginx/entrypoint-tls-bootstrap.sh:/etc/nginx/entrypoint-tls-bootstrap.sh:ro" \
+            nginx:1.27-alpine sh -c "sed 's/exec nginx -g \"daemon off;\"/nginx -t/' /etc/nginx/entrypoint-tls-bootstrap.sh | sh"
 
-      - name: Validate Offsite Backup Script Syntax
+      - name: Validate Operational Shell Scripts Syntax
         run: |
           bash -n scripts/backup/backup_to_r2.sh
+          bash -n scripts/backup/restore_from_r2.sh
+          bash -n scripts/deploy/init-letsencrypt.sh
+          sh -n deploy/postgres/00-init-roles.sh
+          sh -n deploy/nginx/entrypoint-tls-bootstrap.sh
 
   database-migration-test:
-    name: PostgreSQL 18 Migrator CLI, RLS, Constraints, Rollback & Seed
+    name: PostgreSQL 18 Triple-Role, Migrator CLI, RLS, Direct mycaffe_app Login & Seed
     runs-on: ubuntu-latest
     timeout-minutes: 8
     services:
       postgres:
         image: postgres:18-alpine
         env:
-          POSTGRES_USER: mycaffe_migrator
-          POSTGRES_PASSWORD: mycaffe_password
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: mycaffe_super_password
           POSTGRES_DB: mycaffe_test
         ports:
           - 5432:5432
@@ -130,30 +135,48 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq postgresql-client
 
-      - name: Apply Initial Schema Migration via Go Migrator CLI (PostgreSQL 18)
+      - name: Bootstrap Non-Superuser Roles (mycaffe_migrator & mycaffe_app)
+        env:
+          PGHOST: localhost
+          PGPORT: "5432"
+          PGPASSWORD: mycaffe_super_password
+          POSTGRES_USER: postgres
+          POSTGRES_DB: mycaffe_test
+          DB_MIGRATOR_USER: mycaffe_migrator
+          DB_MIGRATOR_PASSWORD: mycaffe_migrator_password
+          DB_APP_USER: mycaffe_app
+          DB_APP_PASSWORD: mycaffe_app_password
+        run: |
+          sh deploy/postgres/00-init-roles.sh
+
+      - name: Apply Initial Schema Migration via Go Migrator CLI (as Non-Superuser mycaffe_migrator)
         env:
           APP_ENV: test
-          DATABASE_URL: postgres://mycaffe_migrator:mycaffe_password@localhost:5432/mycaffe_test?sslmode=disable
+          DATABASE_URL: postgres://mycaffe_migrator:mycaffe_migrator_password@localhost:5432/mycaffe_test?sslmode=disable
+          DB_APP_USER: mycaffe_app
+          DB_APP_PASSWORD: mycaffe_app_password
         run: |
           go run ./cmd/migrate -action=up
 
-      - name: Verify Schema Constraints, RLS Isolation, Triggers & Atomic Sequences
+      - name: Verify Schema Constraints, RLS Isolation, Triggers & No-DELETE Ledgers
         env:
-          PGPASSWORD: mycaffe_password
+          PGPASSWORD: mycaffe_migrator_password
         run: |
           psql -h localhost -p 5432 -U mycaffe_migrator -d mycaffe_test -v ON_ERROR_STOP=1 -f scripts/verify/verify_schema_constraints.sql
 
       - name: Test Migration Rollback via Go Migrator CLI
         env:
           APP_ENV: test
-          DATABASE_URL: postgres://mycaffe_migrator:mycaffe_password@localhost:5432/mycaffe_test?sslmode=disable
+          DATABASE_URL: postgres://mycaffe_migrator:mycaffe_migrator_password@localhost:5432/mycaffe_test?sslmode=disable
         run: |
           go run ./cmd/migrate -action=down
 
       - name: Re-apply Migration & Verify Idempotent Up
         env:
           APP_ENV: test
-          DATABASE_URL: postgres://mycaffe_migrator:mycaffe_password@localhost:5432/mycaffe_test?sslmode=disable
+          DATABASE_URL: postgres://mycaffe_migrator:mycaffe_migrator_password@localhost:5432/mycaffe_test?sslmode=disable
+          DB_APP_USER: mycaffe_app
+          DB_APP_PASSWORD: mycaffe_app_password
         run: |
           go run ./cmd/migrate -action=up
           go run ./cmd/migrate -action=up
@@ -161,8 +184,8 @@ jobs:
       - name: Test Idempotent Seed Execution via Go Migrator CLI (Run Twice)
         env:
           APP_ENV: test
-          DATABASE_URL: postgres://mycaffe_migrator:mycaffe_password@localhost:5432/mycaffe_test?sslmode=disable
-          PGPASSWORD: mycaffe_password
+          DATABASE_URL: postgres://mycaffe_migrator:mycaffe_migrator_password@localhost:5432/mycaffe_test?sslmode=disable
+          PGPASSWORD: mycaffe_migrator_password
         run: |
           echo "Executing Seed (Run 1)..."
           go run ./cmd/migrate -action=seed
@@ -180,3 +203,9 @@ jobs:
             exit 1
           fi
           echo "Idempotent Seed verified successfully (Stores: $STORE_COUNT, Orders: $ORDER_COUNT, ModGroups: $MOD_GROUP_COUNT, Splits: $SPLIT_COUNT)."
+
+      - name: Verify Direct TCP Login & WithTenantTx Isolation Connected as mycaffe_app
+        env:
+          TEST_APP_DATABASE_URL: postgres://mycaffe_app:mycaffe_app_password@localhost:5432/mycaffe_test?sslmode=disable
+        run: |
+          go test -v -race -run TestDirectAppRoleLoginAndTenantRLS ./internal/pkg/database/...

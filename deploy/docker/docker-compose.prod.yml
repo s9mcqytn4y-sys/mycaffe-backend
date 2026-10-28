@@ -1,4 +1,4 @@
-# MyCaffe POS Platform — Production Docker Compose
+# MyCaffe POS Platform - Production Docker Compose
 # Architecture: Single-VPS Modular Monolith (Hostinger KVM 2: 2 vCPU, 8 GB RAM, 100 GB NVMe)
 # Target OS: Ubuntu 24.04 LTS
 # Pulls immutable GHCR images built in CI (no source code compilation on VPS).
@@ -10,8 +10,12 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${DB_NAME:?DB_NAME must be set}
-      POSTGRES_USER: ${DB_MIGRATOR_USER:?DB_MIGRATOR_USER must be set}
-      POSTGRES_PASSWORD: ${DB_MIGRATOR_PASSWORD:?DB_MIGRATOR_PASSWORD must be set}
+      POSTGRES_USER: ${DB_SUPERUSER:-postgres}
+      POSTGRES_PASSWORD: ${DB_SUPERUSER_PASSWORD:?DB_SUPERUSER_PASSWORD must be set}
+      DB_MIGRATOR_USER: ${DB_MIGRATOR_USER:?DB_MIGRATOR_USER must be set}
+      DB_MIGRATOR_PASSWORD: ${DB_MIGRATOR_PASSWORD:?DB_MIGRATOR_PASSWORD must be set}
+      DB_APP_USER: ${DB_APP_USER:-mycaffe_app}
+      DB_APP_PASSWORD: ${DB_APP_PASSWORD:?DB_APP_PASSWORD must be set}
     command: >
       postgres
       -c shared_buffers=1GB
@@ -30,6 +34,7 @@ services:
       -c log_min_messages=warning
     volumes:
       - pgdata:/var/lib/postgresql
+      - ../postgres/00-init-roles.sh:/docker-entrypoint-initdb.d/00-init-roles.sh:ro
     networks:
       - mycaffe-internal
     healthcheck:
@@ -56,8 +61,10 @@ services:
         condition: service_healthy
     environment:
       APP_ENV: "production"
-      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL must be set}
-      DATABASE_MIGRATION_URL: ${DATABASE_MIGRATION_URL:?DATABASE_MIGRATION_URL must be set}
+      DATABASE_URL: ${COMPOSE_DATABASE_URL:?COMPOSE_DATABASE_URL must be set}
+      DATABASE_MIGRATION_URL: ${COMPOSE_DATABASE_MIGRATION_URL:?COMPOSE_DATABASE_MIGRATION_URL must be set}
+      DB_APP_USER: ${DB_APP_USER:-mycaffe_app}
+      DB_APP_PASSWORD: ${DB_APP_PASSWORD:?DB_APP_PASSWORD must be set}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:?JWT_SECRET_KEY must be set}
       JWT_EXPIRED_HOURS: ${JWT_EXPIRED_HOURS:-24}
       MIDTRANS_MERCHANT_ID: ${MIDTRANS_MERCHANT_ID:?MIDTRANS_MERCHANT_ID must be set}
@@ -83,7 +90,9 @@ services:
       APP_ENV: "production"
       FRONTEND_URL: ${FRONTEND_URL:?FRONTEND_URL must be set}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:?ALLOWED_ORIGINS must be set}
-      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL must be set}
+      DATABASE_URL: ${COMPOSE_DATABASE_URL:?COMPOSE_DATABASE_URL must be set}
+      DB_APP_USER: ${DB_APP_USER:-mycaffe_app}
+      DB_APP_PASSWORD: ${DB_APP_PASSWORD:?DB_APP_PASSWORD must be set}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:?JWT_SECRET_KEY must be set}
       JWT_EXPIRED_HOURS: ${JWT_EXPIRED_HOURS:-24}
       MIDTRANS_MERCHANT_ID: ${MIDTRANS_MERCHANT_ID:?MIDTRANS_MERCHANT_ID must be set}
@@ -145,9 +154,11 @@ services:
       - "443:443"
     volumes:
       - ../nginx/nginx.prod.conf:/etc/nginx/nginx.conf:ro
-      - certbot-etc:/etc/letsencrypt:ro
+      - ../nginx/entrypoint-tls-bootstrap.sh:/etc/nginx/entrypoint-tls-bootstrap.sh:ro
+      - certbot-etc:/etc/letsencrypt
       - certbot-var:/var/lib/letsencrypt:ro
       - web-root:/var/www/certbot:ro
+    entrypoint: ["/bin/sh", "/etc/nginx/entrypoint-tls-bootstrap.sh"]
     depends_on:
       api:
         condition: service_healthy
@@ -164,6 +175,7 @@ services:
   certbot:
     image: certbot/certbot:latest
     container_name: mycaffe-certbot
+    restart: unless-stopped
     volumes:
       - certbot-etc:/etc/letsencrypt
       - certbot-var:/var/lib/letsencrypt

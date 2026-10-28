@@ -83,7 +83,22 @@ func TestValidateConfigProductionFailClosed(t *testing.T) {
 		t.Errorf("expected ValidateConfig to fail for localhost origin in production, got nil")
 	}
 
+	// Placeholder DatabaseURL in production must fail
+	cfg.AllowedOrigins = []string{"https://app.mycaffe.com"}
+	cfg.DatabaseURL = "postgres://mycaffe_app:change_me_in_production@postgres:5432/mycaffe_pos"
+	if err := config.ValidateConfig(cfg); err == nil {
+		t.Errorf("expected ValidateConfig to fail for placeholder DatabaseURL in production, got nil")
+	}
+
+	// Placeholder MidtransServerKey in production must fail
+	cfg.DatabaseURL = "postgresql://mycaffe_app:strong_prod_db_pass_99@postgres:5432/mycaffe_pos"
+	cfg.MidtransServerKey = "Mid-server-placeholder-key"
+	if err := config.ValidateConfig(cfg); err == nil {
+		t.Errorf("expected ValidateConfig to fail for placeholder MidtransServerKey in production, got nil")
+	}
+
 	// Valid production configuration must pass
+	cfg.MidtransServerKey = "Mid-server-production-valid-key-999"
 	cfg.AllowedOrigins = []string{"https://app.mycaffe.com", "https://pos.mycaffe.com"}
 	if err := config.ValidateConfig(cfg); err != nil {
 		t.Errorf("expected valid production config to pass, got error: %v", err)

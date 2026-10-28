@@ -5,17 +5,17 @@
 -- Using strictly valid RFC 4122 hexadecimal UUIDs and generic multi-tenant identities.
 
 -- 1. STORES (TENANTS)
-INSERT INTO stores (id, slug, name, address, phone, timezone, is_active, order_prefix, queue_prefix, default_billing_mode, enabled_payment_methods, tax_bps, service_bps, qris_mdr_bps, currency)
+INSERT INTO stores (id, slug, name, address, phone, timezone, is_active, order_prefix, queue_prefix, default_billing_mode, shift_mode, enabled_payment_methods, tax_bps, service_bps, qris_mdr_bps, currency)
 VALUES 
-    ('11111111-1111-4111-8111-111111111111', 'central-cafe', 'MyCaffe Demo Store - Central', 'Jl. Sudirman No. 101, Jakarta', '081234567890', 'Asia/Jakarta', true, 'ORD', 'A', 'pay_first', '["qris","bank_transfer","gopay","shopeepay","cash","static_qris"]'::jsonb, 1000, 500, 70, 'IDR'),
-    ('22222222-2222-4222-8222-222222222222', 'express-counter', 'MyCaffe Demo Store - Express Counter', 'Lobby Tower A, Jakarta', '081298765432', 'Asia/Jakarta', true, 'EXP', 'B', 'pay_first', '["qris","gopay","cash"]'::jsonb, 1000, 0, 70, 'IDR')
+    ('11111111-1111-4111-8111-111111111111', 'central-cafe', 'MyCaffe Demo Store - Central', 'Jl. Sudirman No. 101, Jakarta', '081234567890', 'Asia/Jakarta', true, 'ORD', 'A', 'pay_first', 'single_auto', '["qris","bank_transfer","gopay","shopeepay","cash","static_qris","edc"]'::jsonb, 1000, 500, 70, 'IDR'),
+    ('22222222-2222-4222-8222-222222222222', 'express-counter', 'MyCaffe Demo Store - Express Counter', 'Lobby Tower A, Jakarta', '081298765432', 'Asia/Jakarta', true, 'EXP', 'B', 'pay_first', 'single_auto', '["qris","gopay","cash"]'::jsonb, 1000, 0, 70, 'IDR')
 ON CONFLICT (id) DO NOTHING;
 
--- 2. USERS (STAFF)
+-- 2. USERS (STAFF - 4 Roles: owner, cashier, barista, kitchen)
 INSERT INTO users (id, store_id, email, full_name, role, pin_hash, is_active)
 VALUES
     ('a0000001-0000-4000-8000-000000000001', '11111111-1111-4111-8111-111111111111', 'owner@mycaffe.local', 'Alexander (Owner)', 'owner', '$2a$10$abcdefghijklmnopqrstuvw1234567890testdummyhash', true),
-    ('a0000002-0000-4000-8000-000000000002', '11111111-1111-4111-8111-111111111111', 'manager.central@mycaffe.local', 'Sarah Jenkins (Manager)', 'manager', '$2a$10$abcdefghijklmnopqrstuvw1234567890testdummyhash', true),
+    ('a0000002-0000-4000-8000-000000000002', '11111111-1111-4111-8111-111111111111', 'kitchen.central@mycaffe.local', 'Sarah Jenkins (Kitchen)', 'kitchen', '$2a$10$abcdefghijklmnopqrstuvw1234567890testdummyhash', true),
     ('a0000003-0000-4000-8000-000000000003', '11111111-1111-4111-8111-111111111111', 'cashier.central@mycaffe.local', 'Maya Putri (Cashier)', 'cashier', '$2a$10$abcdefghijklmnopqrstuvw1234567890testdummyhash', true),
     ('a0000004-0000-4000-8000-000000000004', '11111111-1111-4111-8111-111111111111', 'barista.central@mycaffe.local', 'Doni Pratama (Barista)', 'barista', '$2a$10$abcdefghijklmnopqrstuvw1234567890testdummyhash', true),
     ('a0000005-0000-4000-8000-000000000005', '22222222-2222-4222-8222-222222222222', 'cashier.express@mycaffe.local', 'Lestari Indah (Cashier)', 'cashier', '$2a$10$abcdefghijklmnopqrstuvw1234567890testdummyhash', true)
@@ -80,12 +80,12 @@ ON CONFLICT (store_id, business_date) DO NOTHING;
 
 -- 7. ORDERS (Sample completed order)
 INSERT INTO orders (
-    id, store_id, order_number, queue_number, table_number, customer_name, customer_phone,
+    id, store_id, idempotency_key, order_number, queue_number, table_number, customer_name, customer_phone,
     order_type, billing_mode, status, payment_status, subtotal_amount, discount_amount, tax_amount, service_charge_amount, total_amount, paid_amount, notes
 ) VALUES (
-    'e0000001-0000-4000-8000-000000000001', '11111111-1111-4111-8111-111111111111',
+    'e0000001-0000-4000-8000-000000000001', '11111111-1111-4111-8111-111111111111', 'idem-seed-order-0001',
     'ORD-20261028-0001', 'A01', 'Meja 04', 'Alexander Budi', '081311223344',
-    'dine_in', 'pay_first', 'ready', 'paid', 50000, 0, 5000, 2500, 57500, 57500, 'Less ice for Latte'
+    'dine_in', 'pay_first', 'served', 'paid', 50000, 0, 5000, 2500, 57500, 57500, 'Less ice for Latte'
 )
 ON CONFLICT (id) DO NOTHING;
 
@@ -129,7 +129,7 @@ INSERT INTO audit_logs (
     id, store_id, actor_id, actor_name, action, reason, reference_id, metadata
 ) VALUES (
     'b0000002-0000-4000-8000-000000000002', '11111111-1111-4111-8111-111111111111',
-    'a0000002-0000-4000-8000-000000000002', 'Sarah Jenkins (Manager)', 'STOCK_OVERRIDE',
+    'a0000003-0000-4000-8000-000000000003', 'Maya Putri (Cashier)', 'STOCK_OVERRIDE',
     'Initial stock replenishment for Gayo beans', 'd0000004-0000-4000-8000-000000000004',
     '{"old_stock": 0, "new_stock": 45}'::jsonb
 )

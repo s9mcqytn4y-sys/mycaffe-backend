@@ -48,6 +48,12 @@ func main() {
 		if err != nil {
 			log.Fatalf("[MIGRATE UP FAILED] %v", err)
 		}
+		if cfg.DBAppPassword != "" {
+			if err := migrator.ProvisionAppRole(ctx, cfg.DBAppUser, cfg.DBAppPassword); err != nil {
+				log.Fatalf("[MIGRATE ROLE PROVISION FAILED] %v", err)
+			}
+			log.Printf("[MIGRATE ROLE PROVISION] Runtime role %q configured with direct login.", cfg.DBAppUser)
+		}
 		log.Printf("[MIGRATE UP] Applied %d migration(s) successfully.", count)
 	case "down":
 		version, err := migrator.DownOne(ctx, *migrationsDir, cfg.AppEnv)

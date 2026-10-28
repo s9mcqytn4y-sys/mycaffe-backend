@@ -2,15 +2,16 @@
 -- Multi-Tenant PostgreSQL 18 Schema for MyCaffe Core POS
 -- ADR-002 Compliant: Single-VPS Docker Modular Monolith, native PostgreSQL 18, neutral multi-tenant branding.
 -- Features:
--- 1. Least-privilege runtime role (mycaffe_app) & Native Row-Level Security (RLS) via current_store_id()
--- 2. Strict ON DELETE RESTRICT on all financial records (stores -> orders -> payments / payment_splits)
--- 3. Full Catalog Modifier Groups & 1-Level Nested Sub-Addons (option_modifier_groups) + Relational Order Item Option Snapshots
--- 4. Single-Order Split Bill (payment_splits, payment_split_items) & Multi-Attempt Core API Payment Ledger
--- 5. Durable Webhook Inbox (payment_notification_logs) & Transactional Outbox (outbox_events)
+-- 1. Triple-Role Separation (postgres bootstrap, mycaffe_migrator DDL owner, mycaffe_app DML runtime with NOBYPASSRLS)
+-- 2. Native Row-Level Security (RLS) on ALL tables including stores and payment_notification_logs
+-- 3. Strict ON DELETE RESTRICT + Revoked DELETE privilege on all financial & historical ledgers
+-- 4. Full Catalog Modifier Groups & 1-Level Nested Sub-Addons + Relational Order Item Option Snapshots
+-- 5. Single-Order Split Bill & Multi-Attempt Core API Payment Ledger with Idempotency Constraints
+-- 6. Controlled SECURITY DEFINER webhook context resolver & Transactional Outbox (outbox_events)
 
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
--- 0. HELPER FUNCTIONS & RUNTIME ROLE
+-- 0. HELPER FUNCTIONS & ROLE DEFINITIONS
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -25,9 +26,12 @@ RETURNS UUID AS $$
     SELECT NULLIF(current_setting('app.current_store_id', true), '')::UUID;
 $$ LANGUAGE sql STABLE;
 
--- Create least-privilege runtime application role (if not exists)
+-- Ensure non-superuser migration and runtime roles exist (passwords provisioned via environment/CLI, never hardcoded)
 DO $$
 BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'mycaffe_migrator') THEN
+        CREATE ROLE mycaffe_migrator LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
+    END IF;
     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'mycaffe_app') THEN
         CREATE ROLE mycaffe_app LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
     END IF;
@@ -46,6 +50,7 @@ CREATE TABLE IF NOT EXISTS stores (
     order_prefix VARCHAR(10) NOT NULL DEFAULT 'ORD',
     queue_prefix VARCHAR(10) NOT NULL DEFAULT 'A',
     default_billing_mode VARCHAR(20) NOT NULL DEFAULT 'pay_first',
+    shift_mode VARCHAR(20) NOT NULL DEFAULT 'single_auto',
     enabled_payment_methods JSONB NOT NULL DEFAULT '["qris","bank_transfer","gopay","shopeepay","cash"]'::jsonb,
     tax_bps BIGINT NOT NULL DEFAULT 1000,               -- 1000 bps = 10.00% PB1
     service_bps BIGINT NOT NULL DEFAULT 0,              -- e.g. 500 = 5.00%
@@ -54,6 +59,7 @@ CREATE TABLE IF NOT EXISTS stores (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT chk_stores_billing_mode CHECK (default_billing_mode IN ('pay_first', 'open_tab')),
+    CONSTRAINT chk_stores_shift_mode CHECK (shift_mode IN ('single_auto', 'multi_shift')),
     CONSTRAINT chk_stores_tax_bps CHECK (tax_bps >= 0 AND tax_bps <= 10000),
     CONSTRAINT chk_stores_service_bps CHECK (service_bps >= 0 AND service_bps <= 10000),
     CONSTRAINT chk_stores_qris_mdr_bps CHECK (qris_mdr_bps >= 0 AND qris_mdr_bps <= 10000)
@@ -63,7 +69,7 @@ CREATE TRIGGER trg_stores_updated_at
 BEFORE UPDATE ON stores
 FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
--- 2. USERS / STAFF
+-- 2. USERS / STAFF (4 Streamlined Operational Roles: owner, cashier, barista, kitchen)
 CREATE TABLE IF NOT EXISTS users (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     store_id UUID NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
@@ -76,7 +82,7 @@ CREATE TABLE IF NOT EXISTS users (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT uq_users_store_id UNIQUE(store_id, id),
     CONSTRAINT uq_users_store_email UNIQUE(store_id, email),
-    CONSTRAINT chk_users_role CHECK (role IN ('owner', 'manager', 'cashier', 'barista', 'kitchen'))
+    CONSTRAINT chk_users_role CHECK (role IN ('owner', 'cashier', 'barista', 'kitchen'))
 );
 
 CREATE TRIGGER trg_users_updated_at
@@ -152,12 +158,16 @@ CREATE TABLE IF NOT EXISTS modifier_options (
     name VARCHAR(100) NOT NULL,
     price_delta BIGINT NOT NULL DEFAULT 0,
     is_available BOOLEAN NOT NULL DEFAULT true,
+    track_stock BOOLEAN NOT NULL DEFAULT false,
+    stock_quantity INT NOT NULL DEFAULT 0,
+    max_quantity INT NOT NULL DEFAULT 1,
     display_order INT NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT uq_modifier_options_store_id UNIQUE(store_id, id),
     CONSTRAINT fk_modifier_options_group FOREIGN KEY (store_id, group_id) REFERENCES modifier_groups(store_id, id) ON DELETE CASCADE,
-    CONSTRAINT chk_modifier_options_price_delta CHECK (price_delta >= 0)
+    CONSTRAINT chk_modifier_options_price_delta CHECK (price_delta >= 0),
+    CONSTRAINT chk_modifier_options_stock CHECK (stock_quantity >= 0 AND max_quantity >= 1)
 );
 
 CREATE TRIGGER trg_modifier_options_updated_at
@@ -203,6 +213,7 @@ CREATE TABLE IF NOT EXISTS store_daily_sequences (
 CREATE TABLE IF NOT EXISTS orders (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     store_id UUID NOT NULL REFERENCES stores(id) ON DELETE RESTRICT,
+    idempotency_key VARCHAR(100) NOT NULL DEFAULT '',
     order_number VARCHAR(50) NOT NULL,
     queue_number VARCHAR(20) NOT NULL,
     table_number VARCHAR(50) NOT NULL DEFAULT '',
@@ -228,16 +239,20 @@ CREATE TABLE IF NOT EXISTS orders (
     CONSTRAINT uq_orders_store_order_number UNIQUE(store_id, order_number),
     CONSTRAINT chk_orders_order_type CHECK (order_type IN ('dine_in', 'takeaway')),
     CONSTRAINT chk_orders_billing_mode CHECK (billing_mode IN ('pay_first', 'open_tab', 'split_bill')),
-    CONSTRAINT chk_orders_status CHECK (status IN ('pending_payment', 'queued', 'preparing', 'ready', 'completed', 'cancelled')),
-    CONSTRAINT chk_orders_payment_status CHECK (payment_status IN ('unpaid', 'pending', 'partially_paid', 'paid', 'failed', 'expired', 'partially_refunded', 'refunded')),
+    CONSTRAINT chk_orders_status CHECK (status IN ('pending_payment', 'queued', 'preparing', 'ready', 'served', 'completed', 'cancelled')),
+    CONSTRAINT chk_orders_payment_status CHECK (payment_status IN ('unpaid', 'pending', 'partially_paid', 'paid', 'failed', 'cancelled', 'expired', 'partially_refunded', 'refunded', 'chargeback', 'partial_chargeback')),
     CONSTRAINT chk_orders_subtotal CHECK (subtotal_amount >= 0),
     CONSTRAINT chk_orders_discount CHECK (discount_amount >= 0),
     CONSTRAINT chk_orders_tax CHECK (tax_amount >= 0),
     CONSTRAINT chk_orders_service CHECK (service_charge_amount >= 0),
     CONSTRAINT chk_orders_total CHECK (total_amount >= 0),
-    CONSTRAINT chk_orders_paid_amount CHECK (paid_amount >= 0),
+    CONSTRAINT chk_orders_paid_amount CHECK (paid_amount >= 0 AND paid_amount <= total_amount),
     CONSTRAINT chk_orders_refunded_amount CHECK (refunded_amount >= 0 AND refunded_amount <= paid_amount)
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_orders_store_idempotency_key
+ON orders(store_id, idempotency_key)
+WHERE idempotency_key <> '';
 
 CREATE TRIGGER trg_orders_updated_at
 BEFORE UPDATE ON orders
@@ -273,6 +288,7 @@ CREATE TABLE IF NOT EXISTS order_item_options (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     store_id UUID NOT NULL REFERENCES stores(id) ON DELETE RESTRICT,
     order_item_id UUID NOT NULL,
+    parent_order_item_option_id UUID DEFAULT NULL,
     modifier_group_id UUID,
     modifier_option_id UUID,
     parent_option_id UUID,
@@ -281,7 +297,9 @@ CREATE TABLE IF NOT EXISTS order_item_options (
     snapshot_price_delta BIGINT NOT NULL DEFAULT 0,
     quantity INT NOT NULL DEFAULT 1,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_order_item_options_store_id UNIQUE(store_id, id),
     CONSTRAINT fk_oio_order_item FOREIGN KEY (store_id, order_item_id) REFERENCES order_items(store_id, id) ON DELETE CASCADE,
+    CONSTRAINT fk_oio_parent_item_option FOREIGN KEY (store_id, parent_order_item_option_id) REFERENCES order_item_options(store_id, id) ON DELETE CASCADE,
     CONSTRAINT fk_oio_group FOREIGN KEY (store_id, modifier_group_id) REFERENCES modifier_groups(store_id, id) ON DELETE SET NULL (modifier_group_id),
     CONSTRAINT fk_oio_option FOREIGN KEY (store_id, modifier_option_id) REFERENCES modifier_options(store_id, id) ON DELETE SET NULL (modifier_option_id),
     CONSTRAINT fk_oio_parent_option FOREIGN KEY (store_id, parent_option_id) REFERENCES modifier_options(store_id, id) ON DELETE SET NULL (parent_option_id),
@@ -309,8 +327,8 @@ CREATE TABLE IF NOT EXISTS payment_splits (
     CONSTRAINT uq_payment_splits_order_num UNIQUE(store_id, order_id, split_number),
     CONSTRAINT fk_payment_splits_order FOREIGN KEY (store_id, order_id) REFERENCES orders(store_id, id) ON DELETE RESTRICT,
     CONSTRAINT chk_payment_splits_mode CHECK (split_mode IN ('full', 'equal', 'by_item', 'custom_amount')),
-    CONSTRAINT chk_payment_splits_status CHECK (status IN ('unpaid', 'pending', 'paid', 'cancelled')),
-    CONSTRAINT chk_payment_splits_amounts CHECK (subtotal_amount >= 0 AND tax_amount >= 0 AND service_charge_amount >= 0 AND total_amount > 0 AND paid_amount >= 0)
+    CONSTRAINT chk_payment_splits_status CHECK (status IN ('unpaid', 'pending', 'partially_paid', 'paid', 'cancelled', 'refunded')),
+    CONSTRAINT chk_payment_splits_amounts CHECK (subtotal_amount >= 0 AND tax_amount >= 0 AND service_charge_amount >= 0 AND total_amount > 0 AND paid_amount >= 0 AND paid_amount <= total_amount)
 );
 
 CREATE TRIGGER trg_payment_splits_updated_at
@@ -332,7 +350,7 @@ CREATE TABLE IF NOT EXISTS payment_split_items (
 );
 
 -- 10. PAYMENTS (Tenant-isolated Payment Attempts & Financial Ledger)
--- Financial history protection: fk_payments_order uses ON DELETE RESTRICT so orders with payments can NEVER be physically deleted.
+-- Financial history protection: fk_payments_order uses ON DELETE RESTRICT and mycaffe_app has NO DELETE privilege.
 CREATE TABLE IF NOT EXISTS payments (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     store_id UUID NOT NULL REFERENCES stores(id) ON DELETE RESTRICT,
@@ -343,28 +361,46 @@ CREATE TABLE IF NOT EXISTS payments (
     provider VARCHAR(50) NOT NULL DEFAULT 'midtrans',
     provider_order_id VARCHAR(100) NOT NULL,
     amount BIGINT NOT NULL,
+    refunded_amount BIGINT NOT NULL DEFAULT 0,
     method VARCHAR(50) NOT NULL,
     status VARCHAR(50) NOT NULL DEFAULT 'pending',
     raw_provider_status VARCHAR(50) NOT NULL DEFAULT '',
     fraud_status VARCHAR(50) NOT NULL DEFAULT '',
     transaction_id VARCHAR(100) DEFAULT '',
     payment_type VARCHAR(50) DEFAULT '',
+    acquirer VARCHAR(50) DEFAULT '',
     qr_string TEXT DEFAULT '',
+    deeplink_url TEXT DEFAULT '',
     va_number VARCHAR(100) DEFAULT '',
     bank VARCHAR(50) DEFAULT '',
+    biller_code VARCHAR(50) DEFAULT '',
+    bill_key VARCHAR(100) DEFAULT '',
+    payment_code VARCHAR(100) DEFAULT '',
     reconciliation_ref VARCHAR(150) DEFAULT '',
+    verified_by_user_id UUID DEFAULT NULL,
+    failure_code VARCHAR(100) DEFAULT '',
+    failure_reason TEXT DEFAULT '',
     paid_at TIMESTAMPTZ,
     expires_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT fk_payments_order FOREIGN KEY (store_id, order_id) REFERENCES orders(store_id, id) ON DELETE RESTRICT,
     CONSTRAINT fk_payments_split FOREIGN KEY (store_id, split_id) REFERENCES payment_splits(store_id, id) ON DELETE RESTRICT,
+    CONSTRAINT fk_payments_verified_user FOREIGN KEY (store_id, verified_by_user_id) REFERENCES users(store_id, id) ON DELETE SET NULL (verified_by_user_id),
     CONSTRAINT uq_payments_provider_order UNIQUE (store_id, provider_order_id),
     CONSTRAINT chk_payments_attempt_no CHECK (attempt_no >= 1),
-    CONSTRAINT chk_payments_amount CHECK (amount > 0),
+    CONSTRAINT chk_payments_amount CHECK (amount > 0 AND refunded_amount >= 0 AND refunded_amount <= amount),
     CONSTRAINT chk_payments_method CHECK (method IN ('qris', 'static_qris', 'bank_transfer', 'gopay', 'shopeepay', 'card', 'cstore', 'cash', 'edc')),
-    CONSTRAINT chk_payments_status CHECK (status IN ('pending', 'authorized', 'paid', 'failed', 'expired', 'cancelled', 'partially_refunded', 'refunded', 'chargeback'))
+    CONSTRAINT chk_payments_status CHECK (status IN ('pending', 'authorized', 'paid', 'failed', 'cancelled', 'expired', 'partially_refunded', 'refunded', 'chargeback', 'partial_chargeback'))
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_payments_store_idempotency_key
+ON payments(store_id, idempotency_key)
+WHERE idempotency_key <> '';
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_payments_provider_tx_id
+ON payments(provider, transaction_id)
+WHERE transaction_id <> '';
 
 CREATE TRIGGER trg_payments_updated_at
 BEFORE UPDATE ON payments
@@ -373,10 +409,10 @@ FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 -- 11. PAYMENT NOTIFICATION LOGS (Durable Webhook Inbox & Idempotency)
 CREATE TABLE IF NOT EXISTS payment_notification_logs (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    store_id UUID,
-    order_id UUID,
+    store_id UUID NOT NULL REFERENCES stores(id) ON DELETE RESTRICT,
+    order_id UUID NOT NULL,
     provider VARCHAR(50) NOT NULL DEFAULT 'midtrans',
-    transaction_id VARCHAR(150) NOT NULL,
+    transaction_id VARCHAR(150) NOT NULL DEFAULT '',
     order_number VARCHAR(100) NOT NULL,
     status_code VARCHAR(10) NOT NULL,
     transaction_status VARCHAR(50) NOT NULL,
@@ -386,13 +422,34 @@ CREATE TABLE IF NOT EXISTS payment_notification_logs (
     processed_at TIMESTAMPTZ DEFAULT NULL,
     error_message TEXT DEFAULT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    CONSTRAINT uq_notif_logs_event UNIQUE(provider, transaction_id, transaction_status, status_code),
+    CONSTRAINT uq_notif_logs_event UNIQUE(provider, order_number, transaction_status, status_code, transaction_id),
     CONSTRAINT fk_notif_logs_order FOREIGN KEY (store_id, order_id) REFERENCES orders(store_id, id) ON DELETE RESTRICT,
     CONSTRAINT chk_notif_logs_processed CHECK (
         (is_processed = false AND processed_at IS NULL) OR
         (is_processed = true AND processed_at IS NOT NULL)
     )
 );
+
+-- Controlled SECURITY DEFINER function to resolve tenant context for incoming Midtrans webhooks
+-- by provider_order_id without allowing cross-tenant table scans by mycaffe_app.
+CREATE OR REPLACE FUNCTION resolve_payment_webhook_context(p_provider_order_id VARCHAR)
+RETURNS TABLE (
+    store_id UUID,
+    order_id UUID,
+    payment_id UUID,
+    expected_amount BIGINT,
+    current_status VARCHAR
+)
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+    SELECT p.store_id, p.order_id, p.id, p.amount, p.status
+    FROM payments p
+    WHERE p.provider_order_id = p_provider_order_id
+    LIMIT 1;
+$$;
 
 -- 12. OUTBOX EVENTS (Transactional Outbox for Reliable KDS / Realtime Delivery)
 CREATE TABLE IF NOT EXISTS outbox_events (
@@ -408,7 +465,7 @@ CREATE TABLE IF NOT EXISTS outbox_events (
     last_error TEXT DEFAULT NULL
 );
 
--- 13. AUDIT LOGS (Operational tracking with strict tenant boundary)
+-- 13. AUDIT LOGS (Operational tracking with strict tenant boundary & append-only immutability)
 CREATE TABLE IF NOT EXISTS audit_logs (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     store_id UUID NOT NULL REFERENCES stores(id) ON DELETE RESTRICT,
@@ -424,6 +481,9 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 );
 
 -- 14. ROW-LEVEL SECURITY (RLS) ENFORCEMENT & LEAST-PRIVILEGE GRANTS
+ALTER TABLE stores ENABLE ROW LEVEL SECURITY;
+CREATE POLICY store_isolation_stores ON stores FOR ALL USING (id = current_store_id()) WITH CHECK (id = current_store_id());
+
 ALTER TABLE users ENABLE ROW LEVEL SECURITY;
 CREATE POLICY store_isolation_users ON users FOR ALL USING (store_id = current_store_id()) WITH CHECK (store_id = current_store_id());
 
@@ -466,22 +526,31 @@ CREATE POLICY store_isolation_payment_split_items ON payment_split_items FOR ALL
 ALTER TABLE payments ENABLE ROW LEVEL SECURITY;
 CREATE POLICY store_isolation_payments ON payments FOR ALL USING (store_id = current_store_id()) WITH CHECK (store_id = current_store_id());
 
+ALTER TABLE payment_notification_logs ENABLE ROW LEVEL SECURITY;
+CREATE POLICY store_isolation_payment_notification_logs ON payment_notification_logs FOR ALL USING (store_id = current_store_id()) WITH CHECK (store_id = current_store_id());
+
 ALTER TABLE outbox_events ENABLE ROW LEVEL SECURITY;
 CREATE POLICY store_isolation_outbox_events ON outbox_events FOR ALL USING (store_id = current_store_id()) WITH CHECK (store_id = current_store_id());
 
 ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
 CREATE POLICY store_isolation_audit_logs ON audit_logs FOR ALL USING (store_id = current_store_id()) WITH CHECK (store_id = current_store_id());
 
--- Grant DML-only privileges to mycaffe_app runtime role
-GRANT SELECT ON stores TO mycaffe_app;
+-- Strict Least-Privilege Grants for mycaffe_app (NO DELETE on financial/order/audit history!)
+REVOKE ALL ON ALL TABLES IN SCHEMA public FROM mycaffe_app;
+
+GRANT SELECT, UPDATE ON stores TO mycaffe_app;
+
 GRANT SELECT, INSERT, UPDATE, DELETE ON
-    users,
     categories,
     products,
     modifier_groups,
     modifier_options,
     product_modifier_groups,
-    option_modifier_groups,
+    option_modifier_groups
+TO mycaffe_app;
+
+GRANT SELECT, INSERT, UPDATE ON
+    users,
     store_daily_sequences,
     orders,
     order_items,
@@ -492,7 +561,11 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON
     payment_notification_logs,
     outbox_events
 TO mycaffe_app;
+
 GRANT SELECT, INSERT ON audit_logs TO mycaffe_app;
+
+GRANT EXECUTE ON FUNCTION current_store_id() TO mycaffe_app;
+GRANT EXECUTE ON FUNCTION resolve_payment_webhook_context(VARCHAR) TO mycaffe_app;
 
 -- 15. INDEXES for Multi-Tenant Isolation and High-Performance Queries
 CREATE INDEX IF NOT EXISTS idx_users_store_role ON users(store_id, role);

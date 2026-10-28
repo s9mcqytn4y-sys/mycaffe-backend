@@ -1,6 +1,9 @@
 -- db/migrations/20261028000001_init_schema.down.sql
--- Rollback / Teardown Migration for MyCaffe Core POS Initial Schema
--- WARNING: Execute ONLY on disposable CI/local test databases. Never run on production data.
+-- Clean Teardown for MyCaffe Core POS Schema (Disposable Test & Development Environments Only)
+
+REVOKE ALL ON ALL TABLES IN SCHEMA public FROM mycaffe_app;
+REVOKE EXECUTE ON FUNCTION resolve_payment_webhook_context(VARCHAR) FROM mycaffe_app;
+REVOKE EXECUTE ON FUNCTION current_store_id() FROM mycaffe_app;
 
 DROP TRIGGER IF EXISTS trg_payments_updated_at ON payments;
 DROP TRIGGER IF EXISTS trg_payment_splits_updated_at ON payment_splits;
@@ -11,6 +14,8 @@ DROP TRIGGER IF EXISTS trg_products_updated_at ON products;
 DROP TRIGGER IF EXISTS trg_categories_updated_at ON categories;
 DROP TRIGGER IF EXISTS trg_users_updated_at ON users;
 DROP TRIGGER IF EXISTS trg_stores_updated_at ON stores;
+
+DROP FUNCTION IF EXISTS resolve_payment_webhook_context(VARCHAR);
 
 DROP TABLE IF EXISTS audit_logs;
 DROP TABLE IF EXISTS outbox_events;

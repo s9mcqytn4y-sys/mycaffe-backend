@@ -194,7 +194,9 @@ func MapMidtransStatus(transactionStatus, fraudStatus string) (domain.PaymentSta
 		return domain.PaymentStatusPartiallyRefunded, nil
 	case "refund":
 		return domain.PaymentStatusRefunded, nil
-	case "chargeback", "partial_chargeback":
+	case "partial_chargeback":
+		return domain.PaymentStatusPartialChargeback, nil
+	case "chargeback":
 		return domain.PaymentStatusChargeback, nil
 	default:
 		return "", fmt.Errorf("unknown midtrans transaction_status: %q", transactionStatus)

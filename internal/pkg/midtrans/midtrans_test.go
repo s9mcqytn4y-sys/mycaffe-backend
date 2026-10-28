@@ -91,7 +91,7 @@ func TestMapMidtransStatus(t *testing.T) {
 		{"partial_refund is partially_refunded", "partial_refund", "", domain.PaymentStatusPartiallyRefunded, false},
 		{"refund is refunded", "refund", "", domain.PaymentStatusRefunded, false},
 		{"chargeback is chargeback", "chargeback", "", domain.PaymentStatusChargeback, false},
-		{"partial_chargeback is chargeback", "partial_chargeback", "", domain.PaymentStatusChargeback, false},
+		{"partial_chargeback is partial_chargeback", "partial_chargeback", "", domain.PaymentStatusPartialChargeback, false},
 		{"unknown status returns error", "unrecognized_state", "", "", true},
 	}
 

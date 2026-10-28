@@ -9,6 +9,7 @@ DECLARE
     v_order_a UUID;
     v_order_b UUID;
     v_item_a UUID;
+    v_opt_parent UUID;
     v_split_a UUID;
     v_payment_a UUID;
     v_check_cat UUID;
@@ -71,24 +72,37 @@ BEGIN
     END IF;
     RAISE NOTICE 'SUCCESS: store_daily_sequences atomic increment verified (seq: % -> %).', v_seq_1, v_seq_2;
 
-    -- 5. Insert Order, Order Item, Order Item Option, Split & Payment in Store A and Store B
-    INSERT INTO orders (store_id, order_number, queue_number, customer_name, status, payment_status, subtotal_amount, total_amount) 
-    VALUES (v_store_a, 'ORD-TEST-001', 'A01', 'Customer Alpha', 'pending_payment', 'pending', 33000, 33000) RETURNING id INTO v_order_a;
+    -- 5. Insert Order, Order Item, Order Item Option (with 1-level Sub-Addon), Split & Payment in Store A and Store B
+    INSERT INTO orders (store_id, idempotency_key, order_number, queue_number, customer_name, status, payment_status, subtotal_amount, total_amount) 
+    VALUES (v_store_a, 'idem-order-a-001', 'ORD-TEST-001', 'A01', 'Customer Alpha', 'pending_payment', 'pending', 33000, 33000) RETURNING id INTO v_order_a;
 
-    INSERT INTO orders (store_id, order_number, queue_number, customer_name, status, payment_status, subtotal_amount, total_amount) 
-    VALUES (v_store_b, 'EXP-TEST-001', 'B01', 'Customer Beta', 'pending_payment', 'pending', 25000, 25000) RETURNING id INTO v_order_b;
+    INSERT INTO orders (store_id, idempotency_key, order_number, queue_number, customer_name, status, payment_status, subtotal_amount, total_amount) 
+    VALUES (v_store_b, 'idem-order-b-001', 'EXP-TEST-001', 'B01', 'Customer Beta', 'pending_payment', 'pending', 25000, 25000) RETURNING id INTO v_order_b;
 
     INSERT INTO order_items (store_id, order_id, product_id, unit_base_price, modifier_total_price, snapshot_name, snapshot_price, quantity, subtotal_amount)
     VALUES (v_store_a, v_order_a, v_prod_a, 25000, 8000, 'Classic Iced Latte', 33000, 1, 33000) RETURNING id INTO v_item_a;
 
     INSERT INTO order_item_options (store_id, order_item_id, modifier_group_id, modifier_option_id, snapshot_group_name, snapshot_option_name, snapshot_price_delta, quantity)
-    VALUES (v_store_a, v_item_a, v_mod_group, v_mod_opt, 'Milk Option', 'Oat Milk', 8000, 1);
+    VALUES (v_store_a, v_item_a, v_mod_group, v_mod_opt, 'Milk Option', 'Oat Milk', 8000, 1)
+    RETURNING id INTO v_opt_parent;
+
+    INSERT INTO order_item_options (store_id, order_item_id, parent_order_item_option_id, modifier_group_id, modifier_option_id, parent_option_id, snapshot_group_name, snapshot_option_name, snapshot_price_delta, quantity)
+    VALUES (v_store_a, v_item_a, v_opt_parent, v_mod_group, v_mod_opt, v_mod_opt, 'Sub Option', 'Cold Foam', 0, 1);
 
     INSERT INTO payment_splits (store_id, order_id, split_number, label, split_mode, subtotal_amount, total_amount, status)
     VALUES (v_store_a, v_order_a, 1, 'Split 1', 'full', 33000, 33000, 'pending') RETURNING id INTO v_split_a;
 
-    INSERT INTO payments (store_id, order_id, split_id, attempt_no, idempotency_key, provider_order_id, amount, method, status)
-    VALUES (v_store_a, v_order_a, v_split_a, 1, 'idem-test-001', 'ORD-TEST-001', 33000, 'qris', 'pending') RETURNING id INTO v_payment_a;
+    INSERT INTO payments (store_id, order_id, split_id, attempt_no, idempotency_key, provider_order_id, amount, method, status, transaction_id)
+    VALUES (v_store_a, v_order_a, v_split_a, 1, 'idem-test-001', 'ORD-TEST-001-S1-A1', 33000, 'qris', 'pending', 'tx-unique-001') RETURNING id INTO v_payment_a;
+
+    -- 5B. Verify Payment Attempt Idempotency Constraint (uq_payments_store_idempotency_key)
+    BEGIN
+        INSERT INTO payments (store_id, order_id, split_id, attempt_no, idempotency_key, provider_order_id, amount, method, status)
+        VALUES (v_store_a, v_order_a, v_split_a, 2, 'idem-test-001', 'ORD-TEST-001-S1-A2', 33000, 'qris', 'pending');
+        RAISE EXCEPTION 'Duplicate payment idempotency_key was permitted!';
+    EXCEPTION WHEN unique_violation THEN
+        RAISE NOTICE 'SUCCESS: Duplicate payment idempotency_key rejected by uq_payments_store_idempotency_key.';
+    END;
 
     -- 6A. Test Store Soft-Delete Protection (ON DELETE RESTRICT on orders & payments)
     BEGIN
@@ -144,18 +158,18 @@ BEGIN
     END IF;
     RAISE NOTICE 'SUCCESS: Product deletion set product_id to NULL while preserving historical order_item.';
 
-    -- 9. Test Webhook Idempotency (Unique constraint violation on duplicate notification)
+    -- 9. Test Webhook Idempotency (Unique constraint on provider, order_number, transaction_status, status_code, transaction_id)
     INSERT INTO payment_notification_logs (
-        provider, transaction_id, order_number, status_code, transaction_status, gross_amount, raw_payload
+        store_id, order_id, provider, transaction_id, order_number, status_code, transaction_status, gross_amount, raw_payload
     ) VALUES (
-        'midtrans', 'trx-test-12345', 'ORD-TEST-001', '200', 'settlement', 33000, '{"status": "settlement"}'::jsonb
+        v_store_a, v_order_a, 'midtrans', 'trx-test-12345', 'ORD-TEST-001-S1-A1', '200', 'settlement', 33000, '{"status": "settlement"}'::jsonb
     );
 
     BEGIN
         INSERT INTO payment_notification_logs (
-            provider, transaction_id, order_number, status_code, transaction_status, gross_amount, raw_payload
+            store_id, order_id, provider, transaction_id, order_number, status_code, transaction_status, gross_amount, raw_payload
         ) VALUES (
-            'midtrans', 'trx-test-12345', 'ORD-TEST-001', '200', 'settlement', 33000, '{"status": "settlement"}'::jsonb
+            v_store_a, v_order_a, 'midtrans', 'trx-test-12345', 'ORD-TEST-001-S1-A1', '200', 'settlement', 33000, '{"status": "settlement"}'::jsonb
         );
         RAISE EXCEPTION 'Duplicate webhook insert was permitted!';
     EXCEPTION WHEN unique_violation THEN
@@ -163,13 +177,19 @@ BEGIN
     END;
 END $$;
 
--- 10. Test Row-Level Security (RLS) under Least-Privilege Runtime Role (mycaffe_app)
+-- 10. Test Row-Level Security (RLS) & Financial DELETE Revocation under mycaffe_app
 DO $$
 DECLARE
     v_store_a UUID;
     v_store_b UUID;
+    v_resolved_store UUID;
+    v_visible_stores INT;
     v_visible_orders INT;
+    v_visible_notifs INT;
     v_rls_blocked BOOLEAN := FALSE;
+    v_delete_payment_blocked BOOLEAN := FALSE;
+    v_delete_order_blocked BOOLEAN := FALSE;
+    v_delete_notif_blocked BOOLEAN := FALSE;
 BEGIN
     SELECT id INTO v_store_a FROM stores WHERE slug = 'demo-store-a';
     SELECT id INTO v_store_b FROM stores WHERE slug = 'demo-store-b';
@@ -177,21 +197,59 @@ BEGIN
     -- Switch to runtime application role (NOBYPASSRLS)
     EXECUTE 'SET LOCAL ROLE mycaffe_app';
 
-    -- Without setting app.current_store_id, 0 tenant orders must be visible
-    SELECT COUNT(*) INTO v_visible_orders FROM orders;
-    IF v_visible_orders != 0 THEN
-        RAISE EXCEPTION 'RLS leak: expected 0 orders when app.current_store_id is unset, got %', v_visible_orders;
+    -- 10A. Verify controlled SECURITY DEFINER webhook context resolver works before setting tenant context
+    SELECT store_id INTO v_resolved_store FROM resolve_payment_webhook_context('ORD-TEST-001-S1-A1');
+    IF v_resolved_store IS DISTINCT FROM v_store_a THEN
+        RAISE EXCEPTION 'resolve_payment_webhook_context failed: expected %, got %', v_store_a, v_resolved_store;
     END IF;
 
-    -- Set tenant context to Store A
+    -- 10B. Without setting app.current_store_id, 0 stores, 0 orders, and 0 notification logs must be visible
+    SELECT COUNT(*) INTO v_visible_stores FROM stores;
+    SELECT COUNT(*) INTO v_visible_orders FROM orders;
+    SELECT COUNT(*) INTO v_visible_notifs FROM payment_notification_logs;
+    IF v_visible_stores != 0 OR v_visible_orders != 0 OR v_visible_notifs != 0 THEN
+        RAISE EXCEPTION 'RLS leak when context unset: stores=%, orders=%, notifs=%', v_visible_stores, v_visible_orders, v_visible_notifs;
+    END IF;
+
+    -- 10C. Set tenant context to Store A
     PERFORM set_config('app.current_store_id', v_store_a::text, true);
 
+    SELECT COUNT(*) INTO v_visible_stores FROM stores;
     SELECT COUNT(*) INTO v_visible_orders FROM orders;
-    IF v_visible_orders != 1 THEN
-        RAISE EXCEPTION 'RLS error: expected exactly 1 order for Store A, got %', v_visible_orders;
+    SELECT COUNT(*) INTO v_visible_notifs FROM payment_notification_logs;
+    IF v_visible_stores != 1 OR v_visible_orders != 1 OR v_visible_notifs != 1 THEN
+        RAISE EXCEPTION 'RLS error for Store A: stores=%, orders=%, notifs=%', v_visible_stores, v_visible_orders, v_visible_notifs;
     END IF;
 
-    -- Attempt cross-tenant insert into Store B while scoped to Store A (must fail WITH CHECK policy)
+    -- 10D. Verify mycaffe_app CANNOT physically DELETE payments, orders, or payment_notification_logs
+    BEGIN
+        DELETE FROM payments;
+    EXCEPTION WHEN insufficient_privilege THEN
+        v_delete_payment_blocked := TRUE;
+    END;
+    IF NOT v_delete_payment_blocked THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app was allowed to DELETE FROM payments!';
+    END IF;
+
+    BEGIN
+        DELETE FROM orders;
+    EXCEPTION WHEN insufficient_privilege THEN
+        v_delete_order_blocked := TRUE;
+    END;
+    IF NOT v_delete_order_blocked THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app was allowed to DELETE FROM orders!';
+    END IF;
+
+    BEGIN
+        DELETE FROM payment_notification_logs;
+    EXCEPTION WHEN insufficient_privilege THEN
+        v_delete_notif_blocked := TRUE;
+    END;
+    IF NOT v_delete_notif_blocked THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app was allowed to DELETE FROM payment_notification_logs!';
+    END IF;
+
+    -- 10E. Attempt cross-tenant insert into Store B while scoped to Store A (must fail WITH CHECK policy)
     BEGIN
         INSERT INTO orders (store_id, order_number, queue_number, customer_name, status, payment_status, total_amount)
         VALUES (v_store_b, 'EXP-HACK-999', 'B99', 'Cross Tenant Attacker', 'pending_payment', 'unpaid', 10000);
@@ -204,6 +262,6 @@ BEGIN
     END IF;
 
     EXECUTE 'RESET ROLE';
-    RAISE NOTICE 'SUCCESS: Row-Level Security (RLS) and mycaffe_app least-privilege isolation verified.';
+    RAISE NOTICE 'SUCCESS: Row-Level Security (RLS) on stores/orders/payments/notifications and DELETE privilege revocation verified.';
     RAISE NOTICE 'ALL CONSTRAINTS, RLS POLICIES, AND BEHAVIORAL VERIFICATIONS PASSED SUCCESSFULLY.';
 END $$;

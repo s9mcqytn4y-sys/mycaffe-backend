@@ -203,3 +203,80 @@ func (m *Migrator) Seed(ctx context.Context, seedFilePath, appEnv string) error 
 
 	return tx.Commit()
 }
+
+// ProvisionAppRole configures the runtime application role (e.g. mycaffe_app) with a login password
+// and enforces NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS so it can authenticate directly via pg_hba.
+func (m *Migrator) ProvisionAppRole(ctx context.Context, appUser, appPassword string) error {
+	appUser = strings.TrimSpace(appUser)
+	if appUser == "" {
+		appUser = "mycaffe_app"
+	}
+	for i := 0; i < len(appUser); i++ {
+		c := appUser[i]
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9' && i > 0) || c == '_') {
+			return fmt.Errorf("invalid SQL identifier for app role: %q", appUser)
+		}
+	}
+	if appPassword == "" {
+		return nil
+	}
+
+	var callerPerms struct {
+		RolSuper      bool `db:"rolsuper"`
+		RolCreateRole bool `db:"rolcreaterole"`
+	}
+	if err := m.db.GetContext(ctx, &callerPerms, "SELECT rolsuper, rolcreaterole FROM pg_roles WHERE rolname = current_user"); err != nil {
+		return fmt.Errorf("failed to inspect caller role capabilities: %w", err)
+	}
+
+	// When connected as least-privilege mycaffe_migrator (NOSUPERUSER NOCREATEROLE),
+	// 00-init-roles.sh has already provisioned mycaffe_app with its password.
+	// Verify mycaffe_app exists with login enabled and without superuser/bypassrls.
+	if !callerPerms.RolSuper && !callerPerms.RolCreateRole {
+		var appRoleFlags struct {
+			RolCanLogin  bool `db:"rolcanlogin"`
+			RolSuper     bool `db:"rolsuper"`
+			RolBypassRLS bool `db:"rolbypassrls"`
+		}
+		if err := m.db.GetContext(ctx, &appRoleFlags, "SELECT rolcanlogin, rolsuper, rolbypassrls FROM pg_roles WHERE rolname = $1", appUser); err != nil {
+			return fmt.Errorf("runtime role %q not found and caller lacks CREATEROLE to provision it: %w", appUser, err)
+		}
+		if !appRoleFlags.RolCanLogin || appRoleFlags.RolSuper || appRoleFlags.RolBypassRLS {
+			return fmt.Errorf("runtime role %q has invalid security flags (canlogin=%v, super=%v, bypassrls=%v)",
+				appUser, appRoleFlags.RolCanLogin, appRoleFlags.RolSuper, appRoleFlags.RolBypassRLS)
+		}
+		return nil
+	}
+
+	tx, err := m.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction for role provisioning: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx,
+		"SELECT set_config('app.provision_role', $1, true), set_config('app.provision_password', $2, true)",
+		appUser, appPassword,
+	); err != nil {
+		return fmt.Errorf("failed to stage role credentials: %w", err)
+	}
+
+	const doBlock = `
+	DO $$
+	DECLARE
+		r_name TEXT := current_setting('app.provision_role', true);
+		r_pass TEXT := current_setting('app.provision_password', true);
+	BEGIN
+		IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r_name) THEN
+			EXECUTE format('CREATE ROLE %I WITH LOGIN PASSWORD %L NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS', r_name, r_pass);
+		ELSE
+			EXECUTE format('ALTER ROLE %I WITH LOGIN PASSWORD %L NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS', r_name, r_pass);
+		END IF;
+	END $$;`
+
+	if _, err := tx.ExecContext(ctx, doBlock); err != nil {
+		return fmt.Errorf("failed to provision role %s: %w", appUser, err)
+	}
+
+	return tx.Commit()
+}

@@ -48,3 +48,4 @@ echo "[BACKUP] Upload completed successfully. Cleaning up local file..."
 rm -f "${BACKUP_FILE}"
 
 echo "[BACKUP] Backup procedure finished successfully at $(date -u +%Y%m%d_%H%M%SZ)."
+

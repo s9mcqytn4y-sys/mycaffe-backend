@@ -3,7 +3,7 @@
 Backend RESTful API dan Realtime Hub untuk platform white-label multi-tenant QR Table Ordering, Point of Sale (POS), Kitchen Display System (KDS), dan TV Queue Display untuk kafe dan restoran.
 
 ## 🚀 Tech Stack
-- **Language**: Go 1.24+
+- **Language**: Go 1.27.x
 - **Web Framework**: Gin Gonic (`v1.12.0`)
 - **Database Driver**: `jackc/pgx/v5` & `jmoiron/sqlx`
 - **Database Engine**: PostgreSQL 18-alpine

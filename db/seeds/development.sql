@@ -87,3 +87,4 @@ INSERT INTO audit_logs (
     '{"old_stock": 0, "new_stock": 45}'::jsonb
 )
 ON CONFLICT (id) DO NOTHING;
+

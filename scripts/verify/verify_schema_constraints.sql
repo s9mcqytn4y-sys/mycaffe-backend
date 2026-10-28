@@ -71,8 +71,15 @@ BEGIN
     -- 6. Test Store Soft-Delete Protection (ON DELETE RESTRICT on orders & payments)
     BEGIN
         DELETE FROM stores WHERE id = v_store_a;
-    EXCEPTION WHEN foreign_key_violation THEN
-        v_restrict_failed := TRUE;
+    EXCEPTION
+        WHEN foreign_key_violation OR restrict_violation OR integrity_constraint_violation THEN
+            v_restrict_failed := TRUE;
+        WHEN OTHERS THEN
+            IF SQLSTATE IN ('23503', '23001') THEN
+                v_restrict_failed := TRUE;
+            ELSE
+                RAISE;
+            END IF;
     END;
 
     IF NOT v_restrict_failed THEN

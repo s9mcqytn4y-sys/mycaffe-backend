@@ -252,3 +252,4 @@ CREATE INDEX IF NOT EXISTS idx_payments_provider_order ON payments(store_id, pro
 CREATE INDEX IF NOT EXISTS idx_notif_logs_lookup ON payment_notification_logs(provider, transaction_id, transaction_status);
 CREATE INDEX IF NOT EXISTS idx_notif_logs_order_number ON payment_notification_logs(order_number);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_store_created ON audit_logs(store_id, created_at DESC);
+

@@ -72,3 +72,4 @@ Cloudflare R2 is **not required** for local asset serving (product images are se
 - **Negative / Operational Responsibilities**:
   - The operator manages container restarts, volume backups, and host OS security patches.
   - Automated offsite backup verification must be tested regularly.
+

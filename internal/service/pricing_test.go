@@ -281,4 +281,3 @@ func TestValidateAndPriceOrder_PurePricingAndModifiers(t *testing.T) {
 		}
 	})
 }
-

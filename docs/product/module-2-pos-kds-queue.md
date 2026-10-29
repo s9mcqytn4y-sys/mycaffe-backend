@@ -1,4 +1,4 @@
-# Module 2 — POS, KDS, Customer Display, and Queue
+# Module 2: POS, KDS, Customer Display, and Queue
 
 ## Screens
 - `/pos/cashier`: QR orders, walk-in orders, cash/QRIS checkout, quick stock toggle, shift lifecycle.
@@ -11,7 +11,7 @@
 - KDS tickets must emphasize table/order number, dine-in/takeaway, quantities, and critical modifiers (e.g., less sugar, extra shot, allergy notes if supported).
 - Use configurable aging thresholds rather than treating sample values (5/10 minutes) as universal. Measure paid-to-ready SLA per station and shift.
 - Queue numbering must be generated safely under concurrency and be unique within the store and business date. Keep internal database IDs separate from human-readable queue numbers.
-- Same-browser dual displays can use `BroadcastChannel`; separate devices require a backend realtime channel (WebSocket/SSE/Supabase Realtime) and authorization. Do not promise “0.01 second” delivery; measure it.
+- Same-browser dual displays can use `BroadcastChannel`; separate devices require an authenticated backend WebSocket channel (`/ws` backed by `outbox_events`). Do not promise "0.01 second" delivery; measure it.
 - Browser TTS/autoplay may be blocked until a user gesture. Provide visual fallback and a staff-controlled audio test/unmute action.
 - Thermal printing may use browser print and 58/80 mm CSS initially. Direct USB/Bluetooth printing depends on device/browser/driver support and must be validated on the target hardware.
 

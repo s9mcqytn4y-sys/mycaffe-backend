@@ -8,17 +8,15 @@ import (
 	"github.com/google/uuid"
 )
 
-// PaymentAttemptStatus represents the lifecycle state of an individual payment attempt in `payments`.
+// PaymentAttemptStatus matches chk_payments_status on payments.status.
 type PaymentAttemptStatus string
 
-// PaymentStatus is an alias for PaymentAttemptStatus for backward compatibility across callers.
+// PaymentStatus aliases PaymentAttemptStatus for gateway status mapping callers.
 type PaymentStatus = PaymentAttemptStatus
 
 const (
-	PaymentStatusUnpaid            PaymentAttemptStatus = "unpaid"
 	PaymentStatusPending           PaymentAttemptStatus = "pending"
 	PaymentStatusAuthorized        PaymentAttemptStatus = "authorized"
-	PaymentStatusPartiallyPaid     PaymentAttemptStatus = "partially_paid"
 	PaymentStatusPaid              PaymentAttemptStatus = "paid"
 	PaymentStatusFailed            PaymentAttemptStatus = "failed"
 	PaymentStatusCancelled         PaymentAttemptStatus = "cancelled"
@@ -29,13 +27,27 @@ const (
 	PaymentStatusPartialChargeback PaymentAttemptStatus = "partial_chargeback"
 )
 
-// OrderPaymentStatus represents the aggregate financial status on `orders.payment_status`.
+func ValidPaymentAttemptStatuses() []PaymentAttemptStatus {
+	return []PaymentAttemptStatus{
+		PaymentStatusPending,
+		PaymentStatusAuthorized,
+		PaymentStatusPaid,
+		PaymentStatusFailed,
+		PaymentStatusCancelled,
+		PaymentStatusExpired,
+		PaymentStatusPartiallyRefunded,
+		PaymentStatusRefunded,
+		PaymentStatusChargeback,
+		PaymentStatusPartialChargeback,
+	}
+}
+
+// OrderPaymentStatus matches chk_orders_payment_status on orders.payment_status.
 type OrderPaymentStatus string
 
 const (
 	OrderPaymentStatusUnpaid            OrderPaymentStatus = "unpaid"
 	OrderPaymentStatusPending           OrderPaymentStatus = "pending"
-	OrderPaymentStatusAuthorized        OrderPaymentStatus = "authorized"
 	OrderPaymentStatusPartiallyPaid     OrderPaymentStatus = "partially_paid"
 	OrderPaymentStatusPaid              OrderPaymentStatus = "paid"
 	OrderPaymentStatusFailed            OrderPaymentStatus = "failed"
@@ -47,32 +59,53 @@ const (
 	OrderPaymentStatusPartialChargeback OrderPaymentStatus = "partial_chargeback"
 )
 
-// SplitBillStatus represents the status of an individual split bill in `payment_splits.status`.
+func ValidOrderPaymentStatuses() []OrderPaymentStatus {
+	return []OrderPaymentStatus{
+		OrderPaymentStatusUnpaid,
+		OrderPaymentStatusPending,
+		OrderPaymentStatusPartiallyPaid,
+		OrderPaymentStatusPaid,
+		OrderPaymentStatusFailed,
+		OrderPaymentStatusCancelled,
+		OrderPaymentStatusExpired,
+		OrderPaymentStatusPartiallyRefunded,
+		OrderPaymentStatusRefunded,
+		OrderPaymentStatusChargeback,
+		OrderPaymentStatusPartialChargeback,
+	}
+}
+
+// SplitBillStatus matches chk_payment_splits_status on payment_splits.status.
 type SplitBillStatus string
 
 const (
-	SplitBillStatusUnpaid            SplitBillStatus = "unpaid"
-	SplitBillStatusPending           SplitBillStatus = "pending"
-	SplitBillStatusAuthorized        SplitBillStatus = "authorized"
-	SplitBillStatusPartiallyPaid     SplitBillStatus = "partially_paid"
-	SplitBillStatusPaid              SplitBillStatus = "paid"
-	SplitBillStatusFailed            SplitBillStatus = "failed"
-	SplitBillStatusCancelled         SplitBillStatus = "cancelled"
-	SplitBillStatusExpired           SplitBillStatus = "expired"
-	SplitBillStatusPartiallyRefunded SplitBillStatus = "partially_refunded"
-	SplitBillStatusRefunded          SplitBillStatus = "refunded"
-	SplitBillStatusChargeback        SplitBillStatus = "chargeback"
-	SplitBillStatusPartialChargeback SplitBillStatus = "partial_chargeback"
+	SplitBillStatusUnpaid        SplitBillStatus = "unpaid"
+	SplitBillStatusPending       SplitBillStatus = "pending"
+	SplitBillStatusPartiallyPaid SplitBillStatus = "partially_paid"
+	SplitBillStatusPaid          SplitBillStatus = "paid"
+	SplitBillStatusCancelled     SplitBillStatus = "cancelled"
+	SplitBillStatusRefunded      SplitBillStatus = "refunded"
 )
 
-// CanTransitionPaymentStatus enforces the payment attempt state machine so out-of-order
-// webhooks (e.g. a delayed "pending" arriving after "settlement") never regress a settled payment.
+func ValidSplitBillStatuses() []SplitBillStatus {
+	return []SplitBillStatus{
+		SplitBillStatusUnpaid,
+		SplitBillStatusPending,
+		SplitBillStatusPartiallyPaid,
+		SplitBillStatusPaid,
+		SplitBillStatusCancelled,
+		SplitBillStatusRefunded,
+	}
+}
+
+// CanTransitionPaymentStatus prevents out-of-order webhooks (such as a delayed "pending"
+// arriving after "settlement") from regressing a settled payment attempt.
 func CanTransitionPaymentStatus(from, to PaymentAttemptStatus) bool {
 	if from == to {
 		return true
 	}
 	switch from {
-	case PaymentStatusUnpaid, PaymentStatusPending:
+	case PaymentStatusPending:
 		switch to {
 		case PaymentStatusAuthorized, PaymentStatusPaid, PaymentStatusFailed, PaymentStatusCancelled, PaymentStatusExpired:
 			return true
@@ -115,6 +148,20 @@ const (
 	PaymentMethodEDC          PaymentMethod = "edc"
 )
 
+func ValidPaymentMethods() []PaymentMethod {
+	return []PaymentMethod{
+		PaymentMethodQRIS,
+		PaymentMethodStaticQRIS,
+		PaymentMethodBankTransfer,
+		PaymentMethodGoPay,
+		PaymentMethodShopeePay,
+		PaymentMethodCard,
+		PaymentMethodCStore,
+		PaymentMethodCash,
+		PaymentMethodEDC,
+	}
+}
+
 type SplitMode string
 
 const (
@@ -124,7 +171,15 @@ const (
 	SplitModeCustomAmount SplitMode = "custom_amount"
 )
 
-// PaymentSplit represents an individual bill portion under a parent Order (`payment_splits`).
+func ValidSplitModes() []SplitMode {
+	return []SplitMode{
+		SplitModeFull,
+		SplitModeEqual,
+		SplitModeByItem,
+		SplitModeCustomAmount,
+	}
+}
+
 type PaymentSplit struct {
 	ID                  uuid.UUID          `json:"id" db:"id"`
 	StoreID             uuid.UUID          `json:"store_id" db:"store_id"`
@@ -143,7 +198,6 @@ type PaymentSplit struct {
 	UpdatedAt           time.Time          `json:"updated_at" db:"updated_at"`
 }
 
-// PaymentSplitItem links a specific quantity of an OrderItem to a PaymentSplit (`payment_split_items`).
 type PaymentSplitItem struct {
 	ID              uuid.UUID `json:"id" db:"id"`
 	StoreID         uuid.UUID `json:"store_id" db:"store_id"`
@@ -154,10 +208,6 @@ type PaymentSplitItem struct {
 	CreatedAt       time.Time `json:"created_at" db:"created_at"`
 }
 
-// ValidateSplitAllocations enforces mathematical and item-quantity invariants across split bills:
-// 1. Every split must have TotalAmount > 0, PaidAmount >= 0, and PaidAmount <= TotalAmount.
-// 2. The sum of all splits' TotalAmount must equal orderTotal exactly (no lost or invented Rupiah).
-// 3. For item allocations, no OrderItem can be allocated beyond its purchased Quantity.
 func ValidateSplitAllocations(orderTotal int64, orderItems []OrderItem, splits []PaymentSplit) error {
 	if orderTotal <= 0 {
 		return errors.New("order total must be strictly positive")
@@ -229,7 +279,6 @@ func ValidateSplitAllocations(orderTotal int64, orderItems []OrderItem, splits [
 	return nil
 }
 
-// Payment represents a tenant-scoped payment transaction attempt (`payments`).
 type Payment struct {
 	ID                uuid.UUID            `json:"id" db:"id"`
 	StoreID           uuid.UUID            `json:"store_id" db:"store_id"`
@@ -238,24 +287,24 @@ type Payment struct {
 	AttemptNo         int                  `json:"attempt_no" db:"attempt_no"`
 	IdempotencyKey    string               `json:"idempotency_key" db:"idempotency_key"`
 	Provider          string               `json:"provider" db:"provider"`
-	ProviderOrderID   string               `json:"provider_order_id" db:"provider_order_id"` // Format: {order_number}-S{split}-A{attempt}
-	Amount            int64                `json:"amount" db:"amount"`                       // Integer Rupiah
-	RefundedAmount    int64                `json:"refunded_amount" db:"refunded_amount"`     // Integer Rupiah
+	ProviderOrderID   string               `json:"provider_order_id" db:"provider_order_id"`
+	Amount            int64                `json:"amount" db:"amount"`
+	RefundedAmount    int64                `json:"refunded_amount" db:"refunded_amount"`
 	Method            PaymentMethod        `json:"method" db:"method"`
 	Status            PaymentAttemptStatus `json:"status" db:"status"`
 	RawProviderStatus string               `json:"raw_provider_status,omitempty" db:"raw_provider_status"`
 	FraudStatus       string               `json:"fraud_status,omitempty" db:"fraud_status"`
-	TransactionID     string               `json:"transaction_id,omitempty" db:"transaction_id"` // Midtrans transaction_id
-	PaymentType       string               `json:"payment_type,omitempty" db:"payment_type"`     // qris, bank_transfer, gopay, shopeepay, card, cstore
+	TransactionID     string               `json:"transaction_id,omitempty" db:"transaction_id"`
+	PaymentType       string               `json:"payment_type,omitempty" db:"payment_type"`
 	Acquirer          string               `json:"acquirer,omitempty" db:"acquirer"`
-	QRString          string               `json:"qr_string,omitempty" db:"qr_string"` // For dynamic QRIS
+	QRString          string               `json:"qr_string,omitempty" db:"qr_string"`
 	DeeplinkURL       string               `json:"deeplink_url,omitempty" db:"deeplink_url"`
-	VANumber          string               `json:"va_number,omitempty" db:"va_number"` // For Virtual Account
+	VANumber          string               `json:"va_number,omitempty" db:"va_number"`
 	Bank              string               `json:"bank,omitempty" db:"bank"`
-	BillerCode        string               `json:"biller_code,omitempty" db:"biller_code"` // For Mandiri Bill
-	BillKey           string               `json:"bill_key,omitempty" db:"bill_key"`       // For Mandiri Bill
+	BillerCode        string               `json:"biller_code,omitempty" db:"biller_code"`
+	BillKey           string               `json:"bill_key,omitempty" db:"bill_key"`
 	PaymentCode       string               `json:"payment_code,omitempty" db:"payment_code"`
-	ReconciliationRef string               `json:"reconciliation_ref,omitempty" db:"reconciliation_ref"` // Mandatory for static_qris / edc
+	ReconciliationRef string               `json:"reconciliation_ref,omitempty" db:"reconciliation_ref"`
 	VerifiedByUserID  *uuid.UUID           `json:"verified_by_user_id,omitempty" db:"verified_by_user_id"`
 	FailureCode       string               `json:"failure_code,omitempty" db:"failure_code"`
 	FailureReason     string               `json:"failure_reason,omitempty" db:"failure_reason"`
@@ -265,12 +314,11 @@ type Payment struct {
 	UpdatedAt         time.Time            `json:"updated_at" db:"updated_at"`
 }
 
-// PaymentNotificationLog records raw incoming webhooks for audit and idempotency (`payment_notification_logs`).
 type PaymentNotificationLog struct {
 	ID                uuid.UUID  `json:"id" db:"id"`
 	StoreID           uuid.UUID  `json:"store_id" db:"store_id"`
 	OrderID           *uuid.UUID `json:"order_id,omitempty" db:"order_id"`
-	Provider          string     `json:"provider" db:"provider"` // midtrans
+	Provider          string     `json:"provider" db:"provider"`
 	TransactionID     string     `json:"transaction_id" db:"transaction_id"`
 	OrderNumber       string     `json:"order_number" db:"order_number"`
 	StatusCode        string     `json:"status_code" db:"status_code"`

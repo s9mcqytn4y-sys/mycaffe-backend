@@ -17,6 +17,8 @@ import (
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/database"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/midtrans"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/realtime"
+	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/repository/postgres"
+	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/service"
 )
 
 // @title MyCaffe Core POS API
@@ -104,6 +106,11 @@ func main() {
 	healthHandler := handler.NewHealthHandler("MyCaffe POS Backend", cfg.AppEnv, db)
 	midtransHandler := handler.NewMidtransHandler(midtransClient, hub)
 	orderHandler := handler.NewOrderHandler(cfg, midtransClient, hub)
+	if db != nil {
+		orderRepo := postgres.NewOrderRepository()
+		orderService := service.NewOrderService(db, orderRepo)
+		orderHandler.SetOrderService(orderService)
+	}
 
 	// Register Routes
 	v1 := router.Group("/api/v1")

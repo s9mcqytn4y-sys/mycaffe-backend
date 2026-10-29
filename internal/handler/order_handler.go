@@ -14,12 +14,14 @@ import (
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/auth"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/midtrans"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/realtime"
+	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/service"
 )
 
 type OrderHandler struct {
 	cfg            *config.Config
 	midtransClient *midtrans.Client
 	realtimeHub    *realtime.Hub
+	orderService   *service.OrderService
 }
 
 func NewOrderHandler(cfg *config.Config, client *midtrans.Client, hub *realtime.Hub) *OrderHandler {
@@ -28,6 +30,10 @@ func NewOrderHandler(cfg *config.Config, client *midtrans.Client, hub *realtime.
 		midtransClient: client,
 		realtimeHub:    hub,
 	}
+}
+
+func (h *OrderHandler) SetOrderService(svc *service.OrderService) {
+	h.orderService = svc
 }
 
 type CreateOrderItemRequest struct {
@@ -47,9 +53,9 @@ type CreateOrderRequest struct {
 	Items         []CreateOrderItemRequest `json:"items" binding:"required,min=1"`
 }
 
-// CreateOrder handles customer order creation and initiates payment
+// CreateOrder handles customer order creation and initiates payment.
 // @Summary Create Customer Order & Initiate Core API Payment
-// @Description Enforces server-side recalculation and fails-closed in production until database persistence repository is connected.
+// @Description Enforces server-side recalculation and fails-closed in staging and production until trusted tenant identity middleware (staff JWT or signed table QR token) is wired on public HTTP routes.
 // @Tags Orders
 // @Accept json
 // @Produce json
@@ -59,10 +65,11 @@ type CreateOrderRequest struct {
 // @Failure 503 {object} map[string]interface{}
 // @Router /api/v1/orders [post]
 func (h *OrderHandler) CreateOrder(c *gin.Context) {
-	// P0 Containment: Production fails closed until database repository is connected
-	if h.cfg.AppEnv == "production" {
+	// P0 Containment: Staging and production fail closed until trusted tenant identity middleware
+	// (staff JWT or signed table QR token) is bound to the public HTTP endpoint.
+	if h.cfg.AppEnv == "production" || h.cfg.AppEnv == "staging" {
 		c.JSON(http.StatusServiceUnavailable, gin.H{
-			"error": "[P0 CONTAINMENT] Order persistence and verified pricing repository are currently being initialized. Live payment transactions are blocked.",
+			"error": "[P0 CONTAINMENT] Public order HTTP endpoint is fail-closed in staging and production until signed table QR or staff JWT tenant binding is active.",
 		})
 		return
 	}
@@ -77,7 +84,7 @@ func (h *OrderHandler) CreateOrder(c *gin.Context) {
 	orderNumber := fmt.Sprintf("ORD-%s-%s", time.Now().Format("20060102"), orderID.String()[:8])
 	queueNumber := fmt.Sprintf("A%s", orderID.String()[:3])
 
-	// In development simulation:
+	// In development simulation without authenticated tenant context:
 	var subtotal int64 = 25000
 	var taxRate int64 = 10
 	var taxAmount int64 = (subtotal * taxRate) / 100
@@ -92,8 +99,9 @@ func (h *OrderHandler) CreateOrder(c *gin.Context) {
 		CustomerName:        req.CustomerName,
 		CustomerPhone:       req.CustomerPhone,
 		OrderType:           req.OrderType,
+		BillingMode:         domain.BillingModePayFirst,
 		Status:              domain.OrderStatusPendingPayment,
-		PaymentStatus:       domain.OrderPaymentStatusPending,
+		PaymentStatus:       domain.OrderPaymentStatusUnpaid,
 		SubtotalAmount:      subtotal,
 		DiscountAmount:      0,
 		TaxAmount:           taxAmount,
@@ -103,21 +111,20 @@ func (h *OrderHandler) CreateOrder(c *gin.Context) {
 		UpdatedAt:           time.Now(),
 	}
 
-	// P0 Containment: In development without DB persistence, do not call Midtrans Charge to avoid orphan charges
 	c.JSON(http.StatusCreated, gin.H{
-		"message":      "Order draft created (Simulation Mode - DB persistence pending)",
+		"message":      "Order draft created (Simulation Mode - use authenticated OrderService for transactional persistence)",
 		"order":        order,
 		"status":       "draft",
 		"payment_mode": "mock_preview",
 	})
 }
 
-// HandleWebSocket upgrades connection for KDS / TV Queue display with cryptographic token authorization
+// HandleWebSocket upgrades connection for KDS / TV Queue display with cryptographic token authorization.
 func (h *OrderHandler) HandleWebSocket(c *gin.Context) {
-	// P0 Fail-Closed: Production disables unauthenticated/unvetted WebSocket endpoint
-	if h.cfg.AppEnv == "production" {
+	// P0 Fail-Closed: Staging and production disable unvetted WebSocket endpoint until Phase 03 session ticket validation.
+	if h.cfg.AppEnv == "production" || h.cfg.AppEnv == "staging" {
 		c.JSON(http.StatusServiceUnavailable, gin.H{
-			"error": "[P0 CONTAINMENT] Production WebSocket endpoint is currently disabled until staff authentication and session ticket validation are deployed in Phase 03.",
+			"error": "[P0 CONTAINMENT] WebSocket endpoint is fail-closed in staging and production until staff authentication and session ticket validation are deployed in Phase 03.",
 		})
 		return
 	}

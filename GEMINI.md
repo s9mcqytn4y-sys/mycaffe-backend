@@ -1,14 +1,15 @@
-# MyCaffe Core POS — Gemini & Antigravity Instructions
+# MyCaffe Core POS: Gemini & Antigravity Instructions
 
 ## Repository Role
-This repository (`mycaffe-backend`) is the Go backend for MyCaffe — a configurable, multi-tenant QR table ordering, POS, KDS, and TV queue display platform. The frontend is a separate Next.js application; do not generate or manage frontend code within this backend repository.
+This repository (`mycaffe-backend`) is the Go backend for MyCaffe, a configurable, multi-tenant QR table ordering, POS, KDS, and TV queue display platform. The frontend is a separate Next.js application; do not generate or manage frontend code within this backend repository. Official brand guidelines, visual tokens (*Espresso & Crema*), and product knowledge are codified in [docs/product/brand-and-product-knowledge.md](docs/product/brand-and-product-knowledge.md).
 
 ## Guiding Principles & Quality Standards
-1. **Multi-Tenant Security**: Every query, mutation, and realtime event must be strictly scoped by the authenticated `store_id` (tenant UUID). Never trust client-provided tenant parameters.
-2. **Payment Integrity**: Prices, modifiers, discounts, taxes, and service charges are calculated exclusively on the server from the official catalog. Money amounts must be whole integer Indonesian Rupiah (`int64` / PostgreSQL `BIGINT`) without floating-point math or fractional cents.
-3. **Fail-Closed Operations**: In production (`APP_ENV=production`), all endpoints must fail-closed if required configuration is missing or insecure.
-4. **Single-VPS Modular Monolith**: Production deployment runs on a single Hostinger KVM 2 VPS (Ubuntu 24.04 LTS) via Docker Compose (`postgres:18-alpine`, Go API backend, Next.js frontend, Nginx reverse proxy). Supabase runtime dependencies are fully superseded (ADR-002).
+1. **Multi-Tenant Security**: Every query, mutation, and realtime event must be strictly scoped by the authenticated `store_id` (tenant UUID) inside `database.WithTenantTx`. Never trust client-provided tenant parameters on public routes.
+2. **Payment Integrity**: Prices, modifiers, 1-level nested sub-addons, discounts, taxes, and service charges are calculated exclusively on the server from the official catalog. Money amounts must be whole integer Indonesian Rupiah (`int64` / PostgreSQL `BIGINT`) without floating-point math or fractional cents.
+3. **Fail-Closed Operations**: In `staging` and `production`, endpoints lacking complete authenticated tenant binding or durable database persistence must fail-closed (`503 Service Unavailable`).
+4. **Single-VPS Modular Monolith**: Production deployment runs on a single Hostinger KVM 2 VPS (Ubuntu 24.04 LTS) via Docker Compose (`postgres:18-alpine`, Go API backend, Next.js frontend, Nginx reverse proxy). External database PaaS runtime dependencies are fully superseded (ADR-002).
 5. **Cloudflare R2 Dual-Bucket Storage**: Cloudflare R2 is used with two isolated buckets and separate credentials: `mycaffe-media` (public/CDN product & store media) and `mycaffe-backups` (private GPG AES256+SHA512 encrypted `pg_dump` backups with zero egress fees).
+6. **Zero In-Place Coding on Production VPS**: Never edit source code, SQL migrations, or run `go build` directly on the production VPS. All changes must pass through `feature/*` -> `staging` CI -> `main` -> immutable GHCR container image deployment.
 
 ## Bounded Autonomy for Agents
 - **Autonomous Decisions (No confirmation required)**:

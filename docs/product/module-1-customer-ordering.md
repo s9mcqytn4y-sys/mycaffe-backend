@@ -1,4 +1,4 @@
-# Module 1 — Customer QR Ordering
+# Module 1: Customer QR Ordering
 
 ## Product goal
 Mobile-first, guest checkout with minimal friction. Target: a typical customer can choose items and start payment in under 90 seconds, without creating an account. Treat this as a measurable target, not a guarantee on every network/payment app.
@@ -24,7 +24,7 @@ Mobile-first, guest checkout with minimal friction. Target: a typical customer c
 
 ## Payment and split-bill scope
 - Distinguish static store QRIS/manual reconciliation from dynamic order-linked QRIS.
-- Confirm payment through a verified provider notification or authorized cashier workflow—not a client redirect.
+- Confirm payment through a verified provider notification or authorized cashier workflow, never via a client redirect.
 - Split bill is a supported product requirement, but implement it only after the single-payer path is stable. Define equal split and item-based split, rounding, partial payment, cancellation, refund, and reconciliation semantics before coding.
 
 ## Edge cases

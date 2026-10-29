@@ -1,4 +1,4 @@
-# MyCaffe Core POS — Frontend Repository Instructions
+# MyCaffe Core POS: Frontend Repository Instructions
 
 This file is a template for the separate Next.js frontend repository. Copy it as `AGENTS.md` into that repository only after checking its current files.
 

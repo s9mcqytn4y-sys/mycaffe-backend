@@ -5,7 +5,7 @@
 
 ## 1. Executive Summary & Design Scope
 
-Dokumen ini mendefinisikan arsitektur data dan kontrak transaksional untuk **MyCaffe Core POS** pada Phase 01 (Sub-task 1 & Sub-task 2). Tujuannya adalah menjamin:
+Dokumen ini mendefinisikan arsitektur data dan kontrak transaksional untuk **MyCaffe Core POS** pada Phase 01 (Sub-task 1, Sub-task 2, dan Sub-task 3). Tujuannya adalah menjamin:
 - **Tenant Isolation (Defense-in-Depth)**: Isolasi data per store/tenant menggunakan filter eksplisit `store_id` di Go ditambah PostgreSQL 18 Row-Level Security (`ENABLE ROW LEVEL SECURITY`) dengan runtime role `mycaffe_app` (`NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS`).
 - **Streamlined 4 Operational Roles & Fast-Action Audit**: Empat role operasional (`owner`, `cashier`, `barista`, `kitchen`) tanpa gate persetujuan berlapis yang menghambat kasir. Aksi sensitif kasir dicatat ke `audit_logs` dengan PIN + kode alasan wajib.
 - **Payment & Financial Integrity**: Perhitungan harga, opsi modifier, pajak, service charge, dan split bill menggunakan integer Rupiah (`BIGINT` / `int64`) serta Basis Points (`BPS`) tanpa floating-point (`float64`).
@@ -114,3 +114,41 @@ Seluruh migrasi database dikelola oleh `cmd/migrate` (`internal/pkg/database/mig
 5. `go run ./cmd/migrate -action=up` (Re-apply)
 6. `go run ./cmd/migrate -action=seed` dijalankan 2x berturut-turut (Uji Idempotensi Seed Development)
 7. `go test -v -race -run TestDirectAppRoleLoginAndTenantRLS ./internal/pkg/database/...` (Koneksi TCP langsung sebagai `mycaffe_app`)
+8. `go test -v -race -run TestOrderServiceIntegration_EndToEnd ./internal/service/...` (Uji integrasi transaksional `OrderService` pada PostgreSQL 18 sebagai `mycaffe_app`)
+
+---
+
+## 8. Phase 01 Sub-task 03A & 03B: Transactional Order Persistence & Pricing Contract
+
+### 8.1 Additive Migration `20261029000002_add_orders_request_hash`
+Untuk mendeteksi konflik penggunaan ulang `idempotency_key` dengan payload pesanan yang berbeda tanpa mengubah file migrasi awal (`20261028000001_init_schema.up.sql` yang sudah terkunci checksum SHA-256-nya), migrasi aditif `20261029000002_add_orders_request_hash.up.sql` menambahkan kolom:
+```sql
+ALTER TABLE orders
+ADD COLUMN IF NOT EXISTS request_hash VARCHAR(64) NOT NULL DEFAULT '';
+```
+Nilai `request_hash` dihitung secara deterministik menggunakan SHA-256 (`service.ComputeInputRequestHash`) atas:
+- `store_id` terautentikasi
+- `order_type` dan `billing_mode` efektif
+- `table_number`, `customer_name`, `customer_phone`, dan `notes` yang telah dinormalisasi (`strings.TrimSpace`)
+- Daftar berurutan item pesanan beserta `product_id`, `quantity`, `config_hash` (kanonikal atas opsi modifier dan sub-addon 1 level), serta catatan item.
+
+Aturan idempotensi di dalam `OrderService.CreateOrder`:
+1. Jika `(store_id, idempotency_key)` sudah ada di tabel `orders` dan `existing.request_hash == canonicalRequestHash`, layanan langsung mengembalikan pesanan beserta `payment_splits` yang sudah tersimpan (`IsIdempotentReplay = true`) tanpa mengurangi stok atau mengalokasikan nomor antrean baru.
+2. Jika `(store_id, idempotency_key)` sudah ada tetapi `existing.request_hash != canonicalRequestHash`, layanan menolak permintaan dengan `service.ErrIdempotencyConflict`.
+
+### 8.2 Atomic Transaction Flow (`OrderService.CreateOrder`)
+Seluruh pembuatan pesanan dieksekusi di dalam satu transaksi `database.WithTenantTx(ctx, db, trustedStoreID, ...)`:
+1. Menyetel konteks RLS `SELECT set_config('app.current_store_id', $1, true)`.
+2. Memuat dan memvalidasi status aktif toko (`stores.is_active = true AND stores.deleted_at IS NULL`).
+3. Memeriksa `idempotency_key` dan membandingkan `orders.request_hash`.
+4. Mengunci baris `products` dan `modifier_options` yang diminta secara deterministik (`ORDER BY id ASC FOR UPDATE`) untuk mencegah deadlock maupun race condition pada stok terbatas.
+5. Menjalankan `service.ValidateAndPriceOrder` untuk memvalidasi ketersediaan item, aturan grup modifier (`single`/`multiple`, `min_select`/`max_select`, `override_required`), sub-addon 1 level (`option_modifier_groups`), dan menghitung nominal integer Rupiah (`SubtotalAmount`, `ServiceChargeAmount`, `TaxAmount`, `TotalAmount`).
+6. Mengurangi `stock_quantity` pada `products` dan `modifier_options` yang mengaktifkan `track_stock = true` dengan kondisi atomik `WHERE store_id = $1 AND id = $2 AND track_stock = true AND stock_quantity >= $3`.
+7. Mengalokasikan nomor urut harian (`store_daily_sequences`) berdasarkan zona waktu lokal toko (`stores.timezone`) untuk membentuk `order_number` (`{ORDER_PREFIX}-{YYYYMMDD}-{XXXX}`) dan `queue_number` (`{QUEUE_PREFIX}{XXX}`).
+8. Menyimpan grafik pesanan lengkap (`orders`, `order_items`, `order_item_options` induk dan anak dengan `parent_order_item_option_id`, serta baris awal `payment_splits`).
+9. Menyimpan event `order.created` ke tabel `outbox_events` dalam transaksi yang sama untuk pengiriman realtime KDS/TV Queue yang andal.
+
+### 8.3 Boundary Kontrak HTTP Publik (`POST /api/v1/orders`) & Proposal Phase 02
+- Pada tahap ini, rute HTTP publik `POST /api/v1/orders` **tetap dikunci fail-closed (`503 Service Unavailable`) pada environment `staging` dan `production`** karena kontrak DTO publik lama masih menerima `store_id` dari body JSON klien dan belum diikat ke middleware tanda tangan QR meja atau JWT kasir.
+- Ketika middleware autentikasi penuh diaktifkan pada Phase 02, endpoint akan menurunkan `trustedStoreID` secara eksklusif dari klaim token terverifikasi (bukan dari body request) dan meneruskan `service.OrderCreationInput` (lengkap dengan `idempotency_key`, `modifiers`, dan `sub_addons`) langsung ke `OrderService.CreateOrder`.
+

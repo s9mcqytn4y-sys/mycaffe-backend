@@ -180,8 +180,9 @@ func TestValidateAndPriceOrder_PurePricingAndModifiers(t *testing.T) {
 	t.Run("missing required modifier group fails", func(t *testing.T) {
 		cat := buildCatalog()
 		input := service.OrderCreationInput{
-			CustomerName: "Budi",
-			OrderType:    domain.OrderTypeTakeaway,
+			IdempotencyKey: "idem-test-002",
+			CustomerName:   "Budi",
+			OrderType:      domain.OrderTypeTakeaway,
 			Items: []service.OrderItemInput{
 				{ProductID: prodID, Quantity: 1}, // Missing required Sugar Level
 			},
@@ -195,8 +196,9 @@ func TestValidateAndPriceOrder_PurePricingAndModifiers(t *testing.T) {
 	t.Run("missing required child sub-addon when parent option is selected fails", func(t *testing.T) {
 		cat := buildCatalog()
 		input := service.OrderCreationInput{
-			CustomerName: "Budi",
-			OrderType:    domain.OrderTypeTakeaway,
+			IdempotencyKey: "idem-test-003",
+			CustomerName:   "Budi",
+			OrderType:      domain.OrderTypeTakeaway,
 			Items: []service.OrderItemInput{
 				{
 					ProductID: prodID,
@@ -221,8 +223,9 @@ func TestValidateAndPriceOrder_PurePricingAndModifiers(t *testing.T) {
 		cat.Products[prodID] = p
 
 		input := service.OrderCreationInput{
-			CustomerName: "Budi",
-			OrderType:    domain.OrderTypeTakeaway,
+			IdempotencyKey: "idem-test-004",
+			CustomerName:   "Budi",
+			OrderType:      domain.OrderTypeTakeaway,
 			Items: []service.OrderItemInput{
 				{
 					ProductID: prodID,
@@ -240,8 +243,9 @@ func TestValidateAndPriceOrder_PurePricingAndModifiers(t *testing.T) {
 	t.Run("insufficient product or modifier stock is rejected", func(t *testing.T) {
 		cat := buildCatalog()
 		input := service.OrderCreationInput{
-			CustomerName: "Budi",
-			OrderType:    domain.OrderTypeTakeaway,
+			IdempotencyKey: "idem-test-005",
+			CustomerName:   "Budi",
+			OrderType:      domain.OrderTypeTakeaway,
 			Items: []service.OrderItemInput{
 				{
 					ProductID: prodID,
@@ -260,6 +264,155 @@ func TestValidateAndPriceOrder_PurePricingAndModifiers(t *testing.T) {
 		_, err := service.ValidateAndPriceOrder(store, input, cat)
 		if !errors.Is(err, service.ErrInsufficientStock) {
 			t.Fatalf("expected ErrInsufficientStock, got %v", err)
+		}
+	})
+
+	t.Run("missing idempotency_key is rejected", func(t *testing.T) {
+		cat := buildCatalog()
+		input := service.OrderCreationInput{
+			IdempotencyKey: "   ",
+			CustomerName:   "Budi",
+			OrderType:      domain.OrderTypeTakeaway,
+			Items: []service.OrderItemInput{
+				{
+					ProductID: prodID,
+					Quantity:  1,
+					Modifiers: []service.SelectedModifierInput{{OptionID: optLessSugarID, Quantity: 1}},
+				},
+			},
+		}
+		_, err := service.ValidateAndPriceOrder(store, input, cat)
+		if !errors.Is(err, service.ErrInvalidOrderInput) {
+			t.Fatalf("expected ErrInvalidOrderInput for empty idempotency_key, got %v", err)
+		}
+	})
+
+	t.Run("split_bill billing_mode is rejected on CreateOrder", func(t *testing.T) {
+		cat := buildCatalog()
+		input := service.OrderCreationInput{
+			IdempotencyKey: "idem-split-001",
+			CustomerName:   "Budi",
+			OrderType:      domain.OrderTypeTakeaway,
+			BillingMode:    domain.BillingModeSplitBill,
+			Items: []service.OrderItemInput{
+				{
+					ProductID: prodID,
+					Quantity:  1,
+					Modifiers: []service.SelectedModifierInput{{OptionID: optLessSugarID, Quantity: 1}},
+				},
+			},
+		}
+		_, err := service.ValidateAndPriceOrder(store, input, cat)
+		if !errors.Is(err, service.ErrUnsupportedBillingMode) {
+			t.Fatalf("expected ErrUnsupportedBillingMode, got %v", err)
+		}
+	})
+
+	t.Run("open_tab without staff ActorUserID is rejected", func(t *testing.T) {
+		cat := buildCatalog()
+		input := service.OrderCreationInput{
+			IdempotencyKey: "idem-opentab-001",
+			TableNumber:    "T01",
+			CustomerName:   "Budi",
+			OrderType:      domain.OrderTypeDineIn,
+			BillingMode:    domain.BillingModeOpenTab,
+			Items: []service.OrderItemInput{
+				{
+					ProductID: prodID,
+					Quantity:  1,
+					Modifiers: []service.SelectedModifierInput{{OptionID: optLessSugarID, Quantity: 1}},
+				},
+			},
+		}
+		_, err := service.ValidateAndPriceOrder(store, input, cat)
+		if !errors.Is(err, service.ErrUnauthorizedBillingMode) {
+			t.Fatalf("expected ErrUnauthorizedBillingMode, got %v", err)
+		}
+	})
+
+	t.Run("single-selection modifier group rejects quantity > 1 even if option MaxQuantity > 1", func(t *testing.T) {
+		cat := buildCatalog()
+		opt := cat.ModifierOptions[optLessSugarID]
+		opt.MaxQuantity = 3
+		cat.ModifierOptions[optLessSugarID] = opt
+
+		input := service.OrderCreationInput{
+			IdempotencyKey: "idem-single-qty-001",
+			CustomerName:   "Budi",
+			OrderType:      domain.OrderTypeTakeaway,
+			Items: []service.OrderItemInput{
+				{
+					ProductID: prodID,
+					Quantity:  1,
+					Modifiers: []service.SelectedModifierInput{{OptionID: optLessSugarID, Quantity: 2}},
+				},
+			},
+		}
+		_, err := service.ValidateAndPriceOrder(store, input, cat)
+		if !errors.Is(err, service.ErrInvalidModifierSelection) {
+			t.Fatalf("expected ErrInvalidModifierSelection for single group quantity > 1, got %v", err)
+		}
+	})
+
+	t.Run("multiple-selection parent modifier with quantity > 1 multiplies sub-addon cost and stock", func(t *testing.T) {
+		cat := buildCatalog()
+		// Make Milk Option a multiple-selection group allowing up to 3 selections, and Oat Milk MaxQuantity = 2
+		grpMilk := cat.ModifierGroups[grpMilkID]
+		grpMilk.SelectionType = "multiple"
+		grpMilk.MaxSelect = 3
+		cat.ModifierGroups[grpMilkID] = grpMilk
+
+		optOat := cat.ModifierOptions[optOatMilkID]
+		optOat.MaxQuantity = 2
+		optOat.StockQuantity = 10
+		cat.ModifierOptions[optOatMilkID] = optOat
+
+		optFoam := cat.ModifierOptions[optExtraFoamID]
+		optFoam.TrackStock = true
+		optFoam.StockQuantity = 10
+		cat.ModifierOptions[optExtraFoamID] = optFoam
+
+		input := service.OrderCreationInput{
+			IdempotencyKey: "idem-multi-sub-001",
+			CustomerName:   "Budi",
+			OrderType:      domain.OrderTypeTakeaway,
+			Items: []service.OrderItemInput{
+				{
+					ProductID: prodID,
+					Quantity:  2, // 2 drinks
+					Modifiers: []service.SelectedModifierInput{
+						{OptionID: optLessSugarID, Quantity: 1},
+						{
+							OptionID: optOatMilkID,
+							Quantity: 2, // 2x Oat Milk per drink
+							SubAddons: []service.SelectedSubAddonInput{
+								{OptionID: optExtraFoamID, Quantity: 1}, // 1x Extra Microfoam per Oat Milk => 2x per drink
+							},
+						},
+					},
+				},
+			},
+		}
+
+		res, err := service.ValidateAndPriceOrder(store, input, cat)
+		if err != nil {
+			t.Fatalf("expected valid pricing, got error: %v", err)
+		}
+		// Base price = 28,000
+		// Parent modifier (2x Oat Milk @ 8,000) = 16,000
+		// Sub-addon (2x parent * 1x Extra Microfoam @ 2,000) = 4,000
+		// Unit price = 28,000 + 16,000 + 4,000 = 48,000
+		// Subtotal for 2 drinks = 96,000
+		if res.SubtotalAmount != 96000 {
+			t.Errorf("expected subtotal 96000, got %d", res.SubtotalAmount)
+		}
+		// Stock deduction for Oat Milk = 2 drinks * 2 = 4
+		if res.OptionStockDeducts[optOatMilkID] != 4 {
+			t.Errorf("expected oat milk stock deduction 4, got %d", res.OptionStockDeducts[optOatMilkID])
+		}
+		// Stock deduction for Extra Microfoam = 2 drinks * 2 parent * 1 sub = 4
+		if res.OptionStockDeducts[optExtraFoamID] != 4 {
+			t.Errorf("expected extra foam stock deduction 4, got %d", res.OptionStockDeducts[optExtraFoamID])
 		}
 	})
 

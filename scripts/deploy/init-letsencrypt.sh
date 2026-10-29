@@ -19,7 +19,16 @@ fi
 echo "[1/4] Starting Nginx with temporary TLS bootstrap certificate..."
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d nginx
 
-echo "[2/4] Removing temporary bootstrap certificate before requesting Let's Encrypt certificate..."
+echo "[2/4] Verifying existing Let's Encrypt certificate state before removing bootstrap certificate..."
+if docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" run --rm --entrypoint "test -f /etc/letsencrypt/renewal/${CERT_NAME}.conf" certbot 2>/dev/null; then
+  if [[ "${FORCE_REPLACE_CERT:-0}" != "1" ]]; then
+    echo "[ERROR] Existing Let's Encrypt renewal configuration found at /etc/letsencrypt/renewal/${CERT_NAME}.conf." >&2
+    echo "[ERROR] Refusing to delete live certificate. To force replacement, re-run with FORCE_REPLACE_CERT=1." >&2
+    exit 1
+  fi
+  echo "[WARN] FORCE_REPLACE_CERT=1 is set; replacing existing certificate ${CERT_NAME}..."
+fi
+
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" run --rm --entrypoint "\
   rm -rf /etc/letsencrypt/live/${CERT_NAME} /etc/letsencrypt/archive/${CERT_NAME} /etc/letsencrypt/renewal/${CERT_NAME}.conf" certbot
 

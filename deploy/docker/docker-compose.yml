@@ -21,7 +21,8 @@ services:
       - pgdata:/var/lib/postgresql
       - ../postgres/00-init-roles.sh:/docker-entrypoint-initdb.d/00-init-roles.sh:ro
     networks:
-      - mycaffe-internal
+      - mycaffe-edge
+      - mycaffe-data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_MIGRATOR_USER:-mycaffe_migrator} -d ${DB_NAME:-mycaffe_dev}"]
       interval: 5s
@@ -54,7 +55,8 @@ services:
       MIDTRANS_CLIENT_KEY: ${MIDTRANS_CLIENT_KEY:-SB-Mid-client-local-dev-key}
       MIDTRANS_IS_PRODUCTION: "false"
     networks:
-      - mycaffe-internal
+      - mycaffe-edge
+      - mycaffe-data
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health/ready"]
       interval: 10s
@@ -74,12 +76,15 @@ services:
       api:
         condition: service_healthy
     networks:
-      - mycaffe-internal
+      - mycaffe-edge
 
 volumes:
   pgdata:
     driver: local
 
 networks:
-  mycaffe-internal:
+  mycaffe-edge:
     driver: bridge
+  mycaffe-data:
+    driver: bridge
+    internal: true

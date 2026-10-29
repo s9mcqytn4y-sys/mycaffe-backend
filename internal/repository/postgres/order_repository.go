@@ -79,7 +79,8 @@ func (r *OrderRepository) GetOrderByIdempotencyKey(ctx context.Context, tx *sqlx
 		SELECT
 			id, store_id, idempotency_key, request_hash, order_number, queue_number,
 			table_number, customer_name, COALESCE(customer_phone, '') AS customer_phone,
-			order_type, billing_mode, status, payment_status,
+			order_type, billing_mode, status, payment_status, stock_status,
+			expires_at, created_by_user_id,
 			subtotal_amount, discount_amount, tax_amount, service_charge_amount,
 			total_amount, paid_amount, refunded_amount, COALESCE(notes, '') AS notes,
 			created_at, updated_at
@@ -93,6 +94,63 @@ func (r *OrderRepository) GetOrderByIdempotencyKey(ctx context.Context, tx *sqlx
 		return nil, nil, fmt.Errorf("failed to query order by idempotency_key: %w", err)
 	}
 
+	if err := r.populateOrderItemsAndOptions(ctx, tx, storeID, &order); err != nil {
+		return nil, nil, err
+	}
+
+	splits, err := r.getOrderSplits(ctx, tx, storeID, order.ID)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return &order, splits, nil
+}
+
+func (r *OrderRepository) GetOrderByIDForUpdate(ctx context.Context, tx *sqlx.Tx, storeID, orderID uuid.UUID) (*domain.Order, []domain.PaymentSplit, error) {
+	if tx == nil {
+		return nil, nil, ErrNilTransaction
+	}
+	if storeID == uuid.Nil {
+		return nil, nil, ErrEmptyTenantContext
+	}
+	if orderID == uuid.Nil {
+		return nil, nil, ErrOrderNotFound
+	}
+
+	var order domain.Order
+	orderQuery := `
+		SELECT
+			id, store_id, idempotency_key, request_hash, order_number, queue_number,
+			table_number, customer_name, COALESCE(customer_phone, '') AS customer_phone,
+			order_type, billing_mode, status, payment_status, stock_status,
+			expires_at, created_by_user_id,
+			subtotal_amount, discount_amount, tax_amount, service_charge_amount,
+			total_amount, paid_amount, refunded_amount, COALESCE(notes, '') AS notes,
+			created_at, updated_at
+		FROM orders
+		WHERE store_id = $1 AND id = $2
+		FOR UPDATE
+	`
+	if err := tx.GetContext(ctx, &order, orderQuery, storeID, orderID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil, ErrOrderNotFound
+		}
+		return nil, nil, fmt.Errorf("failed to lock and query order by id: %w", err)
+	}
+
+	if err := r.populateOrderItemsAndOptions(ctx, tx, storeID, &order); err != nil {
+		return nil, nil, err
+	}
+
+	splits, err := r.getOrderSplits(ctx, tx, storeID, order.ID)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return &order, splits, nil
+}
+
+func (r *OrderRepository) populateOrderItemsAndOptions(ctx context.Context, tx *sqlx.Tx, storeID uuid.UUID, order *domain.Order) error {
 	itemsQuery := `
 		SELECT
 			id, store_id, order_id, product_id, config_hash, snapshot_name,
@@ -105,7 +163,7 @@ func (r *OrderRepository) GetOrderByIdempotencyKey(ctx context.Context, tx *sqlx
 	`
 	var items []domain.OrderItem
 	if err := tx.SelectContext(ctx, &items, itemsQuery, storeID, order.ID); err != nil {
-		return nil, nil, fmt.Errorf("failed to query order items: %w", err)
+		return fmt.Errorf("failed to query order items: %w", err)
 	}
 
 	if len(items) > 0 {
@@ -122,7 +180,7 @@ func (r *OrderRepository) GetOrderByIdempotencyKey(ctx context.Context, tx *sqlx
 		`
 		var options []domain.OrderItemOption
 		if err := tx.SelectContext(ctx, &options, optionsQuery, storeID, order.ID); err != nil {
-			return nil, nil, fmt.Errorf("failed to query order item options: %w", err)
+			return fmt.Errorf("failed to query order item options: %w", err)
 		}
 
 		optsByItem := make(map[uuid.UUID][]domain.OrderItemOption, len(items))
@@ -134,7 +192,10 @@ func (r *OrderRepository) GetOrderByIdempotencyKey(ctx context.Context, tx *sqlx
 		}
 	}
 	order.Items = items
+	return nil
+}
 
+func (r *OrderRepository) getOrderSplits(ctx context.Context, tx *sqlx.Tx, storeID, orderID uuid.UUID) ([]domain.PaymentSplit, error) {
 	splitsQuery := `
 		SELECT
 			id, store_id, order_id, split_number, label, split_mode,
@@ -145,11 +206,35 @@ func (r *OrderRepository) GetOrderByIdempotencyKey(ctx context.Context, tx *sqlx
 		ORDER BY split_number ASC
 	`
 	var splits []domain.PaymentSplit
-	if err := tx.SelectContext(ctx, &splits, splitsQuery, storeID, order.ID); err != nil {
-		return nil, nil, fmt.Errorf("failed to query payment splits: %w", err)
+	if err := tx.SelectContext(ctx, &splits, splitsQuery, storeID, orderID); err != nil {
+		return nil, fmt.Errorf("failed to query payment splits: %w", err)
+	}
+	return splits, nil
+}
+
+func (r *OrderRepository) VerifyActiveStaffActor(ctx context.Context, tx *sqlx.Tx, storeID, userID uuid.UUID) (bool, error) {
+	if tx == nil {
+		return false, ErrNilTransaction
+	}
+	if storeID == uuid.Nil || userID == uuid.Nil {
+		return false, nil
 	}
 
-	return &order, splits, nil
+	var exists bool
+	query := `
+		SELECT EXISTS (
+			SELECT 1
+			FROM users
+			WHERE store_id = $1
+			  AND id = $2
+			  AND is_active = true
+			  AND role IN ('owner', 'cashier')
+		)
+	`
+	if err := tx.GetContext(ctx, &exists, query, storeID, userID); err != nil {
+		return false, fmt.Errorf("failed to verify active staff actor: %w", err)
+	}
+	return exists, nil
 }
 
 func (r *OrderRepository) LockAndLoadCatalogForOrder(ctx context.Context, tx *sqlx.Tx, storeID uuid.UUID, productIDs []uuid.UUID) (*CatalogData, error) {
@@ -373,6 +458,36 @@ func (r *OrderRepository) DeductModifierOptionStock(ctx context.Context, tx *sql
 	return nil
 }
 
+func (r *OrderRepository) RestoreProductStock(ctx context.Context, tx *sqlx.Tx, storeID, productID uuid.UUID, quantity int) error {
+	if quantity <= 0 {
+		return nil
+	}
+	_, err := tx.ExecContext(ctx, `
+		UPDATE products
+		SET stock_quantity = stock_quantity + $3
+		WHERE store_id = $1 AND id = $2 AND track_stock = true
+	`, storeID, productID, quantity)
+	if err != nil {
+		return fmt.Errorf("failed to restore product stock: %w", err)
+	}
+	return nil
+}
+
+func (r *OrderRepository) RestoreModifierOptionStock(ctx context.Context, tx *sqlx.Tx, storeID, optionID uuid.UUID, quantity int) error {
+	if quantity <= 0 {
+		return nil
+	}
+	_, err := tx.ExecContext(ctx, `
+		UPDATE modifier_options
+		SET stock_quantity = stock_quantity + $3
+		WHERE store_id = $1 AND id = $2 AND track_stock = true
+	`, storeID, optionID, quantity)
+	if err != nil {
+		return fmt.Errorf("failed to restore modifier option stock: %w", err)
+	}
+	return nil
+}
+
 func (r *OrderRepository) AllocateDailySequence(ctx context.Context, tx *sqlx.Tx, storeID uuid.UUID, businessDate string) (int, error) {
 	var seq int
 	query := `
@@ -391,17 +506,22 @@ func (r *OrderRepository) AllocateDailySequence(ctx context.Context, tx *sqlx.Tx
 }
 
 func (r *OrderRepository) InsertOrder(ctx context.Context, tx *sqlx.Tx, order *domain.Order) error {
+	if order.StockStatus == "" {
+		order.StockStatus = domain.OrderStockStatusReserved
+	}
 	query := `
 		INSERT INTO orders (
 			id, store_id, idempotency_key, request_hash, order_number, queue_number,
 			table_number, customer_name, customer_phone, order_type, billing_mode,
-			status, payment_status, subtotal_amount, discount_amount, tax_amount,
+			status, payment_status, stock_status, expires_at, created_by_user_id,
+			subtotal_amount, discount_amount, tax_amount,
 			service_charge_amount, total_amount, paid_amount, refunded_amount, notes
 		) VALUES (
 			$1, $2, $3, $4, $5, $6,
 			$7, $8, $9, $10, $11,
 			$12, $13, $14, $15, $16,
-			$17, $18, $19, $20, $21
+			$17, $18, $19,
+			$20, $21, $22, $23, $24
 		)
 		RETURNING created_at, updated_at
 	`
@@ -409,9 +529,50 @@ func (r *OrderRepository) InsertOrder(ctx context.Context, tx *sqlx.Tx, order *d
 		ctx, query,
 		order.ID, order.StoreID, order.IdempotencyKey, order.RequestHash, order.OrderNumber, order.QueueNumber,
 		order.TableNumber, order.CustomerName, order.CustomerPhone, order.OrderType, order.BillingMode,
-		order.Status, order.PaymentStatus, order.SubtotalAmount, order.DiscountAmount, order.TaxAmount,
+		order.Status, order.PaymentStatus, order.StockStatus, order.ExpiresAt, order.CreatedByUserID,
+		order.SubtotalAmount, order.DiscountAmount, order.TaxAmount,
 		order.ServiceChargeAmount, order.TotalAmount, order.PaidAmount, order.RefundedAmount, order.Notes,
 	).Scan(&order.CreatedAt, &order.UpdatedAt)
+}
+
+func (r *OrderRepository) UpdateOrderStatusAndStock(ctx context.Context, tx *sqlx.Tx, order *domain.Order) error {
+	query := `
+		UPDATE orders
+		SET status = $3,
+		    payment_status = $4,
+		    stock_status = $5,
+		    paid_amount = $6,
+		    expires_at = $7
+		WHERE store_id = $1 AND id = $2
+		RETURNING updated_at
+	`
+	return tx.QueryRowxContext(
+		ctx, query,
+		order.StoreID, order.ID, order.Status, order.PaymentStatus, order.StockStatus, order.PaidAmount, order.ExpiresAt,
+	).Scan(&order.UpdatedAt)
+}
+
+func (r *OrderRepository) UpdatePaymentSplitsStatusByOrder(ctx context.Context, tx *sqlx.Tx, storeID, orderID uuid.UUID, status domain.SplitBillStatus, setPaidFull bool) error {
+	var query string
+	if setPaidFull {
+		query = `
+			UPDATE payment_splits
+			SET status = $3,
+			    paid_amount = total_amount
+			WHERE store_id = $1 AND order_id = $2
+		`
+	} else {
+		query = `
+			UPDATE payment_splits
+			SET status = $3
+			WHERE store_id = $1 AND order_id = $2
+		`
+	}
+	_, err := tx.ExecContext(ctx, query, storeID, orderID, status)
+	if err != nil {
+		return fmt.Errorf("failed to update payment splits status: %w", err)
+	}
+	return nil
 }
 
 func (r *OrderRepository) InsertOrderItem(ctx context.Context, tx *sqlx.Tx, item *domain.OrderItem) error {

@@ -15,16 +15,20 @@ import (
 )
 
 var (
-	ErrStoreInactive            = errors.New("store is inactive or not found")
-	ErrInvalidOrderInput        = errors.New("invalid order input")
-	ErrProductNotFound          = errors.New("product not found in store catalog")
-	ErrProductUnavailable       = errors.New("product is currently unavailable")
-	ErrInvalidModifierSelection = errors.New("invalid modifier selection for product")
-	ErrInvalidSubAddonSelection = errors.New("invalid nested sub-addon selection for modifier option")
-	ErrInsufficientStock        = errors.New("insufficient stock for requested item or modifier")
-	ErrIntegerOverflow          = errors.New("integer overflow during financial calculation")
-	ErrIdempotencyConflict      = errors.New("idempotency_key already used with a different order payload")
-	ErrCrossTenantAccess        = errors.New("store not found or cross-tenant access denied")
+	ErrStoreInactive             = errors.New("store is inactive or not found")
+	ErrInvalidOrderInput         = errors.New("invalid order input")
+	ErrProductNotFound           = errors.New("product not found in store catalog")
+	ErrProductUnavailable        = errors.New("product is currently unavailable")
+	ErrInvalidModifierSelection  = errors.New("invalid modifier selection for product")
+	ErrInvalidSubAddonSelection  = errors.New("invalid nested sub-addon selection for modifier option")
+	ErrInsufficientStock         = errors.New("insufficient stock for requested item or modifier")
+	ErrIntegerOverflow           = errors.New("integer overflow during financial calculation")
+	ErrIdempotencyConflict       = errors.New("idempotency_key already used with a different order payload or unverifiable legacy hash")
+	ErrCrossTenantAccess         = errors.New("store not found or cross-tenant access denied")
+	ErrUnsupportedBillingMode    = errors.New("split_bill billing mode is not enabled for direct order creation")
+	ErrUnauthorizedBillingMode   = errors.New("open_tab billing mode requires an authorized staff user")
+	ErrOrderAlreadyPaid          = errors.New("order is already paid and cannot be expired or cancelled without refund workflow")
+	ErrLatePaymentStockExhausted = errors.New("late payment arrived after reservation release and stock is exhausted")
 )
 
 type SelectedSubAddonInput struct {
@@ -52,6 +56,7 @@ type OrderCreationInput struct {
 	CustomerPhone  string             `json:"customer_phone,omitempty"`
 	OrderType      domain.OrderType   `json:"order_type"`
 	BillingMode    domain.BillingMode `json:"billing_mode,omitempty"`
+	ActorUserID    *uuid.UUID         `json:"actor_user_id,omitempty"`
 	Notes          string             `json:"notes,omitempty"`
 	Items          []OrderItemInput   `json:"items"`
 }
@@ -137,7 +142,17 @@ func ValidateAndPriceOrder(store domain.Store, input OrderCreationInput, catalog
 	if billingMode != domain.BillingModePayFirst && billingMode != domain.BillingModeOpenTab && billingMode != domain.BillingModeSplitBill {
 		return nil, fmt.Errorf("%w: unsupported billing_mode %q", ErrInvalidOrderInput, billingMode)
 	}
-	if len(input.IdempotencyKey) > 100 {
+	if billingMode == domain.BillingModeSplitBill {
+		return nil, ErrUnsupportedBillingMode
+	}
+	if billingMode == domain.BillingModeOpenTab && (input.ActorUserID == nil || *input.ActorUserID == uuid.Nil) {
+		return nil, ErrUnauthorizedBillingMode
+	}
+	trimmedIdemKey := strings.TrimSpace(input.IdempotencyKey)
+	if trimmedIdemKey == "" {
+		return nil, fmt.Errorf("%w: idempotency_key is required", ErrInvalidOrderInput)
+	}
+	if len(trimmedIdemKey) > 100 {
 		return nil, fmt.Errorf("%w: idempotency_key exceeds 100 characters", ErrInvalidOrderInput)
 	}
 	if len(input.Items) == 0 {
@@ -278,6 +293,10 @@ func priceSingleOrderItem(
 		if !grpExists || !grp.IsActive || grp.StoreID != storeID {
 			return nil, fmt.Errorf("%w: modifier group %s is inactive or missing", ErrInvalidModifierSelection, opt.GroupID)
 		}
+		if grp.SelectionType == "single" && modReq.Quantity > 1 {
+			return nil, fmt.Errorf("%w: single-selection group %q does not allow option quantity > 1 (got %d)",
+				ErrInvalidModifierSelection, grp.Name, modReq.Quantity)
+		}
 
 		groupSelectedCount[grp.ID] += modReq.Quantity
 
@@ -303,7 +322,7 @@ func priceSingleOrderItem(
 		}
 
 		childrenPriced, childrenJSON, subCost, err := validateAndPriceSubAddons(
-			storeID, opt, modReq.SubAddons, reqItem.Quantity, catalog, optionDeducts,
+			storeID, opt, modReq.Quantity, modReq.SubAddons, reqItem.Quantity, catalog, optionDeducts,
 		)
 		if err != nil {
 			return nil, err
@@ -406,6 +425,7 @@ func priceSingleOrderItem(
 func validateAndPriceSubAddons(
 	storeID uuid.UUID,
 	parentOption domain.ModifierOption,
+	parentOptionQuantity int,
 	subAddons []SelectedSubAddonInput,
 	itemQuantity int,
 	catalog CatalogSnapshot,
@@ -457,11 +477,20 @@ func validateAndPriceSubAddons(
 		if !grpExists || !childGrp.IsActive || childGrp.StoreID != storeID {
 			return nil, nil, 0, fmt.Errorf("%w: child modifier group %s is inactive", ErrInvalidSubAddonSelection, subOpt.GroupID)
 		}
+		if childGrp.SelectionType == "single" && subReq.Quantity > 1 {
+			return nil, nil, 0, fmt.Errorf("%w: single-selection child group %q does not allow sub-addon quantity > 1 (got %d)",
+				ErrInvalidSubAddonSelection, childGrp.Name, subReq.Quantity)
+		}
 
 		childGroupCounts[childGrp.ID] += subReq.Quantity
 
+		effectiveSubQtyPerItem, err := safeMulInt64(int64(subReq.Quantity), int64(parentOptionQuantity))
+		if err != nil {
+			return nil, nil, 0, err
+		}
+
 		if subOpt.TrackStock {
-			totalSubNeeded, err := safeMulInt64(int64(subReq.Quantity), int64(itemQuantity))
+			totalSubNeeded, err := safeMulInt64(effectiveSubQtyPerItem, int64(itemQuantity))
 			if err != nil {
 				return nil, nil, 0, err
 			}
@@ -472,7 +501,7 @@ func validateAndPriceSubAddons(
 			}
 		}
 
-		subCost, err := safeMulInt64(subOpt.PriceDelta, int64(subReq.Quantity))
+		subCost, err := safeMulInt64(subOpt.PriceDelta, effectiveSubQtyPerItem)
 		if err != nil {
 			return nil, nil, 0, err
 		}
@@ -492,7 +521,7 @@ func validateAndPriceSubAddons(
 			SnapshotGroupName:  childGrp.Name,
 			SnapshotOptionName: subOpt.Name,
 			SnapshotPriceDelta: subOpt.PriceDelta,
-			Quantity:           subReq.Quantity,
+			Quantity:           int(effectiveSubQtyPerItem),
 		})
 
 		childrenJSON = append(childrenJSON, selectedOptionSnapshotJSON{
@@ -501,7 +530,7 @@ func validateAndPriceSubAddons(
 			OptionID:   subOpt.ID,
 			OptionName: subOpt.Name,
 			PriceDelta: subOpt.PriceDelta,
-			Quantity:   subReq.Quantity,
+			Quantity:   int(effectiveSubQtyPerItem),
 		})
 	}
 
@@ -578,10 +607,15 @@ func ComputeInputRequestHash(
 	input OrderCreationInput,
 ) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "store=%s|type=%s|billing=%s|table=%s|name=%s|phone=%s|notes=%s",
+	actorStr := ""
+	if input.ActorUserID != nil && *input.ActorUserID != uuid.Nil {
+		actorStr = input.ActorUserID.String()
+	}
+	fmt.Fprintf(&b, "store=%s|type=%s|billing=%s|actor=%s|table=%s|name=%s|phone=%s|notes=%s",
 		storeID.String(),
 		input.OrderType,
 		billingMode,
+		actorStr,
 		strings.TrimSpace(input.TableNumber),
 		strings.TrimSpace(input.CustomerName),
 		strings.TrimSpace(input.CustomerPhone),

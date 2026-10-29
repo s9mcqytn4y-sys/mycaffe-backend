@@ -118,6 +118,70 @@ func LoadConfig() (*Config, error) {
 	return cfg, nil
 }
 
+// LoadMigrateConfig loads and validates only the database migration configuration needed by cmd/migrate.
+// This allows the migration job container to run with least privilege without requiring JWT or Midtrans runtime secrets.
+func LoadMigrateConfig() (*Config, error) {
+	_ = godotenv.Load()
+
+	rawAppEnv, exists := os.LookupEnv("APP_ENV")
+	if !exists {
+		return nil, errors.New("APP_ENV is not set: environment must be explicitly defined (development, test, staging, production)")
+	}
+	appEnv := strings.ToLower(strings.TrimSpace(rawAppEnv))
+	if appEnv == "" {
+		return nil, errors.New("APP_ENV cannot be empty: environment must be explicitly defined (development, test, staging, production)")
+	}
+
+	cfg := &Config{
+		AppEnv:               appEnv,
+		DatabaseURL:          getEnv("DATABASE_URL", ""),
+		DatabaseMigrationURL: getEnv("DATABASE_MIGRATION_URL", getEnv("DATABASE_URL", "")),
+		DBAppUser:            getEnv("DB_APP_USER", "mycaffe_app"),
+		DBAppPassword:        getEnv("DB_APP_PASSWORD", ""),
+	}
+
+	if err := ValidateMigrateConfig(cfg); err != nil {
+		return nil, err
+	}
+
+	return cfg, nil
+}
+
+// ValidateMigrateConfig enforces environment and database DSN safety rules for the database migration CLI.
+func ValidateMigrateConfig(cfg *Config) error {
+	cfg.AppEnv = strings.ToLower(strings.TrimSpace(cfg.AppEnv))
+	validEnvs := []string{"development", "test", "staging", "production"}
+	isValidEnv := false
+	for _, env := range validEnvs {
+		if cfg.AppEnv == env {
+			isValidEnv = true
+			break
+		}
+	}
+	if !isValidEnv {
+		return fmt.Errorf("[SECURITY FAIL-CLOSED] invalid APP_ENV %q: allowed values are development, test, staging, production", cfg.AppEnv)
+	}
+
+	dsn := cfg.DatabaseMigrationURL
+	if dsn == "" {
+		dsn = cfg.DatabaseURL
+	}
+	if dsn == "" {
+		return errors.New("[SECURITY FAIL-CLOSED] DATABASE_MIGRATION_URL or DATABASE_URL must be set")
+	}
+
+	if cfg.AppEnv == "production" {
+		if containsPlaceholderPattern(dsn) {
+			return errors.New("[SECURITY FAIL-CLOSED] production DATABASE_MIGRATION_URL cannot contain placeholder credentials")
+		}
+		if cfg.DBAppPassword != "" && containsPlaceholderPattern(cfg.DBAppPassword) {
+			return errors.New("[SECURITY FAIL-CLOSED] production DB_APP_PASSWORD cannot contain placeholder credentials")
+		}
+	}
+
+	return nil
+}
+
 // ValidateConfig enforces fail-closed security rules without embedding actual secrets in code
 func ValidateConfig(cfg *Config) error {
 	// Whitelist valid environments

@@ -209,6 +209,7 @@ func TestDomainStatusesMatchSQLCheckConstraints(t *testing.T) {
 		{"chk_orders_billing_mode", toStrings(domain.ValidBillingModes())},
 		{"chk_orders_status", toStrings(domain.ValidOrderStatuses())},
 		{"chk_orders_payment_status", toStrings(domain.ValidOrderPaymentStatuses())},
+		{"chk_orders_stock_status", toStrings(domain.ValidOrderStockStatuses())},
 		{"chk_payment_splits_mode", toStrings(domain.ValidSplitModes())},
 		{"chk_payment_splits_status", toStrings(domain.ValidSplitBillStatuses())},
 		{"chk_payments_method", toStrings(domain.ValidPaymentMethods())},

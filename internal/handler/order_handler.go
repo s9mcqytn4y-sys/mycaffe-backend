@@ -68,8 +68,12 @@ func (h *OrderHandler) CreateOrder(c *gin.Context) {
 	// P0 Containment: Staging and production fail closed until trusted tenant identity middleware
 	// (staff JWT or signed table QR token) is bound to the public HTTP endpoint.
 	if h.cfg.AppEnv == "production" || h.cfg.AppEnv == "staging" {
+		reqID := uuid.NewString()
+		log.Printf("[ORDER CONTAINMENT] request_id=%s env=%s ip=%s blocked public order creation: trusted tenant identity binding not yet active", reqID, h.cfg.AppEnv, c.ClientIP())
 		c.JSON(http.StatusServiceUnavailable, gin.H{
-			"error": "[P0 CONTAINMENT] Public order HTTP endpoint is fail-closed in staging and production until signed table QR or staff JWT tenant binding is active.",
+			"error":      "Layanan pemesanan sedang dalam pemeliharaan. Silakan hubungi kasir untuk bantuan pemesanan.",
+			"code":       "SERVICE_TEMPORARILY_UNAVAILABLE",
+			"request_id": reqID,
 		})
 		return
 	}
@@ -123,8 +127,12 @@ func (h *OrderHandler) CreateOrder(c *gin.Context) {
 func (h *OrderHandler) HandleWebSocket(c *gin.Context) {
 	// P0 Fail-Closed: Staging and production disable unvetted WebSocket endpoint until Phase 03 session ticket validation.
 	if h.cfg.AppEnv == "production" || h.cfg.AppEnv == "staging" {
+		reqID := uuid.NewString()
+		log.Printf("[WS CONTAINMENT] request_id=%s env=%s ip=%s blocked WebSocket upgrade: session ticket validation not yet active", reqID, h.cfg.AppEnv, c.ClientIP())
 		c.JSON(http.StatusServiceUnavailable, gin.H{
-			"error": "[P0 CONTAINMENT] WebSocket endpoint is fail-closed in staging and production until staff authentication and session ticket validation are deployed in Phase 03.",
+			"error":      "Layanan pembaruan status langsung sedang dalam pemeliharaan.",
+			"code":       "REALTIME_TEMPORARILY_UNAVAILABLE",
+			"request_id": reqID,
 		})
 		return
 	}

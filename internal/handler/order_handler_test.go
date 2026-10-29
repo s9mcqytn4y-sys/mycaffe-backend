@@ -49,6 +49,12 @@ func TestOrderHandlerProductionAndStagingFailClosed(t *testing.T) {
 			if w.Code != http.StatusServiceUnavailable {
 				t.Errorf("[%s] expected order creation to fail with 503 Service Unavailable, got %d", env, w.Code)
 			}
+			if strings.Contains(w.Body.String(), "[P0 CONTAINMENT]") {
+				t.Errorf("[%s] client response leaked internal diagnostic string: %s", env, w.Body.String())
+			}
+			if !strings.Contains(w.Body.String(), "request_id") {
+				t.Errorf("[%s] expected request_id in 503 response, got: %s", env, w.Body.String())
+			}
 
 			// 2. WebSocket in staging/production must fail-closed with 503
 			wsReq, _ := http.NewRequest(http.MethodGet, "/ws?store_id="+uuid.New().String(), nil)
@@ -57,6 +63,9 @@ func TestOrderHandlerProductionAndStagingFailClosed(t *testing.T) {
 
 			if wsW.Code != http.StatusServiceUnavailable {
 				t.Errorf("[%s] expected WebSocket to fail-closed with 503, got %d", env, wsW.Code)
+			}
+			if strings.Contains(wsW.Body.String(), "[P0 CONTAINMENT]") {
+				t.Errorf("[%s] WebSocket response leaked internal diagnostic string: %s", env, wsW.Body.String())
 			}
 		})
 	}

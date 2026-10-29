@@ -246,8 +246,9 @@ func TestOrderServiceIntegration_EndToEnd(t *testing.T) {
 		}
 
 		_, err = svc.CreateOrder(ctx, storeAID, service.OrderCreationInput{
-			CustomerName: "Budi",
-			OrderType:    domain.OrderTypeDineIn,
+			IdempotencyKey: "idem-unavail-" + uuid.New().String()[:8],
+			CustomerName:   "Budi",
+			OrderType:      domain.OrderTypeDineIn,
 			Items: []service.OrderItemInput{
 				{ProductID: unavailProdID, Quantity: 1},
 			},
@@ -258,8 +259,9 @@ func TestOrderServiceIntegration_EndToEnd(t *testing.T) {
 
 		// Missing required modifier groups on Classic Iced Latte
 		_, err = svc.CreateOrder(ctx, storeAID, service.OrderCreationInput{
-			CustomerName: "Budi",
-			OrderType:    domain.OrderTypeDineIn,
+			IdempotencyKey: "idem-missmod-" + uuid.New().String()[:8],
+			CustomerName:   "Budi",
+			OrderType:      domain.OrderTypeDineIn,
 			Items: []service.OrderItemInput{
 				{ProductID: latteProdID, Quantity: 1},
 			},
@@ -284,8 +286,9 @@ func TestOrderServiceIntegration_EndToEnd(t *testing.T) {
 
 		// Requesting 5 when only 3 in stock must fail immediately without changing stock
 		_, err = svc.CreateOrder(ctx, storeAID, service.OrderCreationInput{
-			CustomerName: "Excess Buyer",
-			OrderType:    domain.OrderTypeTakeaway,
+			IdempotencyKey: "idem-excess-" + uuid.New().String()[:8],
+			CustomerName:   "Excess Buyer",
+			OrderType:      domain.OrderTypeTakeaway,
 			Items: []service.OrderItemInput{
 				{ProductID: raceProdID, Quantity: 5},
 			},
@@ -357,8 +360,9 @@ func TestOrderServiceIntegration_EndToEnd(t *testing.T) {
 	t.Run("4_CrossTenantAccessBlockedByRLS", func(t *testing.T) {
 		// Store A attempting to order Store B's product must fail with ErrProductNotFound
 		_, err := svc.CreateOrder(ctx, storeAID, service.OrderCreationInput{
-			CustomerName: "Cross Tenant Attacker",
-			OrderType:    domain.OrderTypeDineIn,
+			IdempotencyKey: "idem-xtenant-" + uuid.New().String()[:8],
+			CustomerName:   "Cross Tenant Attacker",
+			OrderType:      domain.OrderTypeDineIn,
 			Items: []service.OrderItemInput{
 				{ProductID: storeBProdID, Quantity: 1},
 			},
@@ -369,8 +373,9 @@ func TestOrderServiceIntegration_EndToEnd(t *testing.T) {
 
 		// Non-existent store UUID must fail with ErrCrossTenantAccess
 		_, err = svc.CreateOrder(ctx, uuid.New(), service.OrderCreationInput{
-			CustomerName: "Ghost Store",
-			OrderType:    domain.OrderTypeDineIn,
+			IdempotencyKey: "idem-ghost-" + uuid.New().String()[:8],
+			CustomerName:   "Ghost Store",
+			OrderType:      domain.OrderTypeDineIn,
 			Items: []service.OrderItemInput{
 				{ProductID: storeBProdID, Quantity: 1},
 			},
@@ -491,6 +496,188 @@ func TestOrderServiceIntegration_EndToEnd(t *testing.T) {
 		var pgErr *pgconn.PgError
 		if !errors.As(err, &pgErr) || pgErr.Code != "23514" {
 			t.Fatalf("expected PostgreSQL CHECK violation 23514 for invalid payment_status 'refund_pending', got: %v", err)
+		}
+	})
+
+	t.Run("7_StockReservationReleaseAndLateSettlementRecovery", func(t *testing.T) {
+		resvProdID := uuid.New()
+		err := database.WithTenantTx(ctx, db, storeAID, func(tx *sqlx.Tx) error {
+			_, err := tx.ExecContext(ctx, `
+				INSERT INTO products (id, store_id, name, base_price, is_available, track_stock, stock_quantity)
+				VALUES ($1, $2, 'Limited Matcha Ceremonial', 35000, true, true, 5)
+			`, resvProdID, storeAID)
+			return err
+		})
+		if err != nil {
+			t.Fatalf("failed to seed reservation test product: %v", err)
+		}
+
+		res, err := svc.CreateOrder(ctx, storeAID, service.OrderCreationInput{
+			IdempotencyKey: "idem-resv-" + uuid.New().String()[:8],
+			TableNumber:    "T10",
+			CustomerName:   "Dewi Lestari",
+			OrderType:      domain.OrderTypeDineIn,
+			BillingMode:    domain.BillingModePayFirst,
+			Items: []service.OrderItemInput{
+				{ProductID: resvProdID, Quantity: 2},
+			},
+		})
+		if err != nil {
+			t.Fatalf("CreateOrder for stock reservation failed: %v", err)
+		}
+		if res.Order.StockStatus != domain.OrderStockStatusReserved {
+			t.Fatalf("expected StockStatus='reserved', got %q", res.Order.StockStatus)
+		}
+		if res.Order.ExpiresAt == nil {
+			t.Fatal("expected non-nil ExpiresAt on pending_payment order")
+		}
+
+		// Stock should now be 5 - 2 = 3
+		var stockNow int
+		_ = database.WithTenantTx(ctx, db, storeAID, func(tx *sqlx.Tx) error {
+			return tx.GetContext(ctx, &stockNow, `SELECT stock_quantity FROM products WHERE store_id = $1 AND id = $2`, storeAID, resvProdID)
+		})
+		if stockNow != 3 {
+			t.Fatalf("expected reserved stock 3, got %d", stockNow)
+		}
+
+		// Expire the unpaid order -> stock must be restored to 5
+		cancelledOrder, err := svc.CancelOrExpireUnpaidOrder(ctx, storeAID, res.Order.ID, domain.OrderPaymentStatusExpired, "Midtrans QRIS expired after 15m")
+		if err != nil {
+			t.Fatalf("CancelOrExpireUnpaidOrder failed: %v", err)
+		}
+		if cancelledOrder.Status != domain.OrderStatusCancelled || cancelledOrder.StockStatus != domain.OrderStockStatusReleased {
+			t.Fatalf("expected status=cancelled & stock_status=released, got status=%s stock_status=%s", cancelledOrder.Status, cancelledOrder.StockStatus)
+		}
+
+		_ = database.WithTenantTx(ctx, db, storeAID, func(tx *sqlx.Tx) error {
+			return tx.GetContext(ctx, &stockNow, `SELECT stock_quantity FROM products WHERE store_id = $1 AND id = $2`, storeAID, resvProdID)
+		})
+		if stockNow != 5 {
+			t.Fatalf("expected restored stock 5 after expiry, got %d", stockNow)
+		}
+
+		// Calling CancelOrExpireUnpaidOrder a second time must be idempotent and NOT double-restore stock to 7
+		cancelledAgain, err := svc.CancelOrExpireUnpaidOrder(ctx, storeAID, res.Order.ID, domain.OrderPaymentStatusExpired, "Duplicate expire webhook")
+		if err != nil {
+			t.Fatalf("second CancelOrExpireUnpaidOrder failed: %v", err)
+		}
+		if cancelledAgain.StockStatus != domain.OrderStockStatusReleased {
+			t.Fatalf("expected StockStatus='released', got %q", cancelledAgain.StockStatus)
+		}
+		_ = database.WithTenantTx(ctx, db, storeAID, func(tx *sqlx.Tx) error {
+			return tx.GetContext(ctx, &stockNow, `SELECT stock_quantity FROM products WHERE store_id = $1 AND id = $2`, storeAID, resvProdID)
+		})
+		if stockNow != 5 {
+			t.Fatalf("idempotency bug: stock was double-restored to %d (expected 5)", stockNow)
+		}
+
+		// Simulate late settlement arriving after expiry when stock is still available (5 >= 2)
+		paidOrder, err := svc.ConfirmOrderPaymentAndCommitStock(ctx, storeAID, res.Order.ID)
+		if err != nil {
+			t.Fatalf("ConfirmOrderPaymentAndCommitStock on late payment failed: %v", err)
+		}
+		if paidOrder.PaymentStatus != domain.OrderPaymentStatusPaid || paidOrder.Status != domain.OrderStatusQueued || paidOrder.StockStatus != domain.OrderStockStatusCommitted {
+			t.Fatalf("expected paid+queued+committed, got payment=%s status=%s stock=%s", paidOrder.PaymentStatus, paidOrder.Status, paidOrder.StockStatus)
+		}
+		_ = database.WithTenantTx(ctx, db, storeAID, func(tx *sqlx.Tx) error {
+			return tx.GetContext(ctx, &stockNow, `SELECT stock_quantity FROM products WHERE store_id = $1 AND id = $2`, storeAID, resvProdID)
+		})
+		if stockNow != 3 {
+			t.Fatalf("expected re-deducted stock 3 after late settlement recovery, got %d", stockNow)
+		}
+
+		// Once paid, attempting to expire/cancel as unpaid must fail with ErrOrderAlreadyPaid
+		_, err = svc.CancelOrExpireUnpaidOrder(ctx, storeAID, res.Order.ID, domain.OrderPaymentStatusExpired, "Late out-of-order expire")
+		if !errors.Is(err, service.ErrOrderAlreadyPaid) {
+			t.Fatalf("expected ErrOrderAlreadyPaid when expiring an already paid order, got: %v", err)
+		}
+	})
+
+	t.Run("8_LegacyEmptyRequestHashAndBillingModeGuards", func(t *testing.T) {
+		// Seeded order e0000001-0000-4000-8000-000000000001 has idempotency_key 'idem-seed-order-0001' and request_hash ''
+		_, err := svc.CreateOrder(ctx, storeAID, service.OrderCreationInput{
+			IdempotencyKey: "idem-seed-order-0001",
+			TableNumber:    "Meja 04",
+			CustomerName:   "Alexander Budi",
+			OrderType:      domain.OrderTypeDineIn,
+			Items: []service.OrderItemInput{
+				{
+					ProductID: latteProdID,
+					Quantity:  1,
+					Modifiers: []service.SelectedModifierInput{
+						{OptionID: lessSugarOptID, Quantity: 1},
+						{
+							OptionID:  oatMilkOptID,
+							Quantity:  1,
+							SubAddons: []service.SelectedSubAddonInput{{OptionID: coldFoamSubOptID, Quantity: 1}},
+						},
+					},
+				},
+			},
+		})
+		if !errors.Is(err, service.ErrIdempotencyConflict) {
+			t.Fatalf("expected ErrIdempotencyConflict on legacy order with empty request_hash, got: %v", err)
+		}
+
+		// open_tab with Barista role (a0000004) must fail with ErrUnauthorizedBillingMode
+		baristaID := uuid.MustParse("a0000004-0000-4000-8000-000000000004")
+		_, err = svc.CreateOrder(ctx, storeAID, service.OrderCreationInput{
+			IdempotencyKey: "idem-opentab-barista-" + uuid.New().String()[:8],
+			TableNumber:    "Meja 02",
+			CustomerName:   "Tamu Open Tab",
+			OrderType:      domain.OrderTypeDineIn,
+			BillingMode:    domain.BillingModeOpenTab,
+			ActorUserID:    &baristaID,
+			Items: []service.OrderItemInput{
+				{
+					ProductID: latteProdID,
+					Quantity:  1,
+					Modifiers: []service.SelectedModifierInput{
+						{OptionID: lessSugarOptID, Quantity: 1},
+						{
+							OptionID:  oatMilkOptID,
+							Quantity:  1,
+							SubAddons: []service.SelectedSubAddonInput{{OptionID: coldFoamSubOptID, Quantity: 1}},
+						},
+					},
+				},
+			},
+		})
+		if !errors.Is(err, service.ErrUnauthorizedBillingMode) {
+			t.Fatalf("expected ErrUnauthorizedBillingMode when barista initiates open_tab, got: %v", err)
+		}
+
+		// open_tab with Cashier role (a0000003) must succeed and start in 'queued' status
+		cashierID := uuid.MustParse("a0000003-0000-4000-8000-000000000003")
+		openTabRes, err := svc.CreateOrder(ctx, storeAID, service.OrderCreationInput{
+			IdempotencyKey: "idem-opentab-cashier-" + uuid.New().String()[:8],
+			TableNumber:    "Meja 02",
+			CustomerName:   "Tamu VIP Open Tab",
+			OrderType:      domain.OrderTypeDineIn,
+			BillingMode:    domain.BillingModeOpenTab,
+			ActorUserID:    &cashierID,
+			Items: []service.OrderItemInput{
+				{
+					ProductID: latteProdID,
+					Quantity:  1,
+					Modifiers: []service.SelectedModifierInput{
+						{OptionID: lessSugarOptID, Quantity: 1},
+						{
+							OptionID:  oatMilkOptID,
+							Quantity:  1,
+							SubAddons: []service.SelectedSubAddonInput{{OptionID: coldFoamSubOptID, Quantity: 1}},
+						},
+					},
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("expected open_tab with active cashier to succeed, got: %v", err)
+		}
+		if openTabRes.Order.Status != domain.OrderStatusQueued || openTabRes.Order.CreatedByUserID == nil || *openTabRes.Order.CreatedByUserID != cashierID {
+			t.Fatalf("expected open_tab order status=queued and CreatedByUserID=%s, got status=%s actor=%v",
+				cashierID, openTabRes.Order.Status, openTabRes.Order.CreatedByUserID)
 		}
 	})
 }

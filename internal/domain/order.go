@@ -72,20 +72,41 @@ func ValidBillingModes() []BillingMode {
 	return []BillingMode{BillingModePayFirst, BillingModeOpenTab, BillingModeSplitBill}
 }
 
+type OrderStockStatus string
+
+const (
+	OrderStockStatusNotTracked OrderStockStatus = "not_tracked"
+	OrderStockStatusReserved   OrderStockStatus = "reserved"
+	OrderStockStatusCommitted  OrderStockStatus = "committed"
+	OrderStockStatusReleased   OrderStockStatus = "released"
+)
+
+func ValidOrderStockStatuses() []OrderStockStatus {
+	return []OrderStockStatus{
+		OrderStockStatusNotTracked,
+		OrderStockStatusReserved,
+		OrderStockStatusCommitted,
+		OrderStockStatusReleased,
+	}
+}
+
 type Order struct {
-	ID             uuid.UUID          `json:"id" db:"id"`
-	StoreID        uuid.UUID          `json:"store_id" db:"store_id"`
-	IdempotencyKey string             `json:"idempotency_key,omitempty" db:"idempotency_key"`
-	RequestHash    string             `json:"request_hash,omitempty" db:"request_hash"`
-	OrderNumber    string             `json:"order_number" db:"order_number"`
-	QueueNumber    string             `json:"queue_number" db:"queue_number"`
-	TableNumber    string             `json:"table_number" db:"table_number"`
-	CustomerName   string             `json:"customer_name" db:"customer_name"`
-	CustomerPhone  string             `json:"customer_phone" db:"customer_phone"`
-	OrderType      OrderType          `json:"order_type" db:"order_type"`
-	BillingMode    BillingMode        `json:"billing_mode" db:"billing_mode"`
-	Status         OrderStatus        `json:"status" db:"status"`
-	PaymentStatus  OrderPaymentStatus `json:"payment_status" db:"payment_status"`
+	ID              uuid.UUID          `json:"id" db:"id"`
+	StoreID         uuid.UUID          `json:"store_id" db:"store_id"`
+	IdempotencyKey  string             `json:"idempotency_key,omitempty" db:"idempotency_key"`
+	RequestHash     string             `json:"request_hash,omitempty" db:"request_hash"`
+	OrderNumber     string             `json:"order_number" db:"order_number"`
+	QueueNumber     string             `json:"queue_number" db:"queue_number"`
+	TableNumber     string             `json:"table_number" db:"table_number"`
+	CustomerName    string             `json:"customer_name" db:"customer_name"`
+	CustomerPhone   string             `json:"customer_phone" db:"customer_phone"`
+	OrderType       OrderType          `json:"order_type" db:"order_type"`
+	BillingMode     BillingMode        `json:"billing_mode" db:"billing_mode"`
+	Status          OrderStatus        `json:"status" db:"status"`
+	PaymentStatus   OrderPaymentStatus `json:"payment_status" db:"payment_status"`
+	StockStatus     OrderStockStatus   `json:"stock_status" db:"stock_status"`
+	ExpiresAt       *time.Time         `json:"expires_at,omitempty" db:"expires_at"`
+	CreatedByUserID *uuid.UUID         `json:"created_by_user_id,omitempty" db:"created_by_user_id"`
 
 	SubtotalAmount      int64 `json:"subtotal_amount" db:"subtotal_amount"`
 	DiscountAmount      int64 `json:"discount_amount" db:"discount_amount"`

@@ -1,0 +1,787 @@
+openapi: 3.1.0
+info:
+  title: MyCaffe Core POS API
+  version: 0.4.0
+  summary: Multi-tenant QR Table Ordering, POS Cashier, Kitchen Display System (KDS), and Payment Reconciliation API
+  description: |
+    Official OpenAPI 3.1 contract for **MyCaffe Core POS** backend (`mycaffe-backend`).
+    All monetary values are represented as whole integer Indonesian Rupiah (`int64`, e.g. `24000` = Rp 24.000) without floating-point numbers.
+    Percentage rates (PB1 tax, service charge, QRIS MDR) are represented in Basis Points (`1% = 100 bps`).
+  contact:
+    name: MyCaffe Platform Engineering
+servers:
+  - url: http://localhost:8080
+    description: Local Development API Server
+  - url: https://api.example.com
+    description: Production Single-VPS Hostinger KVM 2 Reverse Proxy (Nginx TLS)
+tags:
+  - name: Health
+    description: Liveness and readiness probes for Docker Compose and Nginx
+  - name: Catalog
+    description: Public and staff menu catalog, modifier groups, and 1-level sub-addons
+  - name: Orders
+    description: Transactional order creation, stock reservation lifecycle, and real-time order tracking
+  - name: Payments
+    description: Payment initiation (QRIS, VA, E-Wallet, Cash, Static QRIS, EDC) and Midtrans webhook reconciliation
+  - name: KDS
+    description: Kitchen Display System and Barista preparation queue transitions
+
+paths:
+  /health:
+    get:
+      tags: [Health]
+      operationId: getLiveness
+      summary: Liveness probe
+      responses:
+        "200":
+          description: Process is alive
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatusResponse"
+
+  /health/ready:
+    get:
+      tags: [Health]
+      operationId: getReadiness
+      summary: Readiness probe (verifies PostgreSQL 18 connection pool)
+      responses:
+        "200":
+          description: Database connection pool is healthy and ready
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatusResponse"
+        "503":
+          description: Database connection is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/public/stores/{store_slug}/catalog:
+    get:
+      tags: [Catalog]
+      operationId: getPublicStoreCatalog
+      summary: Retrieve active store catalog, modifier groups, and 1-level sub-addons
+      description: Status in Roadmap - Planned (Phase 02 Public QR Table Ordering API).
+      parameters:
+        - name: store_slug
+          in: path
+          required: true
+          schema:
+            type: string
+            example: central-cafe
+      responses:
+        "200":
+          description: Store profile and active menu catalog
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublicCatalogResponse"
+        "404":
+          description: Store not found or inactive
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/orders:
+    post:
+      tags: [Orders]
+      operationId: createOrder
+      summary: Create an order with server-side pricing, modifier validation, and atomic stock reservation
+      description: |
+        In `staging` and `production`, the public HTTP route fails closed (`503 Service Unavailable`) until signed table QR token or staff JWT tenant binding middleware is attached in Phase 02.
+        The underlying `OrderService.CreateOrder` is **Implemented & Tested** against PostgreSQL 18.
+      security:
+        - BearerStaffJWT: []
+        - TableQRToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateOrderRequest"
+      responses:
+        "201":
+          description: Order created (or idempotent replay returned)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateOrderResponse"
+        "400":
+          description: Validation error (invalid modifiers, sub-addons, or missing idempotency_key)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Unauthorized billing_mode (e.g. open_tab requested without active cashier/owner token)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Idempotency key conflict (reused with different payload) or insufficient stock
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Endpoint fail-closed in staging/production while tenant binding is being completed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/orders/{order_id}/payments/initiate:
+    post:
+      tags: [Payments]
+      operationId: initiatePayment
+      summary: Initiate a payment attempt for a payment split (Dynamic QRIS, GoPay, ShopeePay, VA, Cash, Static QRIS, EDC)
+      description: Status in Roadmap - Planned (Phase 01 Sub-task 04 PaymentService).
+      security:
+        - BearerStaffJWT: []
+        - TableQRToken: []
+      parameters:
+        - name: order_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InitiatePaymentRequest"
+      responses:
+        "201":
+          description: Payment attempt recorded and gateway charge initiated (or cashier tender settled)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InitiatePaymentResponse"
+        "409":
+          description: Split already paid, order expired, or active pending payment with different method
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/payments/midtrans/webhook:
+    post:
+      tags: [Payments]
+      operationId: handleMidtransWebhook
+      summary: Midtrans HTTP Notification Webhook
+      description: |
+        Verifies `SHA512(order_id + status_code + gross_amount + server_key)`, validates `IDR` currency and whole-integer `gross_amount`, and maps `transaction_status` + `fraud_status`.
+        Currently **Guarded / Fail-Closed** (`503 Service Unavailable` with `Retry-After: 60`) until `PaymentService.ProcessMidtransWebhook` is wired in Phase 01 Sub-task 04.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MidtransWebhookPayload"
+      responses:
+        "200":
+          description: Webhook verified and durably committed to payment_events, payments, payment_splits, orders, and outbox_events
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    example: ok
+        "400":
+          description: Malformed JSON, missing fields, non-IDR currency, or fractional gross_amount
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Invalid SHA-512 signature key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "413":
+          description: Webhook body exceeds 64 KB limit
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Signature verified, deferred for retry while durable payment transaction is uncommitted
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+                example: 60
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+components:
+  securitySchemes:
+    BearerStaffJWT:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Stateless HMAC-SHA256 staff token containing `store_id`, `user_id`, and `role` (`owner`, `cashier`, `barista`, `kitchen`).
+    TableQRToken:
+      type: apiKey
+      in: header
+      name: X-Table-QR-Token
+      description: Signed HMAC token binding a public dine-in/takeaway session to a specific `store_id` and `table_number`.
+
+  schemas:
+    HealthStatusResponse:
+      type: object
+      required: [status, service]
+      properties:
+        status:
+          type: string
+          example: ok
+        service:
+          type: string
+          example: mycaffe-api
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          example: Layanan pemesanan sedang dalam pemeliharaan. Silakan hubungi kasir untuk bantuan pemesanan.
+        code:
+          type: string
+          example: SERVICE_TEMPORARILY_UNAVAILABLE
+        request_id:
+          type: string
+          format: uuid
+          example: 8f9d2a1c-4b3e-4d5a-9c1b-2e3f4a5b6c7d
+
+    OrderType:
+      type: string
+      enum: [dine_in, takeaway, delivery]
+
+    BillingMode:
+      type: string
+      enum: [pay_first, open_tab, split_bill]
+
+    OrderStatus:
+      type: string
+      enum: [pending_payment, queued, preparing, ready, served, completed, cancelled]
+
+    OrderPaymentStatus:
+      type: string
+      enum: [unpaid, pending, partially_paid, paid, failed, cancelled, expired, partially_refunded, refunded, chargeback, partial_chargeback]
+
+    OrderStockStatus:
+      type: string
+      enum: [not_tracked, reserved, committed, released]
+
+    PaymentMethod:
+      type: string
+      enum: [qris, gopay, shopeepay, bank_transfer, cash, static_qris, edc]
+
+    PaymentStatus:
+      type: string
+      enum: [pending, authorized, paid, failed, cancelled, expired, partially_refunded, refunded, chargeback, partial_chargeback]
+
+    PaymentSplitStatus:
+      type: string
+      enum: [unpaid, pending, partially_paid, paid, cancelled, refunded]
+
+    SelectedSubAddonInput:
+      type: object
+      required: [option_id, quantity]
+      properties:
+        option_id:
+          type: string
+          format: uuid
+        quantity:
+          type: integer
+          minimum: 1
+          example: 1
+
+    SelectedModifierInput:
+      type: object
+      required: [option_id, quantity]
+      properties:
+        option_id:
+          type: string
+          format: uuid
+        quantity:
+          type: integer
+          minimum: 1
+          example: 1
+        sub_addons:
+          type: array
+          items:
+            $ref: "#/components/schemas/SelectedSubAddonInput"
+
+    OrderItemInput:
+      type: object
+      required: [product_id, quantity]
+      properties:
+        product_id:
+          type: string
+          format: uuid
+        quantity:
+          type: integer
+          minimum: 1
+          example: 2
+        modifiers:
+          type: array
+          items:
+            $ref: "#/components/schemas/SelectedModifierInput"
+        notes:
+          type: string
+          maxLength: 250
+          example: Less ice
+
+    CreateOrderRequest:
+      type: object
+      required: [idempotency_key, customer_name, order_type, items]
+      properties:
+        idempotency_key:
+          type: string
+          minLength: 1
+          maxLength: 100
+          example: idem-20261030-table04-001
+        table_number:
+          type: string
+          maxLength: 50
+          example: Meja 04
+        customer_name:
+          type: string
+          minLength: 1
+          maxLength: 120
+          example: Rina Kartika
+        customer_phone:
+          type: string
+          maxLength: 30
+          example: "081234567890"
+        order_type:
+          $ref: "#/components/schemas/OrderType"
+        billing_mode:
+          $ref: "#/components/schemas/BillingMode"
+        notes:
+          type: string
+          maxLength: 500
+        items:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/OrderItemInput"
+
+    OrderItemOptionSnapshot:
+      type: object
+      required: [id, store_id, order_item_id, snapshot_group_name, snapshot_option_name, snapshot_price_delta, quantity]
+      properties:
+        id:
+          type: string
+          format: uuid
+        store_id:
+          type: string
+          format: uuid
+        order_item_id:
+          type: string
+          format: uuid
+        parent_order_item_option_id:
+          type: ["string", "null"]
+          format: uuid
+        modifier_group_id:
+          type: ["string", "null"]
+          format: uuid
+        modifier_option_id:
+          type: ["string", "null"]
+          format: uuid
+        parent_option_id:
+          type: ["string", "null"]
+          format: uuid
+        snapshot_group_name:
+          type: string
+          example: Milk Selection
+        snapshot_option_name:
+          type: string
+          example: Oat Milk Barista Blend
+        snapshot_price_delta:
+          type: integer
+          format: int64
+          example: 8000
+        quantity:
+          type: integer
+          example: 1
+
+    OrderItemSnapshot:
+      type: object
+      required: [id, store_id, order_id, config_hash, snapshot_name, unit_base_price, modifier_total_price, snapshot_price, quantity, subtotal_amount]
+      properties:
+        id:
+          type: string
+          format: uuid
+        store_id:
+          type: string
+          format: uuid
+        order_id:
+          type: string
+          format: uuid
+        product_id:
+          type: ["string", "null"]
+          format: uuid
+        config_hash:
+          type: string
+        snapshot_name:
+          type: string
+          example: Classic Iced Latte
+        unit_base_price:
+          type: integer
+          format: int64
+          example: 24000
+        modifier_total_price:
+          type: integer
+          format: int64
+          example: 12000
+        snapshot_price:
+          type: integer
+          format: int64
+          example: 36000
+        quantity:
+          type: integer
+          example: 2
+        subtotal_amount:
+          type: integer
+          format: int64
+          example: 72000
+        options:
+          type: array
+          items:
+            $ref: "#/components/schemas/OrderItemOptionSnapshot"
+        notes:
+          type: string
+
+    PaymentSplit:
+      type: object
+      required: [id, store_id, order_id, split_number, label, split_mode, subtotal_amount, tax_amount, service_charge_amount, total_amount, paid_amount, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        store_id:
+          type: string
+          format: uuid
+        order_id:
+          type: string
+          format: uuid
+        split_number:
+          type: integer
+          example: 1
+        label:
+          type: string
+          example: Main Bill
+        split_mode:
+          type: string
+          enum: [full, equal, by_item, custom]
+        subtotal_amount:
+          type: integer
+          format: int64
+          example: 72000
+        tax_amount:
+          type: integer
+          format: int64
+          example: 7560
+        service_charge_amount:
+          type: integer
+          format: int64
+          example: 3600
+        total_amount:
+          type: integer
+          format: int64
+          example: 83160
+        paid_amount:
+          type: integer
+          format: int64
+          example: 0
+        status:
+          $ref: "#/components/schemas/PaymentSplitStatus"
+
+    Order:
+      type: object
+      required:
+        - id
+        - store_id
+        - idempotency_key
+        - order_number
+        - queue_number
+        - customer_name
+        - order_type
+        - billing_mode
+        - status
+        - payment_status
+        - stock_status
+        - subtotal_amount
+        - discount_amount
+        - tax_amount
+        - service_charge_amount
+        - total_amount
+        - paid_amount
+        - refunded_amount
+      properties:
+        id:
+          type: string
+          format: uuid
+        store_id:
+          type: string
+          format: uuid
+        idempotency_key:
+          type: string
+        request_hash:
+          type: string
+        order_number:
+          type: string
+          example: ORD-20261030-0001
+        queue_number:
+          type: string
+          example: A001
+        table_number:
+          type: string
+          example: Meja 04
+        customer_name:
+          type: string
+          example: Rina Kartika
+        customer_phone:
+          type: string
+        order_type:
+          $ref: "#/components/schemas/OrderType"
+        billing_mode:
+          $ref: "#/components/schemas/BillingMode"
+        status:
+          $ref: "#/components/schemas/OrderStatus"
+        payment_status:
+          $ref: "#/components/schemas/OrderPaymentStatus"
+        stock_status:
+          $ref: "#/components/schemas/OrderStockStatus"
+        expires_at:
+          type: ["string", "null"]
+          format: date-time
+        created_by_user_id:
+          type: ["string", "null"]
+          format: uuid
+        subtotal_amount:
+          type: integer
+          format: int64
+          example: 72000
+        discount_amount:
+          type: integer
+          format: int64
+          example: 0
+        service_charge_amount:
+          type: integer
+          format: int64
+          example: 3600
+        tax_amount:
+          type: integer
+          format: int64
+          example: 7560
+        total_amount:
+          type: integer
+          format: int64
+          example: 83160
+        paid_amount:
+          type: integer
+          format: int64
+          example: 0
+        refunded_amount:
+          type: integer
+          format: int64
+          example: 0
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/OrderItemSnapshot"
+        notes:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateOrderResponse:
+      type: object
+      required: [order, splits, is_idempotent_replay]
+      properties:
+        order:
+          $ref: "#/components/schemas/Order"
+        splits:
+          type: array
+          items:
+            $ref: "#/components/schemas/PaymentSplit"
+        outbox_event_id:
+          type: string
+          format: uuid
+        is_idempotent_replay:
+          type: boolean
+
+    InitiatePaymentRequest:
+      type: object
+      required: [idempotency_key, split_id, payment_method]
+      properties:
+        idempotency_key:
+          type: string
+          minLength: 1
+          maxLength: 100
+        split_id:
+          type: string
+          format: uuid
+        payment_method:
+          $ref: "#/components/schemas/PaymentMethod"
+        bank:
+          type: string
+          enum: [bca, bni, bri, permata]
+          description: Required only when `payment_method` is `bank_transfer`
+        cash_tendered_amount:
+          type: integer
+          format: int64
+          description: Required when `payment_method` is `cash`; must be `>= split.total_amount`
+        external_reference:
+          type: string
+          maxLength: 120
+          description: Optional receipt/approval code for `static_qris` or `edc` cashier settlement
+
+    InitiatePaymentResponse:
+      type: object
+      required: [payment_id, provider_order_id, payment_method, status, amount]
+      properties:
+        payment_id:
+          type: string
+          format: uuid
+        provider_order_id:
+          type: string
+          example: ORD-20261030-0001-S1-A1
+        payment_method:
+          $ref: "#/components/schemas/PaymentMethod"
+        status:
+          $ref: "#/components/schemas/PaymentStatus"
+        amount:
+          type: integer
+          format: int64
+          example: 83160
+        cash_tendered_amount:
+          type: integer
+          format: int64
+        change_given_amount:
+          type: integer
+          format: int64
+        qr_string:
+          type: string
+        qr_code_url:
+          type: string
+        deeplink_url:
+          type: string
+        va_number:
+          type: string
+        expiry_time:
+          type: ["string", "null"]
+          format: date-time
+
+    MidtransWebhookPayload:
+      type: object
+      required: [order_id, status_code, gross_amount, signature_key, transaction_status]
+      properties:
+        transaction_time:
+          type: string
+          example: "2026-10-30 14:35:10"
+        transaction_status:
+          type: string
+          example: settlement
+        transaction_id:
+          type: string
+          example: 9b8a7c6d-1234-4321-8888-abcdef012345
+        status_message:
+          type: string
+          example: midtrans payment notification
+        status_code:
+          type: string
+          example: "200"
+        signature_key:
+          type: string
+          description: Lowercase hex SHA-512 of `order_id + status_code + gross_amount + server_key`
+        payment_type:
+          type: string
+          example: qris
+        order_id:
+          type: string
+          example: ORD-20261030-0001-S1-A1
+        gross_amount:
+          type: string
+          example: "83160.00"
+        fraud_status:
+          type: string
+          example: accept
+        currency:
+          type: string
+          example: IDR
+
+    PublicCatalogResponse:
+      type: object
+      required: [store_id, slug, name, currency, tax_bps, service_bps, categories]
+      properties:
+        store_id:
+          type: string
+          format: uuid
+        slug:
+          type: string
+        name:
+          type: string
+        currency:
+          type: string
+          example: IDR
+        tax_bps:
+          type: integer
+          example: 1000
+        service_bps:
+          type: integer
+          example: 500
+        categories:
+          type: array
+          items:
+            type: object
+            required: [id, name, products]
+            properties:
+              id:
+                type: string
+                format: uuid
+              name:
+                type: string
+              products:
+                type: array
+                items:
+                  type: object
+                  required: [id, name, base_price, is_available]
+                  properties:
+                    id:
+                      type: string
+                      format: uuid
+                    name:
+                      type: string
+                    description:
+                      type: string
+                    base_price:
+                      type: integer
+                      format: int64
+                    image_url:
+                      type: string
+                    is_available:
+                      type: boolean
+                    stock_quantity:
+                      type: integer

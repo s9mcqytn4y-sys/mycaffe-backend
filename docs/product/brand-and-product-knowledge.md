@@ -20,7 +20,7 @@ Dokumen ini menetapkan pedoman identitas merek internal, token desain visual def
 
 ### 1.1 Tiga Model Deployment dan Lisensi Operasional
 
-Kode aplikasi MyCaffe dibangun di atas fondasi isolasi `store_id` (UUID) dan PostgreSQL 18 `FORCE ROW LEVEL SECURITY`, sehingga satu basis kode yang sama mendukung 3 model bisnis dan topologi deployment tanpa menulis ulang aplikasi:
+Kode aplikasi MyCaffe dibangun di atas fondasi isolasi `store_id` (UUID) dan PostgreSQL 18 `ENABLE ROW LEVEL SECURITY` (role runtime `mycaffe_app` bukan pemilik tabel dan `NOBYPASSRLS`, sehingga policy tenant tetap berlaku tanpa `FORCE`), sehingga satu basis kode yang sama mendukung 3 model bisnis dan topologi deployment tanpa menulis ulang aplikasi:
 
 | Model Deployment | Target Pelanggan | Topologi Infrastruktur | Isolasi Data & Kredensial |
 | :--- | :--- | :--- | :--- |

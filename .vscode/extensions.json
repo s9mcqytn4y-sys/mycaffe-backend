@@ -1,5 +1,6 @@
 {
     "recommendations": [
+        "anthropic.claude-code",
         "golang.go",
         "google.google-antigravity",
         "dracula-theme.theme-dracula",

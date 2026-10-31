@@ -206,3 +206,25 @@ func TestValidateMigrateConfigLeastPrivilege(t *testing.T) {
 		t.Fatal("expected ValidateMigrateConfig to reject placeholder DSN in production")
 	}
 }
+
+func TestLoadConfigTrustedProxies(t *testing.T) {
+	t.Setenv("APP_ENV", "development")
+	t.Setenv("TRUSTED_PROXIES", " 172.18.0.0/16 , ,10.0.0.5")
+
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig failed: %v", err)
+	}
+	if len(cfg.TrustedProxies) != 2 || cfg.TrustedProxies[0] != "172.18.0.0/16" || cfg.TrustedProxies[1] != "10.0.0.5" {
+		t.Fatalf("unexpected TrustedProxies: %q", cfg.TrustedProxies)
+	}
+
+	t.Setenv("TRUSTED_PROXIES", "")
+	cfg, err = config.LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig failed: %v", err)
+	}
+	if len(cfg.TrustedProxies) != 0 {
+		t.Fatalf("expected no trusted proxies by default, got %q", cfg.TrustedProxies)
+	}
+}

@@ -16,6 +16,7 @@ type Config struct {
 	Port                 string
 	FrontendURL          string
 	AllowedOrigins       []string
+	TrustedProxies       []string
 	DatabaseURL          string
 	DatabaseMigrationURL string
 	DBAppUser            string
@@ -73,16 +74,8 @@ func LoadConfig() (*Config, error) {
 	frontendURL := getEnv("FRONTEND_URL", "http://localhost:3000")
 
 	// Strict origin parsing
-	allowedOriginsRaw := getEnv("ALLOWED_ORIGINS", "")
-	var allowedOrigins []string
-	if allowedOriginsRaw != "" {
-		for _, o := range strings.Split(allowedOriginsRaw, ",") {
-			trimmed := strings.TrimSpace(o)
-			if trimmed != "" {
-				allowedOrigins = append(allowedOrigins, trimmed)
-			}
-		}
-	} else if appEnv != "production" {
+	allowedOrigins := splitCSV(getEnv("ALLOWED_ORIGINS", ""))
+	if len(allowedOrigins) == 0 && appEnv != "production" {
 		allowedOrigins = append(allowedOrigins, frontendURL)
 	}
 
@@ -91,6 +84,7 @@ func LoadConfig() (*Config, error) {
 		Port:                 getEnv("PORT", "8080"),
 		FrontendURL:          frontendURL,
 		AllowedOrigins:       allowedOrigins,
+		TrustedProxies:       splitCSV(getEnv("TRUSTED_PROXIES", "")),
 		DatabaseURL:          getEnv("DATABASE_URL", ""),
 		DatabaseMigrationURL: getEnv("DATABASE_MIGRATION_URL", getEnv("DATABASE_URL", "")),
 		DBAppUser:            getEnv("DB_APP_USER", "mycaffe_app"),
@@ -286,4 +280,14 @@ func getEnv(key, defaultVal string) string {
 		return val
 	}
 	return defaultVal
+}
+
+func splitCSV(raw string) []string {
+	var out []string
+	for _, part := range strings.Split(raw, ",") {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
 }

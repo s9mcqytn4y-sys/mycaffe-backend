@@ -59,6 +59,13 @@
         "-race"
     ],
     "go.testTimeout": "60s",
+    "claudeCode.preferredLocation": "sidebar",
+    "claudeCode.initialPermissionMode": "default",
+    "claudeCode.allowDangerouslySkipPermissions": false,
+    "claudeCode.autosave": true,
+    "claudeCode.respectGitIgnore": true,
+    "claudeCode.useCtrlEnterToSend": true,
+    "claudeCode.enableNewConversationShortcut": true,
     "errorlens.enabled": true,
     "errorlens.fontSize": "12px",
     "terminal.integrated.defaultProfile.windows": "PowerShell",

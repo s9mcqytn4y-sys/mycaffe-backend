@@ -26,3 +26,27 @@ func TestHubTenantIsolation(t *testing.T) {
 	// Let hub process event
 	time.Sleep(50 * time.Millisecond)
 }
+
+func TestHubBroadcastAfterShutdownDoesNotBlock(t *testing.T) {
+	hub := realtime.NewHub(nil)
+	hub.Shutdown()
+
+	done := make(chan error, 1)
+	go func() {
+		var err error
+		// Overfill the 256-slot buffer: without the stop signal the extra sends block forever.
+		for i := 0; i < 300 && err == nil; i++ {
+			err = hub.BroadcastEvent("test.event", "store-123", nil)
+		}
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("expected BroadcastEvent to report shutdown once the buffer is full")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("BroadcastEvent blocked after hub shutdown")
+	}
+}

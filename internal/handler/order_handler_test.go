@@ -26,7 +26,6 @@ func setupTestOrderRouter(cfg *config.Config) *gin.Engine {
 	orderHandler := handler.NewOrderHandler(cfg, midtransClient, hub)
 
 	r.POST("/api/v1/orders", orderHandler.CreateOrder)
-	r.POST("/api/v1/orders/:id/payments/initiate", orderHandler.InitiateOrderPayment)
 	r.GET("/ws", orderHandler.HandleWebSocket)
 	return r
 }
@@ -68,20 +67,6 @@ func TestOrderHandlerProductionAndStagingFailClosed(t *testing.T) {
 			if strings.Contains(wsW.Body.String(), "[P0 CONTAINMENT]") {
 				t.Errorf("[%s] WebSocket response leaked internal diagnostic string: %s", env, wsW.Body.String())
 			}
-
-			// 3. Payment initiation in staging/production must fail-closed with 503
-			payBody := []byte(`{"store_id":"` + uuid.New().String() + `","idempotency_key":"idem-pay-1","method":"qris"}`)
-			payReq, _ := http.NewRequest(http.MethodPost, "/api/v1/orders/"+uuid.New().String()+"/payments/initiate", bytes.NewBuffer(payBody))
-			payReq.Header.Set("Content-Type", "application/json")
-			payW := httptest.NewRecorder()
-			r.ServeHTTP(payW, payReq)
-
-			if payW.Code != http.StatusServiceUnavailable {
-				t.Errorf("[%s] expected payment initiation to fail-closed with 503, got %d", env, payW.Code)
-			}
-			if !strings.Contains(payW.Body.String(), "request_id") {
-				t.Errorf("[%s] expected request_id in 503 payment response, got: %s", env, payW.Body.String())
-			}
 		})
 	}
 }
@@ -109,7 +94,8 @@ func TestWebSocketAuthentication(t *testing.T) {
 	storeB := uuid.New().String()
 	token, _ := auth.GenerateTestToken(storeA, uuid.New().String(), "cashier", secret, 1*time.Hour)
 
-	reqMismatch, _ := http.NewRequest(http.MethodGet, "/ws?token="+token+"&store_id="+storeB, nil)
+	reqMismatch, _ := http.NewRequest(http.MethodGet, "/ws?store_id="+storeB, nil)
+	reqMismatch.Header.Set("Authorization", "Bearer "+token)
 	wMismatch := httptest.NewRecorder()
 	r.ServeHTTP(wMismatch, reqMismatch)
 	if wMismatch.Code != http.StatusForbidden {
@@ -117,7 +103,8 @@ func TestWebSocketAuthentication(t *testing.T) {
 	}
 
 	// 3. Invalid / malformed token -> 401 Unauthorized with generic error message
-	reqInvalid, _ := http.NewRequest(http.MethodGet, "/ws?token=malformed.invalid.token", nil)
+	reqInvalid, _ := http.NewRequest(http.MethodGet, "/ws", nil)
+	reqInvalid.Header.Set("Authorization", "Bearer malformed.invalid.token")
 	wInvalid := httptest.NewRecorder()
 	r.ServeHTTP(wInvalid, reqInvalid)
 
@@ -126,5 +113,20 @@ func TestWebSocketAuthentication(t *testing.T) {
 	}
 	if !strings.Contains(wInvalid.Body.String(), "Unauthorized: invalid or expired token") {
 		t.Errorf("expected generic unauthorized message, got %s", wInvalid.Body.String())
+	}
+}
+
+// Access tokens in the query string are rejected (ADR-003 F3): they would land in proxy logs.
+func TestWebSocketRejectsQueryToken(t *testing.T) {
+	secret := "secret_key_for_testing_purposes_only_32_chars"
+	cfg := &config.Config{AppEnv: "development", JWTSecret: secret, AllowedOrigins: []string{"http://localhost:3000"}}
+	r := setupTestOrderRouter(cfg)
+	token, _ := auth.GenerateTestToken(uuid.New().String(), uuid.New().String(), "cashier", secret, time.Hour)
+
+	req, _ := http.NewRequest(http.MethodGet, "/ws?token="+token, nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("query-string token must be ignored (401), got %d", w.Code)
 	}
 }

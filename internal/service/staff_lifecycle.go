@@ -14,6 +14,7 @@ import (
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/auth"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/database"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/mailer"
+	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/rbac"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/repository/postgres"
 )
 
@@ -70,7 +71,7 @@ type InviteStaffInput struct {
 }
 
 func requireOwner(actor *AuthenticatedStaff) error {
-	if actor == nil || actor.Staff.Role != domain.RoleOwner {
+	if !actor.Can(rbac.StaffManage) {
 		return ErrForbidden
 	}
 	return nil

@@ -298,8 +298,9 @@ BEGIN
     -- 10G. Account tokens and email outbox (migration 000006): RLS on, no DELETE, discovery
     --      function not executable by PUBLIC.
     IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.account_tokens'::regclass)
-       OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.email_outbox'::regclass) THEN
-        RAISE EXCEPTION 'SECURITY FAILURE: account_tokens/email_outbox must have row-level security enabled!';
+       OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.email_outbox'::regclass)
+       OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.store_settings'::regclass) THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: account_tokens/email_outbox/store_settings must have row-level security enabled!';
     END IF;
     IF has_table_privilege('mycaffe_app', 'public.account_tokens', 'DELETE')
        OR has_table_privilege('mycaffe_app', 'public.email_outbox', 'DELETE') THEN

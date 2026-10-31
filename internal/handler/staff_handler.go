@@ -10,54 +10,66 @@ import (
 	"github.com/google/uuid"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/domain"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/auth"
+	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/rbac"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/repository/postgres"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/service"
 )
 
 const staffContextKey = "mycaffe.staff"
 
-// RequireStaff authenticates the bearer access token against the database and, when roles are
-// given, requires one of them. The trusted identity is stored on the request context; handlers
-// must never read store_id or actor ids from the request body instead.
-func (h *AuthHandler) RequireStaff(roles ...domain.UserRole) gin.HandlerFunc {
+// RequireStaff authenticates the bearer access token against the database. The trusted identity
+// is stored on the request context; handlers must never read store_id or actor ids from the body.
+func (h *AuthHandler) RequireStaff() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		token, ok := strings.CutPrefix(c.GetHeader("Authorization"), "Bearer ")
-		if !ok || token == "" {
-			authError(c, http.StatusUnauthorized, "UNAUTHENTICATED", "Silakan masuk terlebih dahulu.")
-			c.Abort()
+		if h.authenticate(c) == nil {
 			return
 		}
-		staff, err := h.authService.Authenticate(c.Request.Context(), token)
-		switch {
-		case err == nil:
-		case errors.Is(err, service.ErrSessionStale):
-			authError(c, http.StatusUnauthorized, "SESSION_STALE", "Hak akses berubah. Muat ulang sesi.")
-			c.Abort()
-			return
-		case errors.Is(err, service.ErrInvalidSession):
-			authError(c, http.StatusUnauthorized, "SESSION_INVALID", "Sesi tidak valid. Silakan masuk kembali.")
-			c.Abort()
-			return
-		default:
-			log.Printf("[AUTH] authenticate error request_ip=%s: %v", c.ClientIP(), err)
-			authError(c, http.StatusServiceUnavailable, "SERVICE_TEMPORARILY_UNAVAILABLE", "Layanan sesi sedang tidak tersedia.")
-			c.Abort()
-			return
-		}
-		if len(roles) > 0 {
-			allowed := false
-			for _, r := range roles {
-				allowed = allowed || staff.Staff.Role == r
-			}
-			if !allowed {
-				authError(c, http.StatusForbidden, "FORBIDDEN", "Peran Anda tidak diizinkan melakukan aksi ini.")
-				c.Abort()
-				return
-			}
-		}
-		c.Set(staffContextKey, staff)
 		c.Next()
 	}
+}
+
+// RequirePermission authenticates like RequireStaff and then requires an RBAC permission computed
+// from the database role and store options (ADR-003 D7). The check runs before c.Next(), so the
+// handler never executes for a caller without the permission.
+func (h *AuthHandler) RequirePermission(p rbac.Permission) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		staff := h.authenticate(c)
+		if staff == nil {
+			return
+		}
+		if !staff.Can(p) {
+			authError(c, http.StatusForbidden, "FORBIDDEN", "Peran Anda tidak diizinkan melakukan aksi ini.")
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
+}
+
+// authenticate validates the bearer token, stores the identity on the context, and returns it.
+// On failure it writes the response, aborts, and returns nil. It never calls c.Next().
+func (h *AuthHandler) authenticate(c *gin.Context) *service.AuthenticatedStaff {
+	token, ok := strings.CutPrefix(c.GetHeader("Authorization"), "Bearer ")
+	if !ok || token == "" {
+		authError(c, http.StatusUnauthorized, "UNAUTHENTICATED", "Silakan masuk terlebih dahulu.")
+		c.Abort()
+		return nil
+	}
+	staff, err := h.authService.Authenticate(c.Request.Context(), token)
+	switch {
+	case err == nil:
+		c.Set(staffContextKey, staff)
+		return staff
+	case errors.Is(err, service.ErrSessionStale):
+		authError(c, http.StatusUnauthorized, "SESSION_STALE", "Hak akses berubah. Muat ulang sesi.")
+	case errors.Is(err, service.ErrInvalidSession):
+		authError(c, http.StatusUnauthorized, "SESSION_INVALID", "Sesi tidak valid. Silakan masuk kembali.")
+	default:
+		log.Printf("[AUTH] authenticate error request_ip=%s: %v", c.ClientIP(), err)
+		authError(c, http.StatusServiceUnavailable, "SERVICE_TEMPORARILY_UNAVAILABLE", "Layanan sesi sedang tidak tersedia.")
+	}
+	c.Abort()
+	return nil
 }
 
 func currentStaff(c *gin.Context) *service.AuthenticatedStaff {

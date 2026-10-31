@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"net/mail"
+	"slices"
 	"strings"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/domain"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/auth"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/database"
+	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/rbac"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/repository/postgres"
 )
 
@@ -59,10 +61,11 @@ type AuthService struct {
 	hashSem chan struct{}
 
 	// Account lifecycle email (WithAuthEmail); nil disables invitation/reset links.
-	email     *EmailService
-	emailRepo *postgres.EmailRepository
-	publicURL string
-	replyTo   string
+	email        *EmailService
+	emailRepo    *postgres.EmailRepository
+	settingsRepo *postgres.SettingsRepository
+	publicURL    string
+	replyTo      string
 }
 
 type AuthServiceOption func(*AuthService)
@@ -80,13 +83,14 @@ func NewAuthService(db *sqlx.DB, repo *postgres.AuthRepository, jwtSecret string
 		policy.MaxConcurrentHashes = 4
 	}
 	s := &AuthService{
-		db:        db,
-		repo:      repo,
-		secret:    jwtSecret,
-		policy:    policy,
-		nowFunc:   time.Now,
-		hashSem:   make(chan struct{}, policy.MaxConcurrentHashes),
-		emailRepo: postgres.NewEmailRepository(),
+		db:           db,
+		repo:         repo,
+		secret:       jwtSecret,
+		policy:       policy,
+		nowFunc:      time.Now,
+		hashSem:      make(chan struct{}, policy.MaxConcurrentHashes),
+		emailRepo:    postgres.NewEmailRepository(),
+		settingsRepo: postgres.NewSettingsRepository(),
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -122,6 +126,8 @@ type AuthenticatedStaff struct {
 	SessionID         uuid.UUID
 	SessionExpiresAt  time.Time
 	PINChangeRequired bool
+	// Permissions is the effective RBAC set (role + store options such as cashier_handles_bar).
+	Permissions []rbac.Permission
 }
 
 type SessionTokens struct {
@@ -445,7 +451,14 @@ func (s *AuthService) Authenticate(ctx context.Context, accessToken string) (*Au
 		if err != nil {
 			return err
 		}
-		result = &AuthenticatedStaff{Staff: staff, SessionID: sessionID, SessionExpiresAt: session.ExpiresAt, PINChangeRequired: user.MustChangePIN}
+		settings, err := s.settingsRepo.GetStoreSettings(ctx, tx, storeID)
+		if err != nil {
+			return err
+		}
+		result = &AuthenticatedStaff{
+			Staff: staff, SessionID: sessionID, SessionExpiresAt: session.ExpiresAt, PINChangeRequired: user.MustChangePIN,
+			Permissions: rbac.Permissions(user.Role, rbac.Options{CashierHandlesBar: settings.CashierHandlesBar}),
+		}
 		return nil
 	})
 	switch {
@@ -510,4 +523,9 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n]
+}
+
+// Can reports whether the authenticated staff member holds a permission (defence in depth for services).
+func (a *AuthenticatedStaff) Can(p rbac.Permission) bool {
+	return a != nil && slices.Contains(a.Permissions, p)
 }

@@ -111,9 +111,9 @@ Metadata the frontend needs from the server:
 
 | Step | Content | Depends on |
 |------|---------|------------|
-| C1 | Catalog read API (current schema) + ETag, staff/guest views | 02.01-C (done) |
-| C2 | Variants + SKU + product type + prep station (migration, backfill one default variant per product) | C1 |
-| C3 | Catalog management API (CRUD, availability toggles per station permission) | C2 |
+| C1 | Catalog read API (current schema) + ETag, staff/guest views | ✅ iteration 3 |
+| C2 | Variants + SKU + product type + prep station (migration 000008, backfill one default variant per product) | ✅ iteration 3 |
+| C3 | Catalog management API (CRUD, availability toggles per station permission) | ✅ categories/products/variants; modifiers C3b in iteration 4 |
 | C4 | Media uploads (R2) | C3, R2 bucket |
 | C5 | Ingredients, recipes, stock movements, opname, low-stock alert email | C2 |
 | C6 | Promotions + bundles in pricing engine (single best promo per line, snapshot on order) | C2 |

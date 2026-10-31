@@ -105,7 +105,7 @@ func lifecycleError(c *gin.Context, err error) {
 }
 
 type ForgotPINRequest struct {
-	StoreSlug string `json:"store_slug" binding:"required"`
+	StoreSlug string `json:"store_slug"`
 	Email     string `json:"email" binding:"required"`
 }
 
@@ -117,6 +117,9 @@ func (h *AuthHandler) ForgotPIN(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		authError(c, http.StatusBadRequest, "INVALID_REQUEST", "Kode toko dan email wajib diisi.")
 		return
+	}
+	if req.StoreSlug == "" {
+		req.StoreSlug = h.DefaultStoreSlug
 	}
 	if err := h.authService.RequestPINReset(c.Request.Context(), req.StoreSlug, req.Email); err != nil {
 		lifecycleError(c, err)

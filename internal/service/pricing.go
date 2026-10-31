@@ -44,6 +44,7 @@ type SelectedModifierInput struct {
 
 type OrderItemInput struct {
 	ProductID uuid.UUID               `json:"product_id"`
+	VariantID *uuid.UUID              `json:"variant_id,omitempty"`
 	Quantity  int                     `json:"quantity"`
 	Modifiers []SelectedModifierInput `json:"modifiers,omitempty"`
 	Notes     string                  `json:"notes,omitempty"`
@@ -67,6 +68,7 @@ type CatalogSnapshot struct {
 	ModifierOptions   map[uuid.UUID]domain.ModifierOption
 	ProductGroups     map[uuid.UUID][]domain.ProductModifierGroup
 	OptionChildGroups map[uuid.UUID][]domain.OptionModifierGroup
+	Variants          map[uuid.UUID]domain.ProductVariant
 }
 
 type PricedItemOption struct {
@@ -191,7 +193,11 @@ func ValidateAndPriceOrder(store domain.Store, input OrderCreationInput, catalog
 			}
 		}
 
-		pricedItem, err := priceSingleOrderItem(store.ID, product, reqItem, catalog, optionDeducts)
+		variant, err := resolveVariant(product, reqItem.VariantID, catalog)
+		if err != nil {
+			return nil, err
+		}
+		pricedItem, err := priceSingleOrderItem(store.ID, product, variant, reqItem, catalog, optionDeducts)
 		if err != nil {
 			return nil, err
 		}
@@ -244,10 +250,15 @@ func ValidateAndPriceOrder(store domain.Store, input OrderCreationInput, catalog
 func priceSingleOrderItem(
 	storeID uuid.UUID,
 	product domain.Product,
+	variant *domain.ProductVariant,
 	reqItem OrderItemInput,
 	catalog CatalogSnapshot,
 	optionDeducts map[uuid.UUID]int,
 ) (*PricedOrderItem, error) {
+	unitBase := product.BasePrice
+	if variant != nil {
+		unitBase = variant.Price
+	}
 	attachedLinks := catalog.ProductGroups[product.ID]
 	allowedGroups := make(map[uuid.UUID]domain.ProductModifierGroup, len(attachedLinks))
 	for _, link := range attachedLinks {
@@ -387,7 +398,7 @@ func priceSingleOrderItem(
 		}
 	}
 
-	unitSnapshotPrice, err := safeAddInt64(product.BasePrice, modifierUnitTotal)
+	unitSnapshotPrice, err := safeAddInt64(unitBase, modifierUnitTotal)
 	if err != nil {
 		return nil, err
 	}
@@ -403,6 +414,15 @@ func priceSingleOrderItem(
 
 	cfgHash := computeItemConfigHash(product.ID, jsonSnapshots)
 	prodIDCopy := product.ID
+	var variantID *uuid.UUID
+	var variantName, sku string
+	if variant != nil {
+		id := variant.ID
+		variantID, variantName, sku = &id, variant.Name, variant.SKU
+		// Distinct variants of the same product must not share a line configuration.
+		sum := sha256.Sum256([]byte(cfgHash + "|variant=" + id.String()))
+		cfgHash = hex.EncodeToString(sum[:])
+	}
 
 	return &PricedOrderItem{
 		Item: domain.OrderItem{
@@ -410,7 +430,10 @@ func priceSingleOrderItem(
 			ProductID:          &prodIDCopy,
 			ConfigHash:         cfgHash,
 			SnapshotName:       product.Name,
-			UnitBasePrice:      product.BasePrice,
+			VariantID:          variantID,
+			SnapshotVariant:    variantName,
+			SnapshotSKU:        sku,
+			UnitBasePrice:      unitBase,
 			ModifierTotalPrice: modifierUnitTotal,
 			SnapshotPrice:      unitSnapshotPrice,
 			Quantity:           reqItem.Quantity,
@@ -623,6 +646,9 @@ func ComputeInputRequestHash(
 	)
 	for _, item := range input.Items {
 		cfgHash := computeItemConfigHashFromModifiers(item.ProductID, item.Modifiers)
+		if item.VariantID != nil && *item.VariantID != uuid.Nil {
+			cfgHash += ":v=" + item.VariantID.String()
+		}
 		fmt.Fprintf(&b, "|item=%s:%d:%s:%s",
 			item.ProductID.String(),
 			item.Quantity,
@@ -655,4 +681,28 @@ func safeMulInt64(a, b int64) (int64, error) {
 		return 0, ErrIntegerOverflow
 	}
 	return a * b, nil
+}
+
+// resolveVariant picks the requested variant, or the product's default variant when none is
+// requested. Products without variants (legacy rows) price from base_price and return nil.
+func resolveVariant(product domain.Product, requested *uuid.UUID, catalog CatalogSnapshot) (*domain.ProductVariant, error) {
+	if requested != nil && *requested != uuid.Nil {
+		v, ok := catalog.Variants[*requested]
+		if !ok || v.ProductID != product.ID {
+			return nil, fmt.Errorf("%w: variant %s does not belong to product %q", ErrInvalidOrderInput, *requested, product.Name)
+		}
+		if !v.IsAvailable {
+			return nil, fmt.Errorf("%w: variant %q of %q is unavailable", ErrProductUnavailable, v.Name, product.Name)
+		}
+		return &v, nil
+	}
+	for _, v := range catalog.Variants {
+		if v.ProductID == product.ID && v.IsDefault {
+			if !v.IsAvailable {
+				return nil, fmt.Errorf("%w: default variant of %q is unavailable", ErrProductUnavailable, product.Name)
+			}
+			return &v, nil
+		}
+	}
+	return nil, nil
 }

@@ -43,7 +43,8 @@ Status setiap komponen diklasifikasikan ke dalam empat kategori tegas: **Impleme
 | **Realtime WebSocket Hub** (`/ws`) | **Guarded / Fail-Closed** | Memvalidasi token JWT dan kesesuaian `store_id` pada `development`; mengembalikan `503 Service Unavailable` pada `staging` dan `production` hingga tiket sesi WebSocket dan relay `outbox_events` diaktifkan. |
 | **Midtrans Webhook Callback** (`POST /api/v1/payments/midtrans/webhook`) | **Implemented & Tested** | Verifikasi signature SHA-512, batas body `64 KB`, `IDR`, integer `gross_amount`, pemetaan status; inbox durable `payment_notification_logs` (hash SHA-256 per event), proteksi notifikasi out-of-order, deteksi selisih nominal dan pembayaran ganda (`payment.refund_required`). Mengembalikan `503` (`Retry-After: 60`) hanya bila commit database gagal agar Midtrans mengulang. |
 | **Payment Ledger & Reconciliation Worker** (Phase 01 Sub-task 04) | **Implemented & Tested** | Tunai/static QRIS/EDC beraudit; Midtrans Core API dua fase; idempotensi; worker kedaluwarsa & `CheckTransaction`; deteksi pembayaran ganda. Diakses lewat rute POS terautentikasi. |
-| **Signed Table QR, Guest Session, KDS Realtime, Shift, Catalog** | **Planned** | Lihat `docs/architecture/roadmap.md` dan `docs/architecture/pos-operations-evaluation.md`. |
+| **Catalog: Menu, Variants & CRUD** (iteration 3, `internal/service/catalog_service.go`) | **Implemented & Tested** | Katalog staf & publik (ETag/304), varian + SKU, tipe menu & stasiun, CRUD kategori/produk/varian dengan error 422/409 per kolom, toggle habis per stasiun, audit perubahan harga, arsip. |
+| **Signed Table QR, Guest Session, KDS Realtime, Shift, Modifier CRUD, Media Upload** | **Planned** | Lihat `docs/architecture/roadmap.md` dan `docs/architecture/pos-operations-evaluation.md`. |
 | **Live Midtrans Production & Hostinger VPS Cutover** | **Blocked by Dependency** | Menunggu kredensial produksi Midtrans, domain/DNS aktif, dan provisioning Hostinger KVM 2 VPS oleh pemilik proyek. |
 
 ---
@@ -79,7 +80,7 @@ Prasyarat: Go 1.27.3, Docker Desktop. Semua perintah ada di `scripts/dev.ps1`
 | Topologi VPS | [docs/architecture/adr-002-single-vps-docker-topology.md](docs/architecture/adr-002-single-vps-docker-topology.md) |
 | Kontrak database & ledger pembayaran | [phase-01-database-contract.md](docs/architecture/phase-01-database-contract.md), [phase-01-subtask-04-payment-ledger-spec.md](docs/architecture/phase-01-subtask-04-payment-ledger-spec.md) |
 | Email, demo, lingkungan Windows | [docs/setup/email.md](docs/setup/email.md), [docs/setup/demo-staging-environment.md](docs/setup/demo-staging-environment.md), [docs/setup/windows-dev-environment.md](docs/setup/windows-dev-environment.md) |
-| Kontrak API | [docs/api/openapi.yaml](docs/api/openapi.yaml) |
+| Kontrak API & standar CRUD/error | [docs/api/openapi.yaml](docs/api/openapi.yaml), [docs/architecture/api-conventions.md](docs/architecture/api-conventions.md) |
 
 ---
 

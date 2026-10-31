@@ -299,11 +299,13 @@ BEGIN
     --      function not executable by PUBLIC.
     IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.account_tokens'::regclass)
        OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.email_outbox'::regclass)
-       OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.store_settings'::regclass) THEN
+       OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.store_settings'::regclass)
+       OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.product_variants'::regclass) THEN
         RAISE EXCEPTION 'SECURITY FAILURE: account_tokens/email_outbox/store_settings must have row-level security enabled!';
     END IF;
     IF has_table_privilege('mycaffe_app', 'public.account_tokens', 'DELETE')
-       OR has_table_privilege('mycaffe_app', 'public.email_outbox', 'DELETE') THEN
+       OR has_table_privilege('mycaffe_app', 'public.email_outbox', 'DELETE')
+       OR has_table_privilege('mycaffe_app', 'public.product_variants', 'DELETE') THEN
         RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may DELETE account_tokens/email_outbox!';
     END IF;
     IF EXISTS (

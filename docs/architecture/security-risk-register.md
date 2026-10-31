@@ -22,7 +22,7 @@ Nothing here claims the system is "secure"; it lists what is controlled and what
 ### High
 | ID | Risk | Location | Status / next step |
 |----|------|----------|--------------------|
-| R1 | `.env` on the owner's laptop pointed `DATABASE_URL` at a **remote Supabase host** (unreachable at the time) | local `.env` (not in git) | Open — owner to replace with `127.0.0.1` or remove; `dev.ps1` already ignores remote DSNs |
+| R1 | `.env` pointed `DATABASE_URL` at a remote Supabase host | local `.env` | **Resolved 2026-10-31**: Supabase removed from `.env`, MCP config, CLI; `dev.ps1` also ignores remote DSNs. A pre-cleanup copy is in `.env.bak` (git-ignored) — delete it once local dev is confirmed |
 | R2 | **No real WebSocket authentication for browsers** (headers cannot be set on `new WebSocket`) | `internal/handler/order_handler.go` `HandleWebSocket` | Mitigated by containment: `/ws` is 503 in staging/production; Phase 03 one-time WS ticket |
 | R3 | **No backup restore drill yet** (scripts exist, never restored on a real VPS) | `scripts/backup/*` | Blocked — needs VPS; drill is a release gate |
 

@@ -127,6 +127,9 @@ type OrderItem struct {
 	StoreID            uuid.UUID         `json:"store_id" db:"store_id"`
 	OrderID            uuid.UUID         `json:"order_id" db:"order_id"`
 	ProductID          *uuid.UUID        `json:"product_id,omitempty" db:"product_id"`
+	VariantID          *uuid.UUID        `json:"variant_id,omitempty" db:"variant_id"`
+	SnapshotVariant    string            `json:"snapshot_variant_name,omitempty" db:"snapshot_variant_name"`
+	SnapshotSKU        string            `json:"snapshot_sku,omitempty" db:"snapshot_sku"`
 	ConfigHash         string            `json:"config_hash" db:"config_hash"`
 	SnapshotName       string            `json:"snapshot_name" db:"snapshot_name"`
 	UnitBasePrice      int64             `json:"unit_base_price" db:"unit_base_price"`

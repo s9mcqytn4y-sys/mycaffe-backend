@@ -102,6 +102,8 @@ services:
       EMAIL_FROM_ADDRESS: ${EMAIL_FROM_ADDRESS:?EMAIL_FROM_ADDRESS must be set}
       EMAIL_FROM_NAME: ${EMAIL_FROM_NAME:-MyCaffe}
       APP_PUBLIC_URL: ${APP_PUBLIC_URL:?APP_PUBLIC_URL must be set}
+      # Slug created by cmd/migrate -action=bootstrap-store; empty for multi-branch.
+      DEFAULT_STORE_SLUG: ${DEFAULT_STORE_SLUG:-}
       STORAGE_DRIVER: ${STORAGE_DRIVER:-r2}
       R2_ACCOUNT_ID: ${R2_ACCOUNT_ID:-}
       R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:-}

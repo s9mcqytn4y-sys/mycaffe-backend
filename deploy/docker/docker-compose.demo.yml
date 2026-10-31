@@ -94,6 +94,7 @@ services:
       EMAIL_FROM_ADDRESS: ${EMAIL_FROM_ADDRESS:-}
       EMAIL_FROM_NAME: ${EMAIL_FROM_NAME:-MyCaffe Demo}
       APP_PUBLIC_URL: ${APP_PUBLIC_URL:-http://localhost:8088}
+      DEFAULT_STORE_SLUG: ${DEFAULT_STORE_SLUG:-central-cafe}
       SENTRY_ENVIRONMENT: staging
     networks:
       - mycaffe-edge

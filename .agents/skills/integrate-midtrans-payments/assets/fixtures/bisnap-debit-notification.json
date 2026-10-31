@@ -1,0 +1,15 @@
+{
+  "_comment": "BI-SNAP Direct Debit payment notification shape (covers one-time and tokenized GoPay/ShopeePay/DANA Direct Debit). originalReferenceNo is Midtrans's reference; originalPartnerReferenceNo is the merchant order id.",
+  "originalReferenceNo": "MIDREF-DEBIT-1234567890",
+  "originalPartnerReferenceNo": "ORDER-sandbox-gopay-001",
+  "latestTransactionStatus": "00",
+  "transactionStatusDesc": "Success",
+  "amount": {
+    "value": "100000.00",
+    "currency": "IDR"
+  },
+  "additionalInfo": {
+    "paymentType": "GOPAY",
+    "paymentTime": "2026-05-27T14:30:00+07:00"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "_comment": "Snap expire notification — terminal failure. signature_key is generated with MIDTRANS_SERVER_KEY=SB-Mid-server-test for deterministic local checks. Use to verify expire mapping and that this status cannot regress a paid order in the merchant handler.",
+  "transaction_time": "2026-05-27 16:30:00",
+  "transaction_status": "expire",
+  "transaction_id": "11111111-2222-3333-4444-555555555557",
+  "status_message": "midtrans payment notification",
+  "status_code": "202",
+  "signature_key": "a51d1bd2aa8b1dca9228f3827cd641b6dadf52ebb9ed40fb45db6a06dbb33de7cde8e80caa93dfb5e6beeaaf44f698dc7f6f56edd46556eddaa2a774ff7692c6",
+  "payment_type": "qris",
+  "order_id": "ORDER-sandbox-0003",
+  "merchant_id": "G000000000",
+  "gross_amount": "50000.00",
+  "currency": "IDR"
+}

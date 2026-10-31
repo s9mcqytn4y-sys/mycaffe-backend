@@ -58,6 +58,7 @@ type OrderCreationInput struct {
 	OrderType      domain.OrderType   `json:"order_type"`
 	BillingMode    domain.BillingMode `json:"billing_mode,omitempty"`
 	ActorUserID    *uuid.UUID         `json:"actor_user_id,omitempty"`
+	ExpectedTotal  *int64             `json:"expected_total,omitempty"`
 	Notes          string             `json:"notes,omitempty"`
 	Items          []OrderItemInput   `json:"items"`
 }

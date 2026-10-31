@@ -1,0 +1,4 @@
+interface:
+  display_name: "Midtrans Payments"
+  short_description: "Integrate Midtrans merchant payments"
+  default_prompt: "Use integrate-midtrans-payments to plan, implement, or debug a merchant Midtrans payment integration."

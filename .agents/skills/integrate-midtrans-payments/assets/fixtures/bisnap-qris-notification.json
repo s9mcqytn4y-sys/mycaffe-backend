@@ -1,0 +1,15 @@
+{
+  "_comment": "BI-SNAP QRIS payment notification shape. Verify with scripts/verify_bisnap_notification.py using the merchant's stored Midtrans public key. originalPartnerReferenceNo is the merchant order id you sent; originalReferenceNo is Midtrans's reference.",
+  "originalReferenceNo": "MIDREF-QRIS-1234567890",
+  "originalPartnerReferenceNo": "ORDER-sandbox-qris-001",
+  "latestTransactionStatus": "00",
+  "transactionStatusDesc": "Success",
+  "amount": {
+    "value": "25000.00",
+    "currency": "IDR"
+  },
+  "additionalInfo": {
+    "qris": true,
+    "paymentTime": "2026-05-27T14:30:00+07:00"
+  }
+}

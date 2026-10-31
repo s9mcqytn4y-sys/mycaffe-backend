@@ -1,0 +1,14 @@
+{
+  "_comment": "Snap pending notification — async method awaiting payment. signature_key is generated with MIDTRANS_SERVER_KEY=SB-Mid-server-test for deterministic local checks. Use to verify the merchant handler displays a recovery page and does not regress an already-paid order.",
+  "transaction_time": "2026-05-27 14:30:00",
+  "transaction_status": "pending",
+  "transaction_id": "11111111-2222-3333-4444-555555555556",
+  "status_message": "midtrans payment notification",
+  "status_code": "201",
+  "signature_key": "db70270f6c27da2b564d4fffd9df3eeae578a7afba22bf5e6071711c7914d7a3d22ccaa533e864cf53742ca73c9e63016b0cbc1f97ee253a77b24b7a410d876a",
+  "payment_type": "bank_transfer",
+  "order_id": "ORDER-sandbox-0002",
+  "merchant_id": "G000000000",
+  "gross_amount": "75000.00",
+  "currency": "IDR"
+}

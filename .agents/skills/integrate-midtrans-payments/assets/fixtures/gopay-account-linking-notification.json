@@ -1,0 +1,11 @@
+{
+  "_comment": "GoPay account-linking / unlinking notification shape. accountStatus DISABLED means the customer revoked authorization. accessToken is the rotated customer_authorization_token; persist it (or null the local record on DISABLED).",
+  "additionalInfo": {
+    "accessToken": "REDACTED_CUSTOMER_AUTHORIZATION_TOKEN",
+    "merchantId": "REDACTED_GOPAY_MERCHANT_HANDLE",
+    "subMerchantId": null,
+    "paymentType": "GOPAY",
+    "accountStatus": "ENABLED",
+    "statusMessage": "Account linked"
+  }
+}

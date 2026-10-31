@@ -1,0 +1,15 @@
+{
+  "_comment": "Snap settlement notification (Midtrans sandbox shape). signature_key is generated with MIDTRANS_SERVER_KEY=SB-Mid-server-test for deterministic local checks. Regenerate via scripts/replay_snap_webhook.sh with your sandbox key before replaying against a merchant handler.",
+  "transaction_time": "2026-05-27 14:30:00",
+  "transaction_status": "settlement",
+  "transaction_id": "11111111-2222-3333-4444-555555555555",
+  "status_message": "midtrans payment notification",
+  "status_code": "200",
+  "signature_key": "d65b4adf15335095fe1bfafe24964d48009dcc2989393e13570b0c9852ea60df0040b1a9646b9c9ef9433317f77acc8e387c59998dc20f5bd93fff93d23672e4",
+  "payment_type": "credit_card",
+  "order_id": "ORDER-sandbox-0001",
+  "merchant_id": "G000000000",
+  "gross_amount": "150000.00",
+  "fraud_status": "accept",
+  "currency": "IDR"
+}

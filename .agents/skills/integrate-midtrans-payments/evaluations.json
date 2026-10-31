@@ -1,0 +1,294 @@
+{
+  "_comment": "Structured evaluations for the integrate-midtrans-payments skill, in the schema published by Anthropic at https://platform.claude.com/docs/en/agents-and-tools/agent-skills/best-practices. There is not yet a built-in runner for these; the prose form in references/evaluation-prompts.md remains the primary surface, and this file is the machine-readable shadow.",
+  "skill": "integrate-midtrans-payments",
+  "version": "0.3.2",
+  "evaluations": [
+    {
+      "id": "snap-only",
+      "skills": ["integrate-midtrans-payments"],
+      "query": "Use integrate-midtrans-payments to add Midtrans Snap checkout to this ecommerce app. We only want hosted checkout for credit card, VA, GoPay, and Alfamart.",
+      "expected_behavior": [
+        "Routes to Snap (not BI-SNAP, Core API, or Payment Link) and loads references/snap-checkout.md",
+        "Completes the merchant-readiness preflight for account/MID, sandbox access, active methods, callback URLs, expected flow, and proof level",
+        "Completes the project-adaptation checklist before generating code",
+        "Keeps the server key backend-only and the client key frontend-only",
+        "Discusses popup vs redirect vs embedded display modes",
+        "Sets gross_amount as an integer when creating the Snap token",
+        "Verifies notifications with SHA-512 over the raw payload gross_amount string",
+        "Implements idempotent, monotonic webhook handling",
+        "Does not treat Snap frontend callbacks (onSuccess) as fulfillment"
+      ]
+    },
+    {
+      "id": "snap-practical-depth",
+      "skills": ["integrate-midtrans-payments"],
+      "query": "Use integrate-midtrans-payments to implement Snap checkout in this existing store. We want a production-shaped implementation, not just a token API call.",
+      "expected_behavior": [
+        "Loads references/merchant-readiness-preflight.md, references/project-adaptation.md, and references/snap-checkout.md",
+        "Finds the merchant's current order, checkout, payment-attempt, webhook, repository, environment, logging, and test boundaries before proposing code",
+        "Creates the Snap token server-side with Basic Auth, a unique provider order id, integer gross_amount, item-total reconciliation, validated enabled_payments, and explicit expiry behavior",
+        "Moves the local payment attempt to creating_payment before the provider call and awaiting_payment after token creation succeeds",
+        "Persists the Snap token or redirect URL, provider order id, selected local method or allowed method set, expiry, latest provider status, and safe metadata for recovery after refresh",
+        "Chooses popup, redirect, or embedded Snap JS based on the merchant's UX and platform constraints",
+        "Treats onSuccess, onPending, onError, and onClose as customer-experience hints only",
+        "Verifies notifications with the raw payload amount string, maps transaction status monotonically, and keeps the handler idempotent",
+        "Covers retry behavior, expired sessions, and the normal status-lookup not-found case before a customer selects or confirms a payment method",
+        "Keeps server keys and provider payload logs off the frontend"
+      ]
+    },
+    {
+      "id": "snap-advanced-feature-review",
+      "skills": ["integrate-midtrans-payments"],
+      "query": "Use integrate-midtrans-payments to extend our Snap checkout. We are considering recurring card charges, subsequent card charges, payment fees, custom VA numbers, item discounts, promo behavior, and different expiry for the payment page versus the transaction.",
+      "expected_behavior": [
+        "Does not implement every advanced option blindly; separates merchant need, dashboard activation, product eligibility, operational risk, and test evidence",
+        "Maps each requested capability to the relevant Snap area: expiry, page_expiry, enabled_payments, custom_field1-3, callback URLs, card 3DS/security options, saved-card or subsequent-card behavior, recurring card behavior, installment or bank routing, custom VA number or description, item-level discounts, promo setup, and fee handling",
+        "Identifies which features require dashboard or Midtrans support activation before code can be proven",
+        "States the checkout-state, webhook, retry, refund, and reconciliation impact of each accepted feature",
+        "Keeps card/customer payment data in backend-approved boundaries and avoids broadening PCI-sensitive handling",
+        "Recommends feature flags or configuration gates for methods and advanced options that may differ between sandbox and production",
+        "Produces a staged implementation and verification plan rather than mixing all advanced behavior into one untestable change"
+      ]
+    },
+    {
+      "id": "invoice-preflight",
+      "skills": ["integrate-midtrans-payments"],
+      "query": "Use integrate-midtrans-payments to add Midtrans payment for our SaaS invoice billing page. We are not sure yet whether our Midtrans account and sandbox are ready.",
+      "expected_behavior": [
+        "Loads references/merchant-readiness-preflight.md before choosing Snap, BI-SNAP, Core API, or Payment Link",
+        "Asks or infers whether the merchant has a Midtrans account/MID, sandbox dashboard access, sandbox credentials, and active payment methods",
+        "Clarifies the expected invoice flow: who pays, when an invoice becomes payable, redirect or popup preference, retry behavior, and fulfillment rule",
+        "Separates local deterministic scaffolding from sandbox provider proof and does not claim end-to-end verification without credentials/dashboard access",
+        "Gates unavailable methods behind configuration or disabled UI instead of assuming activation",
+        "Identifies required dashboard notification and redirect URLs before implementation"
+      ]
+    },
+    {
+      "id": "bisnap-qris-va",
+      "skills": ["integrate-midtrans-payments"],
+      "query": "Use integrate-midtrans-payments to implement custom checkout UI for QRIS and bank virtual account only. We do not want Snap.",
+      "expected_behavior": [
+        "Routes to BI-SNAP and loads references/bisnap-core.md and references/operations-and-go-live.md",
+        "Separates access-token (RSA), transactional (HMAC), and notification (RSA verify) signatures",
+        "Persists QR content / VA number, expiry, provider reference, and method",
+        "Generates partnerServiceId as the 8-character left-space-padded form (or invokes scripts/format_partner_service_id.sh)",
+        "Plans status mapping, notification verification, and sandbox smoke",
+        "Caches BI-SNAP access tokens with an expiry buffer"
+      ]
+    },
+    {
+      "id": "bisnap-implementation-depth",
+      "skills": ["integrate-midtrans-payments"],
+      "query": "Use integrate-midtrans-payments to implement BI-SNAP QRIS and virtual account in this app with our own payment UI. We want a production-shaped implementation, not just a single charge call.",
+      "expected_behavior": [
+        "Loads references/merchant-readiness-preflight.md, references/project-adaptation.md, and references/bisnap-core.md",
+        "Finds the merchant's order, payment, repository, environment, logging, and test boundaries before proposing code",
+        "Obtains a cached B2B access token using the clientId|timestamp RSA-SHA256 access-token signature, refreshes with an expiry buffer, and guards refresh races",
+        "Signs the transactional request as method:path:accessToken:bodyHashHex:timestamp with HMAC-SHA512 over the exact serialized body without reformatting",
+        "Moves the local payment attempt to creating_payment before the provider call and awaiting_payment after the charge is accepted",
+        "Persists provider reference, QR or VA instructions, expiry, and latest provider status for recovery after refresh",
+        "Maps BI-SNAP status codes through one shared idempotent, monotonic rule and reconciles on the merchant order id or trxId",
+        "Keeps private keys, client secret, access tokens, and signatures off the frontend"
+      ]
+    },
+    {
+      "id": "bisnap-notification-routing",
+      "skills": ["integrate-midtrans-payments"],
+      "query": "Use integrate-midtrans-payments to wire BI-SNAP notifications for QRIS, VA, and Direct Debit. Our dashboard lets us register callback URLs.",
+      "expected_behavior": [
+        "Uses product-specific standardized callback paths such as /v1.0/debit/notify, /v1.0/qr/qr-mpm-notify, and /v1.0/va/notify rather than one merged route, and confirms exact paths against current docs",
+        "Verifies the notification signature over the exact request path POST:requestPath:bodyHashHex:timestamp with the Midtrans public key and warns that a path-rewriting dispatcher breaks verification",
+        "Returns the BI-SNAP-standard response envelope per product (VA 2002500 echoing virtualAccountData, QR 2005200, debit 2005600) instead of a generic 200 OK",
+        "Reads the raw body for verification, verifies before mutating, and gates any verification bypass to non-production only",
+        "Reads the per-product status field (additionalInfo.paymentFlagStatus for VA, latestTransactionStatus for QR and debit) and reconciles on the right key",
+        "Keeps notification handling idempotent and monotonic and redacts secrets, signatures, and full payloads from logs"
+      ]
+    },
+    {
+      "id": "gopaylater-debug",
+      "skills": ["integrate-midtrans-payments"],
+      "query": "Our GoPayLater charge keeps failing after account linking. Use integrate-midtrans-payments to debug the implementation.",
+      "expected_behavior": [
+        "Loads references/gopay-tokenization.md and references/bisnap-core.md",
+        "Checks that the implementation persists customer_authorization_token rather than a legacy account id",
+        "Requires Binding Inquiry before tokenized payment and refreshes the rotated token from inquiry.additionalInfo.accessToken",
+        "Gates PayLater on active PAY_LATER option plus merchant activation flag",
+        "Confirms Authorization-Customer: Bearer header is present for tokenized payment and absent for one-time GoPay",
+        "Confirms BISNAP_GOPAY_MERCHANT_HANDLE is used for linking and BISNAP_GOPAY_MERCHANT_ID for charging",
+        "Checks redaction for auth code, customer authorization token, and payment option token"
+      ]
+    },
+    {
+      "id": "webhook-stays-pending",
+      "skills": ["integrate-midtrans-payments"],
+      "query": "Midtrans says payment is settled but our order remains pending. Use integrate-midtrans-payments to investigate.",
+      "expected_behavior": [
+        "Inspects route/controller, provider verification, status mapping, order repository, logs, and deployment callback config",
+        "Verifies the callback URL is public HTTPS, not localhost, not behind auth/VPN, and does not redirect",
+        "Recomputes the Snap signature with the raw gross_amount string from the payload (proposes scripts/verify_snap_signature.sh)",
+        "Checks idempotency and monotonic state guard",
+        "Does not treat frontend callbacks as fulfillment proof"
+      ]
+    },
+    {
+      "id": "docs-only-overfit",
+      "skills": ["integrate-midtrans-payments"],
+      "query": "Use integrate-midtrans-payments to review this AI-generated Midtrans integration plan. It copies the docs but does not mention our existing order state.",
+      "expected_behavior": [
+        "Flags the missing project adaptation",
+        "Requires merchant-specific order/payment state, recovery page, env wiring, callback URLs, logs, and tests",
+        "Avoids pasting generic docs as the final answer",
+        "Names the specific files in the merchant codebase that the plan should target"
+      ]
+    },
+    {
+      "id": "sandbox-smoke-snap",
+      "skills": ["integrate-midtrans-payments"],
+      "query": "Use integrate-midtrans-payments to prove our Snap integration works in sandbox. You can run commands if needed.",
+      "expected_behavior": [
+        "Loads references/sandbox-interaction-helper.md and references/snap-checkout.md",
+        "Confirms MIDTRANS_SERVER_KEY is a sandbox key (SB- prefix) loaded from env, not chat",
+        "Prefers the merchant app backend route over raw curl when one exists",
+        "Creates a unique sandbox order, confirms token creation, exercises status lookup not-found semantics, replays the webhook, and confirms idempotency",
+        "Captures evidence in the sandbox-helper output template",
+        "Names any missing dashboard or activation step explicitly"
+      ]
+    },
+    {
+      "id": "production-key-refusal",
+      "skills": ["integrate-midtrans-payments"],
+      "query": "Use this production Midtrans server key to test whether payment creation works.",
+      "expected_behavior": [
+        "Refuses to create a live payment as a normal test",
+        "Offers sandbox smoke, local deterministic payload/signature tests, or a merchant-approved live penny-test runbook as alternatives",
+        "Does not echo, store, or log the provided key",
+        "Explains that production smoke requires explicit merchant approval and monitoring"
+      ]
+    },
+    {
+      "id": "webhook-fixture-diagnosis",
+      "skills": ["integrate-midtrans-payments"],
+      "query": "Here is a Midtrans webhook payload and our order stayed pending. Use integrate-midtrans-payments to diagnose it.",
+      "expected_behavior": [
+        "Loads references/sandbox-interaction-helper.md plus the relevant webhook reference",
+        "Computes the expected signature using the raw amount string (proposes scripts/verify_snap_signature.sh --payload)",
+        "Checks order_id prefix mapping, status/fraud mapping, and stale-state rules",
+        "Suggests local replay fixtures with invalid-signature and duplicate-replay cases",
+        "Does not trust frontend callbacks as fulfillment proof"
+      ]
+    },
+    {
+      "id": "bisnap-signing-dry-run",
+      "skills": ["integrate-midtrans-payments"],
+      "query": "Our BI-SNAP QRIS request gets a signature error in sandbox. Use integrate-midtrans-payments to debug it without leaking keys.",
+      "expected_behavior": [
+        "Loads references/sandbox-interaction-helper.md and references/bisnap-core.md",
+        "Verifies that access-token, transactional, and notification signatures use three independent helpers",
+        "Checks timestamp format (Asia/Jakarta ISO-8601), endpoint path (no host/scheme/query), lowercase-hex body hash, exact byte-string body, access token validity, client secret freshness, and external id uniqueness",
+        "Proposes scripts/dry_run_bisnap_sign.py to compare the merchant code's outputs against a reference implementation",
+        "Produces redacted evidence before re-running sandbox calls"
+      ]
+    },
+    {
+      "id": "no-sandbox-credentials",
+      "skills": ["integrate-midtrans-payments"],
+      "query": "We do not have Midtrans sandbox credentials yet. Can you still verify our implementation?",
+      "expected_behavior": [
+        "Does not claim end-to-end verification",
+        "Runs local deterministic checks: payload builders, signature unit tests with known fixtures, webhook replay against local handler, status mapping, idempotency, env wiring, redaction, and recovery pages",
+        "Lists the exact sandbox evidence still required once credentials and dashboard access exist"
+      ]
+    },
+    {
+      "id": "mobile-snap-webview-gopay",
+      "skills": ["integrate-midtrans-payments"],
+      "query": "Use integrate-midtrans-payments to add Midtrans payment to our React Native app. We want Snap hosted checkout in a WebView and need GoPay app-switch return to work.",
+      "expected_behavior": [
+        "Loads references/merchant-readiness-preflight.md, references/project-adaptation.md, references/snap-checkout.md, and references/mobile-sdk.md",
+        "Chooses Snap WebView as the default mobile path, not a deprecated native SDK or an unofficial React Native plugin",
+        "Confirms the merchant backend already creates Snap tokens server-side and never puts the server key in the mobile app",
+        "Persists local payment state before opening the WebView so app backgrounding or cold start can recover",
+        "Uses the exact Snap redirect_url returned by Midtrans without rewriting, shortening, or encoding it",
+        "Configures the WebView to allow JavaScript, cookies, and external app/universal/deep-link redirects needed by wallet methods",
+        "Sets GoPay callback_url only when the merchant app has registered and tested the deeplink, and treats QR-scan payments as a separate return path",
+        "Handles finish, unfinish, error, and wallet return as UX hints only, then verifies status through the backend or webhook",
+        "Tests on real Android and iOS devices for wallet app-switch, unknown URL scheme handling, and cold-start recovery"
+      ]
+    },
+    {
+      "id": "webhook-tls12-edge-debug",
+      "skills": ["integrate-midtrans-payments"],
+      "query": "Use integrate-midtrans-payments to debug why Midtrans production webhooks never arrive. Sandbox webhooks worked. curl to our endpoint succeeds.",
+      "expected_behavior": [
+        "Loads references/operations-and-go-live.md",
+        "Checks whether the merchant webhook endpoint accepts TLS 1.2 instead of being hardened to TLS-1.3-only",
+        "Suggests openssl s_client -connect <host>:443 -tls1_2 to confirm TLS 1.2 acceptance at the edge hostname",
+        "Explains that current Midtrans notification docs say webhook delivery supports TLS up to 1.2, while ordinary curl/browser checks may negotiate TLS 1.3",
+        "Checks strict firewall/WAF allowlists against current Midtrans notification source IPs/CIDRs and points to scripts/print_midtrans_webhook_ips.sh",
+        "Warns that IP allowlists are not authenticity proof and the handler must still verify provider signatures",
+        "Distinguishes TLS/WAF failures from signature/payload bugs by checking edge logs before debugging application status mapping",
+        "Confirms the production Payment Notification URL is HTTPS, public, and not behind auth, VPN, unusual ports, or redirect chains"
+      ]
+    }
+,
+    {
+      "id": "card-subscription-managed",
+      "skills": ["integrate-midtrans-payments"],
+      "query": "Use integrate-midtrans-payments to implement monthly card subscriptions. We want Midtrans to own the billing schedule and notify our app for every recurring charge.",
+      "expected_behavior": [
+        "Loads references/subscriptions.md",
+        "Routes to the Midtrans-managed Subscription API and warns explicitly that mixing it with merchant-driven recurring double-charges customers",
+        "Confirms subscription/recurring activation and Recurring Notification URL setup before implementation",
+        "Requires an initial successful save-card flow and persists saved_token_id plus saved_token_id_expired_at before creating the subscription",
+        "Creates the subscription with a unique name, string amount, schedule, metadata.merchant_subscription_id, and retry_schedule aligned with merchant dunning policy",
+        "Stores the returned subscription id and maintains charge_attempts[] keyed by recurring charge order_id",
+        "Verifies recurring notifications with the Snap/Core SHA-512 signature and maps each charge attempt idempotently",
+        "Separates disable, enable, cancel, and update semantics in operator workflows"
+      ]
+    },
+    {
+      "id": "refund-partial-idempotent",
+      "skills": ["integrate-midtrans-payments"],
+      "query": "Use integrate-midtrans-payments to add a partial refund flow for our settled GoPay orders. The customer support tool may double-click the refund button.",
+      "expected_behavior": [
+        "Loads references/refund-operations.md",
+        "Routes to direct refund endpoint (POST /v2/{order_id}/refund/online/direct) for GoPay, not async refund",
+        "Generates a deterministic refund_key per refund attempt (e.g., {order_id}-refund-{counter}) and persists it before the API call",
+        "Takes a row-level lock or optimistic-concurrency token on the order before issuing the refund",
+        "Maintains a total_refunded ledger and rejects refund attempts that would exceed gross_amount",
+        "Restricts the refund action to orders that reached settlement or accepted partial_refund; treats capture as cancel/void unless current docs explicitly allow refund",
+        "Handles the partial_refund webhook and reconciles to the local ledger keyed on refund_key",
+        "Does not assume a non-refundable method (e.g., bank transfer or OTC) supports refund"
+      ]
+    },
+    {
+      "id": "payment-link-reusable",
+      "skills": ["integrate-midtrans-payments"],
+      "query": "Use integrate-midtrans-payments to create a reusable Payment Link for our event registration. We expect 50 attendees to pay through the same link, and each registration should appear as a distinct order in our admin.",
+      "expected_behavior": [
+        "Loads references/payment-links.md",
+        "Sets usage_limit to 50 explicitly instead of relying on the API default",
+        "Persists the payment_url and order_id linkage before sending the link to attendees",
+        "Reconciles each reusable-link payment by transaction-level identifiers such as transaction_id or transaction-specific provider order id, not only by the Payment Link id",
+        "Reuses scripts/verify_snap_signature.sh against the Payment Link notification (same signature format as Snap)",
+        "Configures Payment Notification URL on the dashboard or per-transaction header",
+        "Plans an out-of-band cancel path (admin route) since customers cannot self-cancel a Payment Link"
+      ]
+    },
+    {
+      "id": "core-api-card-custom-ui",
+      "skills": ["integrate-midtrans-payments"],
+      "query": "Use integrate-midtrans-payments to build a custom card payment UI with our own checkout. We need 3DS, saved-card one-click for returning customers, and Alfamart as a fallback method.",
+      "expected_behavior": [
+        "Routes to classic Core API for both card and Alfamart and loads references/core-api-classic.md (not Snap, not BI-SNAP)",
+        "Tokenizes the card on the frontend with MidtransNew3ds.getCardToken so PAN/CVV never reaches the merchant backend",
+        "Sends authentication: true on first card charge and verifies 3DS via backend status lookup, not frontend callbacks",
+        "Keeps saved-card, two-click, one-click, and recurring flows separate behind merchant activation and stores saved_token_id plus expiry safely",
+        "Charges Alfamart with payment_type: cstore and store: alfamart, persists the payment_code and expiry, and surfaces it on the customer-facing instruction page",
+        "Reuses scripts/verify_snap_signature.sh for Core API notifications (same SHA-512 signature as Snap)",
+        "Validates the api.* host vs app.* host distinction and uses api.* for Core API endpoints",
+        "Documents that OTC customer-resolution is usually manual and the operator runbook must cover it"
+      ]
+    }
+  ]
+}

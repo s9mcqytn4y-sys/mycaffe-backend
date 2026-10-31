@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "integrate-midtrans-payments": {
+      "source": "veritrans/midtrans-agent-skills",
+      "sourceType": "github",
+      "skillPath": "integrate-midtrans-payments/SKILL.md",
+      "computedHash": "0274d11da0ae845d4dbe6fe3e620730ef2922fed3f3ee162ce7285300837a75b"
+    }
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "_comment": "BI-SNAP virtual account payment notification shape. Merchant handler should reconcile by trxId (the order id you sent), not by virtualAccountNo. additionalInfo.paymentFlagStatus carries the actual status code.",
+  "partnerServiceId": "   12345",
+  "customerNo": "00000000000000000001",
+  "virtualAccountNo": "   1234500000000000000000001",
+  "trxId": "ORDER-sandbox-va-001",
+  "paymentRequestId": "PAYREQ-VA-1234567890",
+  "paidAmount": {
+    "value": "150000.00",
+    "currency": "IDR"
+  },
+  "additionalInfo": {
+    "paymentFlagStatus": "00",
+    "paymentFlagReason": "Success",
+    "paymentTime": "2026-05-27T14:30:00+07:00"
+  }
+}

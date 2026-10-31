@@ -1,0 +1,17 @@
+{
+  "_comment": "Payment Link notification (reusable link, second buyer). signature_key generated with MIDTRANS_SERVER_KEY=SB-Mid-server-test. Use to verify reusable-link reconciliation keys on transaction_id (not order_id), preventing the second buyer's payment from being mistaken for a duplicate of the first.",
+  "transaction_time": "2026-06-04 12:30:00",
+  "transaction_status": "settlement",
+  "transaction_id": "44444444-5555-6666-7777-888888888801",
+  "status_message": "midtrans payment notification",
+  "status_code": "200",
+  "signature_key": "ca1da23ae0b49e6c149c0ac52804c5761a35d1ddce68d8b07bbbacd38740d1c19c8d1d9ae8adc17e12f5554dcab92a405fda6be6451f9c9397d883f7d71b9201",
+  "settlement_time": "2026-06-04 12:30:25",
+  "payment_type": "gopay",
+  "order_id": "ORDER-payment-link-0001",
+  "payment_link_id": "55555555-6666-7777-8888-999999999991",
+  "merchant_id": "G000000000",
+  "gross_amount": "275000.00",
+  "fraud_status": "accept",
+  "currency": "IDR"
+}

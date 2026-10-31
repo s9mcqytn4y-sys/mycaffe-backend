@@ -82,6 +82,8 @@ services:
       APP_ENV: "production"
       FRONTEND_URL: ${FRONTEND_URL:?FRONTEND_URL must be set}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:?ALLOWED_ORIGINS must be set}
+      # Only the edge network (Nginx) may set X-Forwarded-For; keeps ClientIP() unspoofable.
+      TRUSTED_PROXIES: ${EDGE_SUBNET:-172.30.0.0/24}
       DATABASE_URL: ${COMPOSE_DATABASE_URL:?COMPOSE_DATABASE_URL must be set}
       DB_APP_USER: ${DB_APP_USER:-mycaffe_app}
       DB_APP_PASSWORD: ${DB_APP_PASSWORD:?DB_APP_PASSWORD must be set}
@@ -187,6 +189,11 @@ volumes:
 networks:
   mycaffe-edge:
     driver: bridge
+    # Fixed subnet so the API can trust exactly this proxy hop (TRUSTED_PROXIES).
+    # Changing it on an existing host requires `docker compose down` to recreate the network.
+    ipam:
+      config:
+        - subnet: ${EDGE_SUBNET:-172.30.0.0/24}
   mycaffe-data:
     driver: bridge
     internal: true

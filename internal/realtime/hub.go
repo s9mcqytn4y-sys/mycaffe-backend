@@ -65,6 +65,7 @@ func (h *Hub) RunWithContext(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			h.Shutdown() // stopCh is the single signal senders select on once the loop exits
 			h.closeAllClients()
 			return
 		case <-h.stopCh:
@@ -143,10 +144,14 @@ func (h *Hub) BroadcastEvent(eventType, storeID string, payload interface{}) err
 		return errors.New("cannot broadcast event without explicit storeID (tenant isolation violation)")
 	}
 
-	h.broadcast <- &EventMessage{
+	select {
+	case h.broadcast <- &EventMessage{
 		Type:    eventType,
 		StoreID: storeID,
 		Payload: payload,
+	}:
+	case <-h.stopCh:
+		return errors.New("realtime hub is shut down")
 	}
 	return nil
 }
@@ -187,7 +192,12 @@ func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request, authenticatedStore
 		storeID:  authenticatedStoreID,
 		isClosed: 0,
 	}
-	client.hub.register <- client
+	select {
+	case client.hub.register <- client:
+	case <-h.stopCh:
+		_ = conn.Close()
+		return
+	}
 
 	go client.writePump()
 	go client.readPump()
@@ -195,7 +205,10 @@ func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request, authenticatedStore
 
 func (c *Client) readPump() {
 	defer func() {
-		c.hub.unregister <- c
+		select {
+		case c.hub.unregister <- c:
+		case <-c.hub.stopCh:
+		}
 		_ = c.conn.Close()
 	}()
 

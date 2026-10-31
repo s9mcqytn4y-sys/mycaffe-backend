@@ -32,7 +32,7 @@ The following findings are based on the repository at commit 19bd992:
 | Table model | orders.table_number is a plain string; no tables table or table_id relationship was found | Table lifecycle and QR generation require a new tenant-scoped model |
 | Guest session | No table_sessions entity or guest session exchange route was found | A scan cannot yet create a revocable, scoped guest session |
 | PIN hashing | users.pin_hash exists; seed values are placeholders; no production PIN verifier was found | Choose and test the hashing format before relying on the field |
-| User deletion | stores has deleted_at; users and domain.User do not currently expose deleted_at | AGENTS.md soft-delete guidance and implementation are inconsistent; resolve this before auth migration |
+| Entity naming | Current schema/domain use users; Module 3 lists staff_users among suggested entities | Keep users as the current canonical table and do not create staff_users as a duplicate without an approved migration decision |
 
 ### Existing JWT details and gaps
 
@@ -88,7 +88,7 @@ Candidate response:
 - staff profile limited to id, name, role, and store context
 - access/session expiry metadata
 
-The current schema supports store-scoped email and pin_hash, but does not include password_hash or staff_code. Therefore the login identifier and credential policy must be confirmed before implementation.
+The current schema supports store-scoped email and pin_hash, but does not include password_hash or a persisted staff_code. The brand guide defines a staff ID-card display pattern (STF-{STORE_SLUG_UPPER}-{XXXX}) based on users.id, but does not specify a stored login identifier column. Therefore decide whether login uses email or a derived/persisted staff code before implementation.
 
 ### Login security
 
@@ -125,16 +125,17 @@ Keep the four existing roles and implement one authoritative backend permission 
 | Catalog, pricing, cost/HPP, financial reports | Full | Operational fields only if explicitly approved | No | No | Public menu fields only |
 | Create POS/walk-in orders | Yes | Yes | No | No | No |
 | Create QR table orders | Staff path only | Staff path only | No | No | Own session only |
-| Cash, static QRIS, EDC tender | Yes | Yes | No | No | No |
-| Dynamic gateway payment initiation | As configured | As configured | No | No | Only guest flow tied to its own order |
+| Cash, static QRIS, EDC, and dynamic QRIS payment operations | Yes | Yes | No | No | Only guest flow tied to its own order |
+| Open tab, split bill, cashier shift open/close | Yes | Yes | No | No | No |
 | KDS ticket visibility | All stations | Operational visibility as approved | Barista station | Kitchen station | No |
 | KDS status transition | All stations | As approved | Barista station only | Kitchen station only | No |
+| Quick item availability toggle | All | No by default | Beverage items only | Food/pastry items only | No |
 | Manage tables and QR generation/rotation/revocation | Yes | No by default | No | No | No |
-| Void/refund paid transaction | Owner/configured authorization | Only via configured authorization flow | No | No | No |
+| Void/refund paid transaction | Yes | Configured authorization flow plus mandatory reason; exact PIN/owner-override policy unresolved | No | No | No |
 | View another tenant's data | Never | Never | Never | Never | Never |
 | View another guest session's order/contact data | No guest access | Staff permissions only | No | No | No |
 
-This matrix is provisional. The product documentation requires least privilege, owner-only finance/cost data, staff PIN protection for sensitive actions, and mandatory reason logging. It also says not to introduce unnecessary multi-step manager-approval bottlenecks. Exact permissions for discounts, stock override, void/refund, shifts, and open-tab billing need owner approval.
+This matrix is provisional. The product sources contain a specific void/refund policy conflict: Module 3 says a cashier must not void/refund a paid transaction without a configured authorization flow, while the brand guide says cashier can void/refund with mandatory reason logging and rejects multi-step manager approval bottlenecks. Do not silently choose one interpretation. Confirm whether the configured flow means cashier PIN re-authentication, owner PIN override, a transaction threshold, or another single-step rule. The product docs also specify cashier open_tab, split bill, shift operations, and station-specific quick availability toggles. Discounts and stock override limits still need explicit confirmation.
 
 ### Enforcement pattern
 
@@ -204,7 +205,7 @@ Candidate exchange endpoint: POST /api/v1/public/table-sessions
 7. Every guest order is associated with table_id and table_session_id.
 8. Guest tracking exposes only the order(s) created by that session and only the minimum public fields.
 
-Create separate sessions for separate devices by default. The product explicitly requires two guests at one table to order from separate devices. Do not let one guest session enumerate other orders from the same table.
+Create separate sessions for separate devices by default. The product explicitly requires two guests at one table to order from separate devices. Do not let one guest session enumerate other orders from the same table. The product also requires a defined behavior when a customer closes/reopens the browser or scans the same QR again; decide whether the client resumes a still-valid session or creates a new session.
 
 Candidate table_sessions fields:
 - id, store_id, table_id
@@ -277,12 +278,12 @@ Each migration must be additive, reversible, PostgreSQL 18-compatible, and teste
 
 ## 11. Decisions required before implementation
 
-1. Staff login identity: store slug + email + PIN, staff code + PIN, or owner password plus staff PIN?
+1. Staff login identity: store slug + email + PIN, store slug + staff ID-card code + PIN, or owner password plus staff PIN? If using staff code, derive it from users.id or add a persisted unique code?
 2. PIN policy: minimum digits, hashing algorithm, retry threshold, lockout duration, and whether PIN is for login, sensitive-action confirmation, or both.
 3. Session policy: multiple devices per staff user, access-token TTL, refresh-token TTL, idle timeout, and forced logout behavior.
 4. Permission policy: exact cashier powers for discount, void/refund, stock override, shift close, and open-tab/split bill.
 5. Printed QR lifecycle: no fixed expiry with version revocation, or scheduled expiry/reprint? Who may rotate/revoke?
-6. Guest lifecycle: idle/absolute TTL, multiple guest sessions per table, and whether QR rotation leaves existing sessions active.
+6. Guest lifecycle: idle/absolute TTL, multiple guest sessions per table, browser close/reopen and QR rescan behavior, and whether QR rotation leaves existing sessions active.
 7. QR generator output: backend URL/token metadata only, or backend-generated SVG/PNG? Confirm the frontend repository boundary.
 8. Table lifecycle: table numbering, capacity, merge/split, temporary closure, and emergency store-wide QR ordering pause.
 

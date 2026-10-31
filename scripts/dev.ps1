@@ -141,7 +141,10 @@ switch ($Command) {
 
     'test-int' {
         Write-Step "PostgreSQL 18 sekali pakai di 127.0.0.1:$TestPort"
-        docker rm -f $TestContainer 2>$null | Out-Null
+        $existing = docker ps -a --format '{{.Names}}'
+        if ($existing -contains $TestContainer) {
+            docker rm -f $TestContainer | Out-Null
+        }
         $initScript = (Resolve-Path 'deploy/postgres/00-init-roles.sh').Path
         Invoke-Native docker @('run', '-d', '--name', $TestContainer,
             '-e', 'POSTGRES_PASSWORD=it_super', '-e', 'POSTGRES_DB=mycaffe_test',

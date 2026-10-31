@@ -1,0 +1,29 @@
+{
+  "rules": [
+    {
+      "allowed": {
+        "origins": [
+          "http://localhost:3000",
+          "http://127.0.0.1:3000",
+          "http://localhost:8088",
+          "https://*.trycloudflare.com"
+        ],
+        "methods": [
+          "GET",
+          "HEAD",
+          "PUT"
+        ],
+        "headers": [
+          "Content-Type",
+          "Content-MD5",
+          "If-Match",
+          "If-None-Match"
+        ]
+      },
+      "exposeHeaders": [
+        "ETag"
+      ],
+      "maxAgeSeconds": 3600
+    }
+  ]
+}

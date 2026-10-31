@@ -25,6 +25,8 @@ coverage/
 # Local/editor/OS noise
 .DS_Store
 Thumbs.db
+.wrangler/
+.claude/
 .vscode/*
 !.vscode/settings.json
 !.vscode/extensions.json

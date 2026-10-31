@@ -57,6 +57,12 @@ type AuthService struct {
 	policy  AuthPolicy
 	nowFunc func() time.Time
 	hashSem chan struct{}
+
+	// Account lifecycle email (WithAuthEmail); nil disables invitation/reset links.
+	email     *EmailService
+	emailRepo *postgres.EmailRepository
+	publicURL string
+	replyTo   string
 }
 
 type AuthServiceOption func(*AuthService)
@@ -74,12 +80,13 @@ func NewAuthService(db *sqlx.DB, repo *postgres.AuthRepository, jwtSecret string
 		policy.MaxConcurrentHashes = 4
 	}
 	s := &AuthService{
-		db:      db,
-		repo:    repo,
-		secret:  jwtSecret,
-		policy:  policy,
-		nowFunc: time.Now,
-		hashSem: make(chan struct{}, policy.MaxConcurrentHashes),
+		db:        db,
+		repo:      repo,
+		secret:    jwtSecret,
+		policy:    policy,
+		nowFunc:   time.Now,
+		hashSem:   make(chan struct{}, policy.MaxConcurrentHashes),
+		emailRepo: postgres.NewEmailRepository(),
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -111,9 +118,10 @@ type StaffIdentity struct {
 
 // AuthenticatedStaff is the result of validating an access token against the database.
 type AuthenticatedStaff struct {
-	Staff            StaffIdentity
-	SessionID        uuid.UUID
-	SessionExpiresAt time.Time
+	Staff             StaffIdentity
+	SessionID         uuid.UUID
+	SessionExpiresAt  time.Time
+	PINChangeRequired bool
 }
 
 type SessionTokens struct {
@@ -123,6 +131,8 @@ type SessionTokens struct {
 	RefreshExpiresAt time.Time
 	SessionID        uuid.UUID
 	Staff            StaffIdentity
+	// PINChangeRequired is true after an owner-issued temporary PIN (owner decision E2).
+	PINChangeRequired bool
 }
 
 // Login verifies store_slug + email + PIN (ADR-003 D1) and opens a persisted session.
@@ -137,7 +147,7 @@ func (s *AuthService) Login(ctx context.Context, in LoginInput) (*SessionTokens,
 		return nil, ErrAuthBusy
 	}
 
-	if slug == "" || len(slug) > 100 || !isPlausibleEmail(email) || len(in.PIN) == 0 || len(in.PIN) > auth.PINMaxLength {
+	if slug == "" || len(slug) > 100 || !isPlausibleEmail(email) || len(in.PIN) != auth.PINLength {
 		auth.BurnPINVerification(in.PIN)
 		return nil, ErrInvalidCredentials
 	}
@@ -163,7 +173,8 @@ func (s *AuthService) Login(ctx context.Context, in LoginInput) (*SessionTokens,
 		if err != nil {
 			return err
 		}
-		if !user.IsActive || (user.LockedUntil != nil && now.Before(*user.LockedUntil)) {
+		// An invited user without a PIN is treated like an unknown user: no counter, same 401.
+		if !user.IsActive || user.PINSetAt == nil || (user.LockedUntil != nil && now.Before(*user.LockedUntil)) {
 			auth.BurnPINVerification(in.PIN)
 			return nil
 		}
@@ -184,6 +195,7 @@ func (s *AuthService) Login(ctx context.Context, in LoginInput) (*SessionTokens,
 		if err != nil {
 			return err
 		}
+		tokens.PINChangeRequired = user.MustChangePIN
 		loginErr = nil
 		return nil
 	})
@@ -204,6 +216,9 @@ func (s *AuthService) recordFailedPIN(ctx context.Context, tx *sqlx.Tx, user *do
 	lockedUntil := now.Add(s.policy.PINLockout)
 	user.FailedPINAttempts, user.LockedUntil = 0, &lockedUntil
 	if err := s.repo.UpdateUserLockout(ctx, tx, user); err != nil {
+		return err
+	}
+	if err := s.enqueueLockedNoticeTx(ctx, tx, user, lockedUntil, now); err != nil {
 		return err
 	}
 	meta, _ := json.Marshal(map[string]any{"locked_until": lockedUntil, "client_ip": clientIP})
@@ -430,7 +445,7 @@ func (s *AuthService) Authenticate(ctx context.Context, accessToken string) (*Au
 		if err != nil {
 			return err
 		}
-		result = &AuthenticatedStaff{Staff: staff, SessionID: sessionID, SessionExpiresAt: session.ExpiresAt}
+		result = &AuthenticatedStaff{Staff: staff, SessionID: sessionID, SessionExpiresAt: session.ExpiresAt, PINChangeRequired: user.MustChangePIN}
 		return nil
 	})
 	switch {

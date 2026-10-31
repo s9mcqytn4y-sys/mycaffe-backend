@@ -47,7 +47,7 @@ Classification used below: *Implemented & Tested*, *Guarded / Fail-Closed*, *Pla
 - **Accepted trade-off:** a 6-digit PIN is a weak secret (10⁶ space). Security rests on server-side throttling/lockout (D3), not on PIN entropy. Revisit (owner password or TOTP for owner role) if the platform hosts high-value merchants.
 
 ### D2 — PIN policy & hashing *(owner decision: "Ketat")*
-- Numeric only, **6–12 digits**. Reject trivially weak PINs at set/reset time: all-identical digits, ascending/descending runs (`123456`, `654321`), and a small denylist (`000000`, `111111`, `121212`, `112233`, birth-year-like `19xx19`).
+- Numeric only, **exactly 6 digits** (owner decision E1, 2026-10-31; previously 6–12). Reject trivially weak PINs at set/reset time: all-identical digits, ascending/descending runs (`123456`, `654321`), and a small denylist (`000000`, `111111`, `121212`, `112233`, birth-year-like `19xx19`).
 - Hash: **argon2id** via `golang.org/x/crypto/argon2` (already in `go.sum` as an indirect dependency at v0.58.0 — promoted to direct, no new module). Parameters: `m=19456 KiB, t=2, p=1`, 16-byte random salt, 32-byte key, stored as a PHC string (`$argon2id$v=19$m=19456,t=2,p=1$<salt>$<hash>`) in the existing `pin_hash VARCHAR(255)`.
 - Parameters are read from the PHC string on verify, so they can be raised later; a successful login with outdated parameters transparently re-hashes.
 - **Concurrency cap:** a process-wide semaphore limits concurrent argon2id computations (default 4) so login floods cannot exhaust RAM/CPU on the 2 vCPU / 8 GB VPS. Excess requests get `429` before hashing.

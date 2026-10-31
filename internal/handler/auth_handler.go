@@ -40,7 +40,7 @@ type StaffLoginRequest struct {
 	PIN       string `json:"pin" binding:"required"`
 }
 
-var pinFormat = regexp.MustCompile(`^[0-9]{6,12}$`)
+var pinFormat = regexp.MustCompile(`^[0-9]{6}$`)
 
 // StaffSessionResponse matches the OpenAPI StaffSessionResponse schema.
 type StaffSessionResponse struct {
@@ -49,14 +49,17 @@ type StaffSessionResponse struct {
 	AccessTokenExpiresAt time.Time             `json:"access_token_expires_at"`
 	SessionExpiresAt     time.Time             `json:"session_expires_at"`
 	Staff                service.StaffIdentity `json:"staff"`
+	// PINChangeRequired: the staff member signed in with a temporary PIN and must change it.
+	PINChangeRequired bool `json:"pin_change_required"`
 }
 
 // StaffMeResponse matches the OpenAPI StaffMeResponse schema.
 type StaffMeResponse struct {
 	Staff service.StaffIdentity `json:"staff"`
 	// Permissions is filled from the RBAC policy in 02.01-C; empty until then.
-	Permissions      []string  `json:"permissions"`
-	SessionExpiresAt time.Time `json:"session_expires_at"`
+	Permissions       []string  `json:"permissions"`
+	SessionExpiresAt  time.Time `json:"session_expires_at"`
+	PINChangeRequired bool      `json:"pin_change_required"`
 }
 
 func authError(c *gin.Context, status int, code, message string) {
@@ -86,7 +89,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxAuthBodyBytes)
 	var req StaffLoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil || !pinFormat.MatchString(req.PIN) {
-		authError(c, http.StatusBadRequest, "INVALID_REQUEST", "Kode toko, email, dan PIN (6-12 digit angka) wajib diisi.")
+		authError(c, http.StatusBadRequest, "INVALID_REQUEST", "Kode toko, email, dan PIN 6 digit wajib diisi.")
 		return
 	}
 
@@ -194,9 +197,10 @@ func (h *AuthHandler) Me(c *gin.Context) {
 	case err == nil:
 		c.Header("Cache-Control", "no-store")
 		c.JSON(http.StatusOK, StaffMeResponse{
-			Staff:            authenticated.Staff,
-			Permissions:      []string{},
-			SessionExpiresAt: authenticated.SessionExpiresAt,
+			Staff:             authenticated.Staff,
+			Permissions:       []string{},
+			SessionExpiresAt:  authenticated.SessionExpiresAt,
+			PINChangeRequired: authenticated.PINChangeRequired,
 		})
 	case errors.Is(err, service.ErrSessionStale):
 		authError(c, http.StatusUnauthorized, "SESSION_STALE", "Hak akses berubah. Muat ulang sesi.")
@@ -227,6 +231,7 @@ func (h *AuthHandler) writeSession(c *gin.Context, tokens *service.SessionTokens
 		AccessTokenExpiresAt: tokens.AccessExpiresAt,
 		SessionExpiresAt:     tokens.RefreshExpiresAt,
 		Staff:                tokens.Staff,
+		PINChangeRequired:    tokens.PINChangeRequired,
 	})
 }
 

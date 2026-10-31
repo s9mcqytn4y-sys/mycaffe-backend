@@ -58,7 +58,7 @@ trusts only that subnet (`TRUSTED_PROXIES`), so logs show the real visitor IP fo
 `cloudflared` instead of a container address. Nginx restores the same visitor IP with
 `set_real_ip_from 172.29.10.0/24` (`nginx.demo.conf`), so `limit_req` is per visitor, not one
 shared bucket for all tunnel traffic. Keep both in sync if you change `DEMO_EDGE_SUBNET`.
-Full networking notes: [windows-dev-environment.md](windows-dev-environment.md).
+Full networking notes: [windows-dev-environment.md](windows-dev-environment.md). Email in the demo: [email.md](email.md).
 
 ## Midtrans sandbox webhook
 

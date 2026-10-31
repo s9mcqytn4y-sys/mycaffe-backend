@@ -1,0 +1,10 @@
+Halo {{.RecipientName}},
+
+PIN akun Anda di {{.StoreName}} telah diubah pada {{.EventAt}}.
+Semua perangkat yang sebelumnya masuk sudah dikeluarkan.
+
+BUKAN ANDA? Segera hubungi pemilik toko agar akun Anda dinonaktifkan
+dan PIN diatur ulang.
+
+--
+{{.StoreName}} (MyCaffe). Email otomatis, mohon tidak dibalas.

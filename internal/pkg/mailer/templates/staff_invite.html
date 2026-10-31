@@ -1,0 +1,13 @@
+{{define "subject"}}Undangan bergabung di {{.StoreName}}: buat PIN Anda{{end}}
+{{define "preheader"}}Aktifkan akun {{.RoleLabel}} Anda dengan membuat PIN 6 digit. Tautan berlaku {{.ExpiresIn}}.{{end}}
+{{define "html_body"}}<h1 style="margin:0 0 16px 0;font-size:22px;line-height:30px;color:#2C1810;">Halo {{.RecipientName}},</h1>
+<p style="margin:0 0 16px 0;">{{.ActorName}} menambahkan Anda sebagai <strong>{{.RoleLabel}}</strong> di <strong>{{.StoreName}}</strong>. Buat PIN 6 digit untuk mulai masuk ke aplikasi kasir.</p>
+{{template "button" .}}
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 16px 0;background-color:#FAF7F2;border-radius:6px;">
+  <tr><td style="padding:14px 16px;font-size:14px;line-height:22px;">
+    <strong>Kode toko:</strong> {{.StoreSlug}}<br>
+    <strong>Email masuk:</strong> {{.RecipientEmail}}<br>
+    <strong>Berlaku sampai:</strong> {{.ExpiresAt}}
+  </td></tr>
+</table>
+<p style="margin:0;font-size:14px;line-height:22px;color:#6B5B52;">Jangan bagikan PIN kepada siapa pun, termasuk pemilik toko. Jika Anda tidak merasa diundang, abaikan email ini.</p>{{end}}

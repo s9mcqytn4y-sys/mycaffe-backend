@@ -49,7 +49,7 @@ func TestAuthServiceIntegration_EndToEnd(t *testing.T) {
 		id := uuid.New()
 		email := "Auth." + id.String()[:8] + "@MyCaffe.Test"
 		if err := database.WithTenantTx(ctx, db, storeID, func(tx *sqlx.Tx) error {
-			_, err := tx.ExecContext(ctx, `INSERT INTO users (id, store_id, email, full_name, role, pin_hash) VALUES ($1, $2, $3, $4, $5, $6)`,
+			_, err := tx.ExecContext(ctx, `INSERT INTO users (id, store_id, email, full_name, role, pin_hash, pin_set_at) VALUES ($1, $2, $3, $4, $5, $6, NOW())`,
 				id, storeID, email, "Staf Uji "+role, role, pinHash)
 			return err
 		}); err != nil {

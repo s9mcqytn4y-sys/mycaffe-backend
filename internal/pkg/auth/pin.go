@@ -19,12 +19,12 @@ const (
 	argonSaltLen    = 16
 	argonKeyLen     = 32
 
-	PINMinLength = 6
-	PINMaxLength = 12
+	// PINLength is fixed at 6 digits (owner decision E1).
+	PINLength = 6
 )
 
 var (
-	ErrPINFormat     = errors.New("PIN harus berupa 6-12 digit angka")
+	ErrPINFormat     = errors.New("PIN harus tepat 6 digit angka")
 	ErrPINTooWeak    = errors.New("PIN terlalu mudah ditebak; hindari angka berulang atau berurutan")
 	ErrPINHashFormat = errors.New("stored PIN hash is not a supported argon2id PHC string")
 )
@@ -38,7 +38,7 @@ var weakPINs = map[string]bool{
 // ValidatePINPolicy enforces the PIN policy at set/reset time. Login never applies it,
 // so a policy change cannot lock out existing staff.
 func ValidatePINPolicy(pin string) error {
-	if len(pin) < PINMinLength || len(pin) > PINMaxLength {
+	if len(pin) != PINLength {
 		return ErrPINFormat
 	}
 	for _, r := range pin {

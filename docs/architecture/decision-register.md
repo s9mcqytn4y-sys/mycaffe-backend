@@ -35,6 +35,27 @@ Earlier decisions live in [decisions-before-code.md](decisions-before-code.md) a
 
 Setup details: [docs/setup/windows-dev-environment.md](../setup/windows-dev-environment.md).
 
+## Email, operations & hardware (recorded 2026-10-31, third interview)
+
+| ID | Decision | Approved option |
+|----|----------|-----------------|
+| E1 | Login identity | **PIN only** for every role (D1 kept); **PIN is exactly 6 digits**; no passwords |
+| E2 | Staff onboarding | Owner invites → staff sets own PIN via email link (48 h); "lupa PIN" link (30 min); owner temporary PIN (must change) for staff without email |
+| E3 | Marketing email | Transactional/notification email only; marketing = consent capture + export, no campaigns via the Hostinger mailbox |
+| E4 | Guest email | Optional email for the digital receipt; **separate, unchecked** marketing opt-in; consent stored append-only with text version and revocable (UU PDP) |
+| E5 | Email delivery | PostgreSQL `email_outbox` written in the business transaction + in-process worker with retry; Gmail App Password for dev/demo, `smtp.hostinger.com:465` for production |
+| T1 | Table occupancy | `table_session` opened by first scan/order; closed by cashier ("Kosongkan meja") or automatically 30 min (per store) after all orders are paid and served |
+| T2 | Group order & split | All devices of a table join one table session; QR = pay-first per device; open tab only by cashier, split equally or by item |
+| C1 | Shift & cash drawer | Opening float, blind count at close, variance > Rp5.000 (per store) needs reason + owner PIN, X/Z reports, recorded paid-outs; QRIS/EDC excluded from drawer |
+| C2 | Refund | Recorded manual refunds (cash from the open drawer, non-cash by owner transfer), Midtrans refund API only where supported, partial per item, optional restock |
+| C3 | Cashier doubling as barista | Per-store toggle grants the cashier role barista KDS permissions; no new role |
+| H1 | Hardware | Chrome + ESC/POS thermal printer (USB via WebUSB/Web Serial, LAN/BT via local print bridge), drawer kick via printer, customer display via BroadcastChannel or WebSocket |
+| R1 | Digital receipt | Random-token public page valid 90 days, emailed when an address is given and printed as QR; amounts from snapshots |
+| N1 | Notifications | In-app WebSocket (toast/sound/KDS) from an outbox relay; owner email only for important events; web push deferred |
+| S1 | Next PR | Email foundation + invitation/reset PIN (migration 000006) — implemented |
+
+Full evaluation and ordered backlog: [pos-operations-evaluation.md](pos-operations-evaluation.md).
+
 ## Resolved from existing sources (not re-asked)
 
 | Topic | Resolution | Source |

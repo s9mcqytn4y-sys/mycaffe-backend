@@ -33,6 +33,19 @@ type Config struct {
 	StaffPINMaxFailures     int
 	StaffPINLockout         time.Duration
 
+	// Email (owner decision E5): "log" writes emails to the server log (dev/test only),
+	// "smtp" delivers through SMTP (Gmail app password for dev/demo, Hostinger for production).
+	EmailDriver    string
+	SMTPHost       string
+	SMTPPort       int
+	SMTPUsername   string
+	SMTPPassword   string
+	SMTPTLSMode    string // "starttls" (587) or "implicit" (465)
+	EmailFromEmail string
+	EmailFromName  string
+	// AppPublicURL is the frontend origin used in links inside emails.
+	AppPublicURL string
+
 	// Midtrans Core API
 	MidtransMerchantID   string
 	MidtransServerKey    string
@@ -101,6 +114,19 @@ func LoadConfig() (*Config, error) {
 	staffMaxSessions := positiveInt("STAFF_MAX_SESSIONS_PER_USER", "3")
 	staffPINMaxFailures := positiveInt("STAFF_PIN_MAX_FAILURES", "5")
 	staffPINLockout := duration("STAFF_PIN_LOCKOUT", "15m")
+	smtpPort := positiveInt("SMTP_PORT", "587")
+	defaultEmailDriver := "smtp"
+	if appEnv == "development" || appEnv == "test" {
+		defaultEmailDriver = "log"
+	}
+	emailDriver := strings.ToLower(strings.TrimSpace(getEnv("EMAIL_DRIVER", defaultEmailDriver)))
+	smtpTLSMode := strings.ToLower(strings.TrimSpace(getEnv("SMTP_TLS_MODE", "")))
+	if smtpTLSMode == "" {
+		smtpTLSMode = "starttls"
+		if smtpPort == 465 {
+			smtpTLSMode = "implicit"
+		}
+	}
 	if err := errors.Join(parseErrs...); err != nil {
 		return nil, err
 	}
@@ -131,6 +157,15 @@ func LoadConfig() (*Config, error) {
 		StaffMaxSessions:        staffMaxSessions,
 		StaffPINMaxFailures:     staffPINMaxFailures,
 		StaffPINLockout:         staffPINLockout,
+		EmailDriver:             emailDriver,
+		SMTPHost:                getEnv("SMTP_HOST", ""),
+		SMTPPort:                smtpPort,
+		SMTPUsername:            getEnv("SMTP_USERNAME", ""),
+		SMTPPassword:            getEnv("SMTP_PASSWORD", ""),
+		SMTPTLSMode:             smtpTLSMode,
+		EmailFromEmail:          getEnv("EMAIL_FROM_ADDRESS", getEnv("SMTP_USERNAME", "")),
+		EmailFromName:           getEnv("EMAIL_FROM_NAME", "MyCaffe"),
+		AppPublicURL:            strings.TrimRight(getEnv("APP_PUBLIC_URL", frontendURL), "/"),
 		MidtransMerchantID:      getEnv("MIDTRANS_MERCHANT_ID", ""),
 		MidtransServerKey:       getEnv("MIDTRANS_SERVER_KEY", ""),
 		MidtransClientKey:       getEnv("MIDTRANS_CLIENT_KEY", ""),
@@ -283,7 +318,7 @@ func ValidateConfig(cfg *Config) error {
 		}
 	}
 
-	return nil
+	return validateEmailConfig(cfg)
 }
 
 func containsPlaceholderPattern(val string) bool {
@@ -333,4 +368,32 @@ func splitCSV(raw string) []string {
 		}
 	}
 	return out
+}
+
+// validateEmailConfig fails closed on an unusable mailer: the "log" driver prints link secrets
+// and is only allowed in development/test, and SMTP needs a full set of credentials.
+func validateEmailConfig(cfg *Config) error {
+	switch cfg.EmailDriver {
+	case "log":
+		if cfg.AppEnv == "production" {
+			return errors.New("[SECURITY FAIL-CLOSED] EMAIL_DRIVER=log is not allowed in production")
+		}
+		return nil
+	case "smtp":
+	default:
+		return fmt.Errorf("invalid EMAIL_DRIVER %q: allowed values are log, smtp", cfg.EmailDriver)
+	}
+	if cfg.SMTPHost == "" || cfg.SMTPUsername == "" || cfg.SMTPPassword == "" || cfg.EmailFromEmail == "" {
+		return errors.New("EMAIL_DRIVER=smtp requires SMTP_HOST, SMTP_USERNAME, SMTP_PASSWORD and EMAIL_FROM_ADDRESS (or set EMAIL_DRIVER=log outside production)")
+	}
+	if cfg.SMTPTLSMode != "starttls" && cfg.SMTPTLSMode != "implicit" {
+		return fmt.Errorf("invalid SMTP_TLS_MODE %q: allowed values are starttls, implicit", cfg.SMTPTLSMode)
+	}
+	if u, err := url.Parse(cfg.AppPublicURL); err != nil || u.Scheme == "" || u.Host == "" {
+		return errors.New("APP_PUBLIC_URL (or FRONTEND_URL) must be an absolute URL for links in emails")
+	}
+	if cfg.AppEnv == "production" && !strings.HasPrefix(cfg.AppPublicURL, "https://") {
+		return errors.New("[SECURITY FAIL-CLOSED] production APP_PUBLIC_URL must use https")
+	}
+	return nil
 }

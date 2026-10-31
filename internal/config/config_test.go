@@ -2,6 +2,7 @@ package config_test
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/config"
@@ -97,11 +98,19 @@ func TestValidateConfigProductionFailClosed(t *testing.T) {
 		t.Errorf("expected ValidateConfig to fail for placeholder MidtransServerKey in production, got nil")
 	}
 
-	// Valid production configuration must pass
+	// Valid production configuration must pass (with a full SMTP mailer)
+	cfg.EmailDriver, cfg.SMTPHost, cfg.SMTPUsername, cfg.SMTPPassword = "smtp", "smtp.hostinger.com", "noreply@mycaffe.com", "smtp-mailbox-secret"
+	cfg.EmailFromEmail, cfg.SMTPTLSMode, cfg.AppPublicURL = "noreply@mycaffe.com", "implicit", "https://pos.mycaffe.com"
 	cfg.MidtransServerKey = "Mid-server-production-valid-key-999"
 	cfg.AllowedOrigins = []string{"https://app.mycaffe.com", "https://pos.mycaffe.com"}
 	if err := config.ValidateConfig(cfg); err != nil {
 		t.Errorf("expected valid production config to pass, got error: %v", err)
+	}
+
+	// The log mailer prints link secrets and must be rejected in an otherwise valid production config.
+	cfg.EmailDriver = "log"
+	if err := config.ValidateConfig(cfg); err == nil || !strings.Contains(err.Error(), "EMAIL_DRIVER") {
+		t.Errorf("expected EMAIL_DRIVER=log to fail closed in production, got %v", err)
 	}
 }
 
@@ -227,4 +236,36 @@ func TestLoadConfigTrustedProxies(t *testing.T) {
 	if len(cfg.TrustedProxies) != 0 {
 		t.Fatalf("expected no trusted proxies by default, got %q", cfg.TrustedProxies)
 	}
+}
+
+func TestLoadConfigEmailDriver(t *testing.T) {
+	t.Setenv("APP_ENV", "development")
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if cfg.EmailDriver != "log" {
+		t.Fatalf("development must default to the log driver, got %q", cfg.EmailDriver)
+	}
+
+	// Hostinger: port 465 implies implicit TLS.
+	t.Setenv("EMAIL_DRIVER", "smtp")
+	t.Setenv("SMTP_HOST", "smtp.hostinger.com")
+	t.Setenv("SMTP_PORT", "465")
+	t.Setenv("SMTP_USERNAME", "noreply@kafe.test")
+	t.Setenv("SMTP_PASSWORD", "mailbox-secret")
+	t.Setenv("APP_PUBLIC_URL", "https://pos.kafe.test/")
+	cfg, err = config.LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig smtp: %v", err)
+	}
+	if cfg.SMTPTLSMode != "implicit" || cfg.EmailFromEmail != "noreply@kafe.test" || cfg.AppPublicURL != "https://pos.kafe.test" {
+		t.Fatalf("unexpected smtp config: mode=%s from=%s url=%s", cfg.SMTPTLSMode, cfg.EmailFromEmail, cfg.AppPublicURL)
+	}
+
+	t.Setenv("SMTP_PASSWORD", "")
+	if _, err := config.LoadConfig(); err == nil {
+		t.Fatal("smtp driver without a password must fail closed")
+	}
+
 }

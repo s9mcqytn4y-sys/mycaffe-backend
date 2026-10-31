@@ -13,8 +13,10 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/jmoiron/sqlx"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/config"
+	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/domain"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/handler"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/database"
+	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/mailer"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/midtrans"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/realtime"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/repository/postgres"
@@ -124,7 +126,7 @@ func main() {
 			MaxSessions:        cfg.StaffMaxSessions,
 			PINMaxFailures:     cfg.StaffPINMaxFailures,
 			PINLockout:         cfg.StaffPINLockout,
-		})
+		}, service.WithAuthEmail(newEmailService(cfg, db, workerCtx), cfg.AppPublicURL, ""))
 		authHandler = handler.NewAuthHandler(authService)
 
 		orderRepo := postgres.NewOrderRepository()
@@ -152,6 +154,15 @@ func main() {
 			staffAuth.POST("/refresh", authHandler.Refresh)
 			staffAuth.POST("/logout", authHandler.Logout)
 			staffAuth.GET("/me", authHandler.Me)
+			staffAuth.POST("/pin/forgot", authHandler.ForgotPIN)
+			staffAuth.POST("/pin/setup", authHandler.SetupPIN)
+			staffAuth.POST("/pin/change", authHandler.RequireStaff(), authHandler.ChangePIN)
+
+			owner := v1.Group("/staff", authHandler.RequireStaff(domain.RoleOwner))
+			owner.GET("", authHandler.ListStaff)
+			owner.POST("", authHandler.InviteStaff)
+			owner.POST("/:id/pin-reset", authHandler.SendPINReset)
+			owner.POST("/:id/temporary-pin", authHandler.IssueTemporaryPIN)
 		}
 	}
 
@@ -205,4 +216,20 @@ func main() {
 	}
 
 	log.Println("[SERVER] Server exited successfully.")
+}
+
+// newEmailService picks the mail driver from config (log for dev/test, SMTP otherwise) and
+// starts the outbox worker on the shared worker context.
+func newEmailService(cfg *config.Config, db *sqlx.DB, ctx context.Context) *service.EmailService {
+	var sender mailer.Sender = mailer.LogSender{}
+	if cfg.EmailDriver == "smtp" {
+		sender = mailer.NewSMTPSender(mailer.SMTPConfig{
+			Host: cfg.SMTPHost, Port: cfg.SMTPPort, Username: cfg.SMTPUsername, Password: cfg.SMTPPassword,
+			TLSMode: cfg.SMTPTLSMode, From: cfg.EmailFromEmail, FromName: cfg.EmailFromName,
+		})
+	}
+	emailService := service.NewEmailService(db, sender)
+	go emailService.StartWorker(ctx, 10*time.Second)
+	log.Printf("[EMAIL] driver=%s worker started", cfg.EmailDriver)
+	return emailService
 }

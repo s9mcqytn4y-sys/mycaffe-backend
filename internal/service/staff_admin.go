@@ -66,8 +66,8 @@ func BootstrapStore(ctx context.Context, db *sqlx.DB, in BootstrapStoreInput) (u
 			return fmt.Errorf("failed to create store (slug may already exist): %w", err)
 		}
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO users (id, store_id, email, full_name, role, pin_hash, is_active)
-			VALUES ($1, $2, $3, $4, 'owner', $5, true)
+			INSERT INTO users (id, store_id, email, full_name, role, pin_hash, is_active, pin_set_at)
+			VALUES ($1, $2, $3, $4, 'owner', $5, true, NOW())
 		`, ownerID, storeID, email, ownerName, pinHash); err != nil {
 			return fmt.Errorf("failed to create owner: %w", err)
 		}

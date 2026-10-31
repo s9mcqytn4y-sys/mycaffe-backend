@@ -25,6 +25,8 @@ tags:
     description: Payment initiation (QRIS, VA, E-Wallet, Cash, Static QRIS, EDC) and Midtrans webhook reconciliation
   - name: Auth
     description: "Staff authentication and session lifecycle (ADR-003). Implemented in Phase 02.01-B (login, refresh, logout, me)."
+  - name: Staff
+    description: Owner staff management - invitation, PIN reset link, temporary PIN (owner decision E2)
   - name: KDS
     description: Kitchen Display System and Barista preparation queue transitions
 
@@ -386,6 +388,289 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /api/v1/auth/staff/pin/forgot:
+    post:
+      tags: [Auth]
+      operationId: staffForgotPin
+      summary: Request a PIN-reset link by email
+      x-implementation-status: implemented
+      description: |
+        Always answers 202, whether or not the store or email exists (no account enumeration). For an
+        active, activated staff member a single-use link valid for 30 minutes is queued in the email outbox.
+        Strict Nginx limit (10 req/min/IP).
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [store_slug, email]
+              properties:
+                store_slug:
+                  type: string
+                  maxLength: 100
+                email:
+                  type: string
+                  format: email
+                  maxLength: 255
+      responses:
+        "202":
+          description: Accepted (an email may or may not have been sent)
+        "400":
+          description: Missing fields (`INVALID_REQUEST`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/auth/staff/pin/setup:
+    post:
+      tags: [Auth]
+      operationId: staffSetupPin
+      summary: Set a PIN from an activation or reset link
+      x-implementation-status: implemented
+      description: |
+        `token` is the value after `#token=` in the emailed link (`<store_id>.<token_id>.<secret>`). The URL
+        fragment is never sent to servers, so the secret stays out of access logs. Single use. On success
+        all existing sessions of the user are revoked; after a reset a security notice email is queued.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, pin]
+              properties:
+                token:
+                  type: string
+                pin:
+                  type: string
+                  pattern: "^[0-9]{6}$"
+                  writeOnly: true
+      responses:
+        "200":
+          description: PIN set; the client can prefill the login form
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  store_slug:
+                    type: string
+                  email:
+                    type: string
+                    format: email
+        "400":
+          description: "`PIN_REJECTED` (format or weak PIN) or `LINK_INVALID` (unknown, used, or expired link)"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/auth/staff/pin/change:
+    post:
+      tags: [Auth]
+      operationId: staffChangePin
+      summary: Change own PIN (required after a temporary PIN)
+      x-implementation-status: implemented
+      description: A wrong `current_pin` counts toward the lockout. Other sessions are revoked; the current one stays signed in.
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [current_pin, new_pin]
+              properties:
+                current_pin:
+                  type: string
+                  writeOnly: true
+                new_pin:
+                  type: string
+                  pattern: "^[0-9]{6}$"
+                  writeOnly: true
+      responses:
+        "204":
+          description: PIN changed
+        "400":
+          description: "`PIN_REJECTED`"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Wrong current PIN (`INVALID_CREDENTIALS`) or invalid session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/staff:
+    get:
+      tags: [Staff]
+      operationId: listStaff
+      summary: List staff of the caller's store (owner)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: Staff list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  staff:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/StaffSummary"
+        "403":
+          description: Not an owner (`FORBIDDEN`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      tags: [Staff]
+      operationId: inviteStaff
+      summary: Invite a staff member (owner)
+      x-implementation-status: implemented
+      description: Creates the account without a PIN and queues an activation email (link valid 48 hours). The store comes from the owner's token, never from the body.
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [full_name, email, role]
+              properties:
+                full_name:
+                  type: string
+                  maxLength: 255
+                email:
+                  type: string
+                  format: email
+                  maxLength: 255
+                  description: Stored trimmed and lower-case; unique per store regardless of case.
+                role:
+                  $ref: "#/components/schemas/StaffRole"
+      responses:
+        "201":
+          description: Invited
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StaffSummary"
+        "400":
+          description: Invalid name, email, or role (`INVALID_REQUEST`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Not an owner (`FORBIDDEN`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Email already used in this store (`EMAIL_TAKEN`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/staff/{id}/pin-reset:
+    post:
+      tags: [Staff]
+      operationId: sendStaffPinReset
+      summary: Email a PIN-reset link to a staff member (owner)
+      x-implementation-status: implemented
+      description: For a staff member who never activated, the invitation is re-sent instead.
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "202":
+          description: Link queued
+        "403":
+          description: Not an owner (`FORBIDDEN`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Unknown or inactive staff (`STAFF_NOT_FOUND`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/staff/{id}/temporary-pin:
+    post:
+      tags: [Staff]
+      operationId: issueStaffTemporaryPin
+      summary: Set a temporary PIN for staff without email (owner)
+      x-implementation-status: implemented
+      description: The staff member must change it after login (`pin_change_required=true`). Not allowed on the owner's own account. Revokes all sessions of that staff member.
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pin]
+              properties:
+                pin:
+                  type: string
+                  pattern: "^[0-9]{6}$"
+                  writeOnly: true
+      responses:
+        "204":
+          description: Temporary PIN set
+        "400":
+          description: "`PIN_REJECTED`"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Not an owner, or the owner's own account (`FORBIDDEN`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Unknown staff (`STAFF_NOT_FOUND`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
 components:
   securitySchemes:
     BearerStaffJWT:
@@ -467,9 +752,9 @@ components:
           example: kasir1@kopisenja.id
         pin:
           type: string
-          pattern: "^[0-9]{6,12}$"
+          pattern: "^[0-9]{6}$"
           writeOnly: true
-          description: 6-12 digit numeric PIN. Never logged.
+          description: Exactly 6 digits (owner decision E1). Never logged.
 
     StaffProfile:
       type: object
@@ -493,6 +778,36 @@ components:
               type: string
             name:
               type: string
+
+    StaffSummary:
+      type: object
+      required: [id, full_name, email, role, is_active, activated, pin_change_required, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        full_name:
+          type: string
+        email:
+          type: string
+          format: email
+        role:
+          $ref: "#/components/schemas/StaffRole"
+        is_active:
+          type: boolean
+        activated:
+          type: boolean
+          description: The staff member has set a PIN.
+        pin_change_required:
+          type: boolean
+          description: Signed in with a temporary PIN that must be changed.
+        locked_until:
+          type: string
+          format: date-time
+          description: Present while the account is locked.
+        created_at:
+          type: string
+          format: date-time
 
     StaffSessionResponse:
       type: object

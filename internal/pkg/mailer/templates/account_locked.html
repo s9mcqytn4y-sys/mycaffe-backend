@@ -1,0 +1,11 @@
+{{define "subject"}}[Keamanan] Akun {{.StaffName}} terkunci sementara{{end}}
+{{define "preheader"}}{{.StaffName}} salah memasukkan PIN beberapa kali. Akun terkunci sampai {{.ExpiresAt}}.{{end}}
+{{define "html_body"}}<h1 style="margin:0 0 16px 0;font-size:22px;line-height:30px;color:#2C1810;">Halo {{.RecipientName}},</h1>
+<p style="margin:0 0 16px 0;">Akun <strong>{{.StaffName}}</strong> ({{.RoleLabel}}) di <strong>{{.StoreName}}</strong> dikunci otomatis karena PIN salah dimasukkan beberapa kali berturut-turut.</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 16px 0;background-color:#FEF3C7;border-radius:6px;">
+  <tr><td style="padding:14px 16px;font-size:14px;line-height:22px;color:#78350F;">
+    <strong>Terkunci sampai:</strong> {{.ExpiresAt}}<br>
+    <strong>Waktu kejadian:</strong> {{.EventAt}}
+  </td></tr>
+</table>
+<p style="margin:0;font-size:14px;line-height:22px;color:#6B5B52;">Jika ini bukan staf Anda yang lupa PIN, periksa siapa yang mencoba masuk dan pertimbangkan untuk mengatur ulang PIN staf tersebut dari backoffice.</p>{{end}}

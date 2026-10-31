@@ -85,6 +85,15 @@ services:
       MIDTRANS_SERVER_KEY: ${MIDTRANS_SERVER_KEY:-SB-Mid-server-demo-placeholder}
       MIDTRANS_CLIENT_KEY: ${MIDTRANS_CLIENT_KEY:-SB-Mid-client-demo-placeholder}
       MIDTRANS_IS_PRODUCTION: "false"
+      # Email: log driver by default; set SMTP_* (Gmail app password) to really send.
+      EMAIL_DRIVER: ${EMAIL_DRIVER:-log}
+      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      EMAIL_FROM_ADDRESS: ${EMAIL_FROM_ADDRESS:-}
+      EMAIL_FROM_NAME: ${EMAIL_FROM_NAME:-MyCaffe Demo}
+      APP_PUBLIC_URL: ${APP_PUBLIC_URL:-http://localhost:8088}
       SENTRY_ENVIRONMENT: staging
     networks:
       - mycaffe-edge

@@ -1,0 +1,16 @@
+Halo {{.RecipientName}},
+
+{{.ActorName}} menambahkan Anda sebagai {{.RoleLabel}} di {{.StoreName}}.
+Buat PIN 6 digit untuk mulai masuk ke aplikasi kasir:
+
+{{.ActionURL}}
+
+Kode toko     : {{.StoreSlug}}
+Email masuk   : {{.RecipientEmail}}
+Berlaku sampai: {{.ExpiresAt}}
+
+Jangan bagikan PIN kepada siapa pun, termasuk pemilik toko.
+Jika Anda tidak merasa diundang, abaikan email ini.
+
+--
+{{.StoreName}} (MyCaffe). Email otomatis, mohon tidak dibalas.

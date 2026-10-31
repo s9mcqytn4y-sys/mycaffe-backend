@@ -1,0 +1,45 @@
+{{define "layout"}}<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>{{template "subject" .}}</title>
+</head>
+<body style="margin:0;padding:0;background-color:#FAF7F2;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#2C1810;">
+<div style="display:none;max-height:0;overflow:hidden;opacity:0;">{{template "preheader" .}}</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#FAF7F2;">
+  <tr>
+    <td align="center" style="padding:32px 16px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;">
+        <tr>
+          <td style="padding:0 4px 16px 4px;font-size:20px;font-weight:700;letter-spacing:0.2px;color:#2C1810;">
+            {{.StoreName}}
+          </td>
+        </tr>
+        <tr>
+          <td style="background-color:#FFFFFF;border:1px solid #EADFD3;border-top:4px solid #C87D55;border-radius:8px;padding:32px 28px;font-size:16px;line-height:24px;color:#2C1810;">
+            {{template "html_body" .}}
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:20px 4px 0 4px;font-size:12px;line-height:18px;color:#6B5B52;">
+            Email ini dikirim otomatis oleh sistem kasir {{.StoreName}} (MyCaffe). Mohon tidak membalas email ini{{if .ReplyTo}}; hubungi {{.ReplyTo}} bila perlu bantuan{{end}}.<br>
+            &copy; {{.Year}} {{.StoreName}}
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+</body>
+</html>{{end}}
+
+{{define "button"}}<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:24px 0;">
+  <tr>
+    <td style="border-radius:6px;background-color:#2C1810;">
+      <a href="{{.ActionURL}}" style="display:inline-block;padding:14px 28px;font-size:16px;font-weight:600;color:#FFFFFF;text-decoration:none;border-radius:6px;">{{.ActionLabel}}</a>
+    </td>
+  </tr>
+</table>
+<p style="margin:0 0 16px 0;font-size:13px;line-height:20px;color:#6B5B52;">Tombol tidak berfungsi? Salin tautan berikut ke browser:<br><a href="{{.ActionURL}}" style="color:#8C4A27;word-break:break-all;">{{.ActionURL}}</a></p>{{end}}

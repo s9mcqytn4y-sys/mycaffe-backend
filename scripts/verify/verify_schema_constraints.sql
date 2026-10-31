@@ -295,6 +295,23 @@ BEGIN
         RAISE EXCEPTION 'SECURITY FAILURE: resolve_store_for_login is executable by PUBLIC!';
     END IF;
 
+    -- 10G. Account tokens and email outbox (migration 000006): RLS on, no DELETE, discovery
+    --      function not executable by PUBLIC.
+    IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.account_tokens'::regclass)
+       OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.email_outbox'::regclass) THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: account_tokens/email_outbox must have row-level security enabled!';
+    END IF;
+    IF has_table_privilege('mycaffe_app', 'public.account_tokens', 'DELETE')
+       OR has_table_privilege('mycaffe_app', 'public.email_outbox', 'DELETE') THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may DELETE account_tokens/email_outbox!';
+    END IF;
+    IF EXISTS (
+        SELECT 1 FROM pg_proc p, aclexplode(p.proacl) a
+        WHERE p.proname = 'list_stores_with_due_email' AND a.grantee = 0 AND a.privilege_type = 'EXECUTE'
+    ) THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: list_stores_with_due_email is executable by PUBLIC!';
+    END IF;
+
     RAISE NOTICE 'SUCCESS: Row-Level Security (RLS) on stores/orders/payments/notifications and DELETE privilege revocation verified.';
     RAISE NOTICE 'ALL CONSTRAINTS, RLS POLICIES, AND BEHAVIORAL VERIFICATIONS PASSED SUCCESSFULLY.';
 END $$;

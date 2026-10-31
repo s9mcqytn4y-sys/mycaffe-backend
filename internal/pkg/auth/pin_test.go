@@ -12,17 +12,18 @@ import (
 
 func TestValidatePINPolicy(t *testing.T) {
 	cases := map[string]error{
-		"482913":        nil,
-		"9037451268":    nil,
-		"12345":         auth.ErrPINFormat,
-		"1234567890123": auth.ErrPINFormat,
-		"48a913":        auth.ErrPINFormat,
-		"000000":        auth.ErrPINTooWeak,
-		"123456":        auth.ErrPINTooWeak,
-		"654321":        auth.ErrPINTooWeak,
-		"7890123":       auth.ErrPINTooWeak,
-		"121212":        auth.ErrPINTooWeak,
-		"198519":        auth.ErrPINTooWeak,
+		"482913":     nil,
+		"905172":     nil,
+		"9037451268": auth.ErrPINFormat,
+		"12345":      auth.ErrPINFormat,
+		"1234567":    auth.ErrPINFormat,
+		"48a913":     auth.ErrPINFormat,
+		"000000":     auth.ErrPINTooWeak,
+		"123456":     auth.ErrPINTooWeak,
+		"654321":     auth.ErrPINTooWeak,
+		"789012":     auth.ErrPINTooWeak,
+		"121212":     auth.ErrPINTooWeak,
+		"198519":     auth.ErrPINTooWeak,
 	}
 	for pin, want := range cases {
 		if got := auth.ValidatePINPolicy(pin); got != want {

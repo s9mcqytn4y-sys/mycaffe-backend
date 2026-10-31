@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -43,7 +44,7 @@ func (r *AuthRepository) ResolveStoreForLogin(ctx context.Context, db *sqlx.DB, 
 }
 
 const userAuthColumns = `id, store_id, email, full_name, role, pin_hash, is_active,
-	created_at, updated_at, failed_pin_attempts, locked_until`
+	created_at, updated_at, failed_pin_attempts, locked_until, pin_set_at, must_change_pin`
 
 // GetUserByEmailForUpdate locks the user row so concurrent wrong-PIN attempts cannot
 // overshoot the lockout threshold (ADR-003 D3). Email matching is case-insensitive.
@@ -98,7 +99,7 @@ func (r *AuthRepository) UpdateUserPIN(ctx context.Context, tx *sqlx.Tx, storeID
 		return ErrNilTransaction
 	}
 	res, err := tx.ExecContext(ctx, `
-		UPDATE users SET pin_hash = $3, failed_pin_attempts = 0, locked_until = NULL
+		UPDATE users SET pin_hash = $3, failed_pin_attempts = 0, locked_until = NULL, pin_set_at = NOW(), must_change_pin = false
 		WHERE store_id = $1 AND id = $2
 	`, storeID, userID, pinHash)
 	if err != nil {
@@ -237,4 +238,90 @@ func (r *AuthRepository) GetStoreProfile(ctx context.Context, tx *sqlx.Tx, store
 
 func (r *AuthRepository) InsertAuditLog(ctx context.Context, tx *sqlx.Tx, audit *domain.AuditLog) error {
 	return InsertAuditLog(ctx, tx, audit)
+}
+
+// ErrEmailTaken is returned when another user of the same store already uses the email (any case).
+var ErrEmailTaken = errors.New("email already used by another staff member in this store")
+
+// InsertInvitedUser creates a staff member who has not chosen a PIN yet (pin_set_at NULL).
+func (r *AuthRepository) InsertInvitedUser(ctx context.Context, tx *sqlx.Tx, u *domain.User) error {
+	if tx == nil {
+		return ErrNilTransaction
+	}
+	err := tx.QueryRowxContext(ctx, `
+		INSERT INTO users (id, store_id, email, full_name, role, pin_hash, is_active)
+		VALUES ($1, $2, $3, $4, $5, '', true)
+		RETURNING created_at, updated_at
+	`, u.ID, u.StoreID, u.Email, u.FullName, u.Role).Scan(&u.CreatedAt, &u.UpdatedAt)
+	if err != nil && strings.Contains(err.Error(), "uq_users_store_email_ci") {
+		return ErrEmailTaken
+	}
+	return err
+}
+
+// SetUserPIN stores a new PIN hash, marks the PIN as set, clears lockout, and records whether
+// the PIN is an owner-issued temporary PIN that must be changed.
+func (r *AuthRepository) SetUserPIN(ctx context.Context, tx *sqlx.Tx, storeID, userID uuid.UUID, pinHash string, mustChange bool, now time.Time) error {
+	if tx == nil {
+		return ErrNilTransaction
+	}
+	res, err := tx.ExecContext(ctx, `
+		UPDATE users
+		SET pin_hash = $3, pin_set_at = $4, must_change_pin = $5, failed_pin_attempts = 0, locked_until = NULL
+		WHERE store_id = $1 AND id = $2
+	`, storeID, userID, pinHash, now, mustChange)
+	if err != nil {
+		return fmt.Errorf("failed to set user PIN: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrUserNotFound
+	}
+	return nil
+}
+
+// ListActiveOwners returns owners who can receive security notifications.
+func (r *AuthRepository) ListActiveOwners(ctx context.Context, tx *sqlx.Tx, storeID uuid.UUID) ([]domain.User, error) {
+	var owners []domain.User
+	err := tx.SelectContext(ctx, &owners, `SELECT `+userAuthColumns+` FROM users
+		WHERE store_id = $1 AND role = 'owner' AND is_active = true AND pin_set_at IS NOT NULL ORDER BY created_at`, storeID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list owners: %w", err)
+	}
+	return owners, nil
+}
+
+func (r *AuthRepository) ListUsers(ctx context.Context, tx *sqlx.Tx, storeID uuid.UUID) ([]domain.User, error) {
+	var users []domain.User
+	if err := tx.SelectContext(ctx, &users, `SELECT `+userAuthColumns+` FROM users WHERE store_id = $1 ORDER BY role, full_name`, storeID); err != nil {
+		return nil, fmt.Errorf("failed to list users: %w", err)
+	}
+	return users, nil
+}
+
+// RevokeOtherUserSessions revokes every active session of a user except keepSessionID.
+func (r *AuthRepository) RevokeOtherUserSessions(ctx context.Context, tx *sqlx.Tx, storeID, userID, keepSessionID uuid.UUID, reason string, now time.Time) error {
+	_, err := tx.ExecContext(ctx, `
+		UPDATE auth_sessions SET revoked_at = $4, revoked_reason = $5
+		WHERE store_id = $1 AND user_id = $2 AND id <> $3 AND revoked_at IS NULL
+	`, storeID, userID, keepSessionID, now, reason)
+	if err != nil {
+		return fmt.Errorf("failed to revoke other sessions: %w", err)
+	}
+	return nil
+}
+
+// GetUserByIDForUpdate locks the user row (PIN change shares the lockout counter with login).
+func (r *AuthRepository) GetUserByIDForUpdate(ctx context.Context, tx *sqlx.Tx, storeID, userID uuid.UUID) (*domain.User, error) {
+	if tx == nil {
+		return nil, ErrNilTransaction
+	}
+	var user domain.User
+	query := `SELECT ` + userAuthColumns + ` FROM users WHERE store_id = $1 AND id = $2 FOR UPDATE`
+	if err := tx.GetContext(ctx, &user, query, storeID, userID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrUserNotFound
+		}
+		return nil, fmt.Errorf("failed to load user for update: %w", err)
+	}
+	return &user, nil
 }

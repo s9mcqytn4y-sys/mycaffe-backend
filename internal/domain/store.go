@@ -53,6 +53,8 @@ type User struct {
 	UpdatedAt time.Time `json:"updated_at" db:"updated_at"`
 
 	FailedPINAttempts int        `json:"-" db:"failed_pin_attempts"`
+	PINSetAt          *time.Time `json:"-" db:"pin_set_at"`
+	MustChangePIN     bool       `json:"-" db:"must_change_pin"`
 	LockedUntil       *time.Time `json:"-" db:"locked_until"`
 }
 
@@ -145,4 +147,42 @@ type AuditLog struct {
 	ReferenceID string     `json:"reference_id,omitempty" db:"reference_id"`
 	Metadata    string     `json:"metadata" db:"metadata"`
 	CreatedAt   time.Time  `json:"created_at" db:"created_at"`
+}
+
+// EmailOutbox is a queued transactional email (email_outbox), delivered by the email worker.
+type EmailOutbox struct {
+	ID            uuid.UUID `db:"id"`
+	StoreID       uuid.UUID `db:"store_id"`
+	Template      string    `db:"template"`
+	ToEmail       string    `db:"to_email"`
+	ToName        string    `db:"to_name"`
+	Subject       string    `db:"subject"`
+	HTMLBody      string    `db:"html_body"`
+	TextBody      string    `db:"text_body"`
+	ReplyTo       string    `db:"reply_to"`
+	ReferenceID   string    `db:"reference_id"`
+	Status        string    `db:"status"`
+	Attempts      int       `db:"attempts"`
+	NextAttemptAt time.Time `db:"next_attempt_at"`
+	LastError     string    `db:"last_error"`
+	CreatedAt     time.Time `db:"created_at"`
+}
+
+// Account token purposes (account_tokens.purpose).
+const (
+	AccountTokenActivation = "activation"
+	AccountTokenPINReset   = "pin_reset"
+)
+
+// AccountToken is a single-use activation or PIN-reset link. Only the SHA-256 of the secret is stored.
+type AccountToken struct {
+	ID        uuid.UUID  `db:"id"`
+	StoreID   uuid.UUID  `db:"store_id"`
+	UserID    uuid.UUID  `db:"user_id"`
+	Purpose   string     `db:"purpose"`
+	TokenHash string     `db:"token_hash"`
+	ExpiresAt time.Time  `db:"expires_at"`
+	UsedAt    *time.Time `db:"used_at"`
+	CreatedBy *uuid.UUID `db:"created_by"`
+	CreatedAt time.Time  `db:"created_at"`
 }

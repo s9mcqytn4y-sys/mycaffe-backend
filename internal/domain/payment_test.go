@@ -318,3 +318,17 @@ func extractCheckInValues(t *testing.T, sqlText, constraintName string) []string
 	}
 	return vals
 }
+
+
+func TestStockReservationMigrationUsesSafeLegacyDefault(t *testing.T) {
+	migrationPath := filepath.Join("..", "..", "db", "migrations", "20261030000003_add_orders_stock_reservation.up.sql")
+	raw, err := os.ReadFile(migrationPath)
+	if err != nil {
+		t.Fatalf("failed to read stock reservation migration: %v", err)
+	}
+
+	pattern := regexp.MustCompile(`(?i)ADD COLUMN IF NOT EXISTS stock_status\\s+VARCHAR\\(20\\)\\s+NOT NULL\\s+DEFAULT\\s+'not_tracked'`)
+	if !pattern.Match(raw) {
+		t.Fatal("legacy orders must default to stock_status='not_tracked'; only newly created orders may explicitly reserve stock")
+	}
+}

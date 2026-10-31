@@ -4,7 +4,7 @@
 -- 2. Adds expires_at TIMESTAMPTZ to orders for unpaid reservation expiry tracking.
 -- 3. Adds created_by_user_id UUID to orders with composite tenant FK to verify staff authorization on open_tab orders.
 
-ALTER TABLE orders ADD COLUMN IF NOT EXISTS stock_status VARCHAR(20) NOT NULL DEFAULT 'reserved';
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS stock_status VARCHAR(20) NOT NULL DEFAULT 'not_tracked';
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ DEFAULT NULL;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS created_by_user_id UUID DEFAULT NULL;
 

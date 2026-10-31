@@ -184,3 +184,25 @@ func TestIsOriginAllowed(t *testing.T) {
 		t.Errorf("expected empty origin to be blocked")
 	}
 }
+
+func TestValidateMigrateConfigLeastPrivilege(t *testing.T) {
+	// Migrate config in production must succeed WITHOUT JWT_SECRET_KEY or MIDTRANS_SERVER_KEY
+	cfg := &config.Config{
+		AppEnv:               "production",
+		DatabaseMigrationURL: "postgres://mycaffe_migrator:strong_prod_mig_pass_99@postgres:5432/mycaffe_pos?sslmode=disable",
+		DBAppUser:            "mycaffe_app",
+		DBAppPassword:        "strong_prod_app_pass_99",
+	}
+	if err := config.ValidateMigrateConfig(cfg); err != nil {
+		t.Fatalf("expected ValidateMigrateConfig to succeed without JWT/Midtrans secrets, got: %v", err)
+	}
+
+	// Placeholder migration password in production must fail
+	cfgPlaceholder := &config.Config{
+		AppEnv:               "production",
+		DatabaseMigrationURL: "postgres://mycaffe_migrator:change_me_in_production@postgres:5432/mycaffe_pos",
+	}
+	if err := config.ValidateMigrateConfig(cfgPlaceholder); err == nil {
+		t.Fatal("expected ValidateMigrateConfig to reject placeholder DSN in production")
+	}
+}

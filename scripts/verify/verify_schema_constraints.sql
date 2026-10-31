@@ -73,11 +73,11 @@ BEGIN
     RAISE NOTICE 'SUCCESS: store_daily_sequences atomic increment verified (seq: % -> %).', v_seq_1, v_seq_2;
 
     -- 5. Insert Order, Order Item, Order Item Option (with 1-level Sub-Addon), Split & Payment in Store A and Store B
-    INSERT INTO orders (store_id, idempotency_key, order_number, queue_number, customer_name, status, payment_status, subtotal_amount, total_amount) 
-    VALUES (v_store_a, 'idem-order-a-001', 'ORD-TEST-001', 'A01', 'Customer Alpha', 'pending_payment', 'pending', 33000, 33000) RETURNING id INTO v_order_a;
+    INSERT INTO orders (store_id, idempotency_key, request_hash, order_number, queue_number, customer_name, status, payment_status, subtotal_amount, total_amount) 
+    VALUES (v_store_a, 'idem-order-a-001', 'req-hash-a-001', 'ORD-TEST-001', 'A01', 'Customer Alpha', 'pending_payment', 'pending', 33000, 33000) RETURNING id INTO v_order_a;
 
-    INSERT INTO orders (store_id, idempotency_key, order_number, queue_number, customer_name, status, payment_status, subtotal_amount, total_amount) 
-    VALUES (v_store_b, 'idem-order-b-001', 'EXP-TEST-001', 'B01', 'Customer Beta', 'pending_payment', 'pending', 25000, 25000) RETURNING id INTO v_order_b;
+    INSERT INTO orders (store_id, idempotency_key, request_hash, order_number, queue_number, customer_name, status, payment_status, subtotal_amount, total_amount) 
+    VALUES (v_store_b, 'idem-order-b-001', 'req-hash-b-001', 'EXP-TEST-001', 'B01', 'Customer Beta', 'pending_payment', 'pending', 25000, 25000) RETURNING id INTO v_order_b;
 
     INSERT INTO order_items (store_id, order_id, product_id, unit_base_price, modifier_total_price, snapshot_name, snapshot_price, quantity, subtotal_amount)
     VALUES (v_store_a, v_order_a, v_prod_a, 25000, 8000, 'Classic Iced Latte', 33000, 1, 33000) RETURNING id INTO v_item_a;

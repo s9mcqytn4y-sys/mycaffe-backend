@@ -1,4 +1,4 @@
-# Module 3 — Owner/Admin Backoffice
+# Module 3: Owner/Admin Backoffice
 
 ## Primary goals
 Single source of truth, fraud prevention, and decisions grounded in reconciled data. The dashboard should communicate operational health quickly without confusing gross sales, gateway settlement, estimated gross profit, and net profit.
@@ -8,7 +8,7 @@ Single source of truth, fraud prevention, and decisions grounded in reconciled d
 2. **Catalog and modifiers:** products, categories, centralized modifier groups/options, required/optional selection limits, selling price, optional cost basis, availability, schedule, and sold-out reset policy.
 3. **Finance:** cost/HPP, margin estimates, gateway settlement reconciliation, store-configured tax/service/takeaway rules, expenses, and exportable P&L.
 4. **Analytics:** menu-engineering matrix, hourly sales, table turnover/revenue, and preparation SLA by station/shift.
-5. **Staff/RBAC:** owner, manager, cashier, and kitchen roles with least privilege; manager approval for sensitive actions.
+5. **Staff/RBAC:** 4 streamlined operational roles (`owner`, `cashier`, `barista`, `kitchen`) with least privilege and fast-action PIN + mandatory reason logging to `audit_logs` (without multi-step manager approval bottlenecks).
 6. **Audit logs:** actor, action, target, timestamp, reason, approval actor, and structured details for void/refund/price/stock/shift/role changes.
 7. **Brand/settings:** store identity, logo, theme, menu banners, receipt builder, Wi-Fi details if the owner chooses to print them, and configurable operating policies.
 8. **Table QR management:** generated table tokens, active/inactive state, rotation/revocation, branded print-ready QR templates, and emergency QR-order pause.

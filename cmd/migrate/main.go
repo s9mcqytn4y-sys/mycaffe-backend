@@ -16,7 +16,7 @@ func main() {
 	seedFile := flag.String("seed-file", "db/seeds/development.sql", "Path to development seed SQL file")
 	flag.Parse()
 
-	cfg, err := config.LoadConfig()
+	cfg, err := config.LoadMigrateConfig()
 	if err != nil {
 		log.Fatalf("[MIGRATE FATAL] Config error: %v", err)
 	}

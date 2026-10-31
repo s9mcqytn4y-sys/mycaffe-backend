@@ -30,31 +30,44 @@ func setupTestOrderRouter(cfg *config.Config) *gin.Engine {
 	return r
 }
 
-func TestOrderHandlerProductionFailClosed(t *testing.T) {
-	cfg := &config.Config{
-		AppEnv:    "production",
-		JWTSecret: "strong_production_secret_key_32_characters_long",
-	}
-	r := setupTestOrderRouter(cfg)
+func TestOrderHandlerProductionAndStagingFailClosed(t *testing.T) {
+	for _, env := range []string{"production", "staging"} {
+		t.Run(env, func(t *testing.T) {
+			cfg := &config.Config{
+				AppEnv:    env,
+				JWTSecret: "strong_production_secret_key_32_characters_long",
+			}
+			r := setupTestOrderRouter(cfg)
 
-	// 1. Order creation in production must fail-closed with 503
-	reqBody := []byte(`{"store_id":"` + uuid.New().String() + `","customer_name":"Budi","order_type":"dine_in","payment_method":"qris","items":[{"product_id":"` + uuid.New().String() + `","quantity":1}]}`)
-	req, _ := http.NewRequest(http.MethodPost, "/api/v1/orders", bytes.NewBuffer(reqBody))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
+			// 1. Order creation in staging/production must fail-closed with 503
+			reqBody := []byte(`{"store_id":"` + uuid.New().String() + `","customer_name":"Budi","order_type":"dine_in","payment_method":"qris","items":[{"product_id":"` + uuid.New().String() + `","quantity":1}]}`)
+			req, _ := http.NewRequest(http.MethodPost, "/api/v1/orders", bytes.NewBuffer(reqBody))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
 
-	if w.Code != http.StatusServiceUnavailable {
-		t.Errorf("expected production order creation to fail with 503 Service Unavailable, got %d", w.Code)
-	}
+			if w.Code != http.StatusServiceUnavailable {
+				t.Errorf("[%s] expected order creation to fail with 503 Service Unavailable, got %d", env, w.Code)
+			}
+			if strings.Contains(w.Body.String(), "[P0 CONTAINMENT]") {
+				t.Errorf("[%s] client response leaked internal diagnostic string: %s", env, w.Body.String())
+			}
+			if !strings.Contains(w.Body.String(), "request_id") {
+				t.Errorf("[%s] expected request_id in 503 response, got: %s", env, w.Body.String())
+			}
 
-	// 2. WebSocket in production must fail-closed with 503
-	wsReq, _ := http.NewRequest(http.MethodGet, "/ws?store_id="+uuid.New().String(), nil)
-	wsW := httptest.NewRecorder()
-	r.ServeHTTP(wsW, wsReq)
+			// 2. WebSocket in staging/production must fail-closed with 503
+			wsReq, _ := http.NewRequest(http.MethodGet, "/ws?store_id="+uuid.New().String(), nil)
+			wsW := httptest.NewRecorder()
+			r.ServeHTTP(wsW, wsReq)
 
-	if wsW.Code != http.StatusServiceUnavailable {
-		t.Errorf("expected production WebSocket to fail-closed with 503, got %d", wsW.Code)
+			if wsW.Code != http.StatusServiceUnavailable {
+				t.Errorf("[%s] expected WebSocket to fail-closed with 503, got %d", env, wsW.Code)
+			}
+			if strings.Contains(wsW.Body.String(), "[P0 CONTAINMENT]") {
+				t.Errorf("[%s] WebSocket response leaked internal diagnostic string: %s", env, wsW.Body.String())
+			}
+		})
 	}
 }
 
@@ -84,6 +97,9 @@ func TestWebSocketAuthentication(t *testing.T) {
 	reqMismatch, _ := http.NewRequest(http.MethodGet, "/ws?token="+token+"&store_id="+storeB, nil)
 	wMismatch := httptest.NewRecorder()
 	r.ServeHTTP(wMismatch, reqMismatch)
+	if wMismatch.Code != http.StatusForbidden {
+		t.Errorf("expected 403 Forbidden for store_id mismatch, got %d", wMismatch.Code)
+	}
 
 	// 3. Invalid / malformed token -> 401 Unauthorized with generic error message
 	reqInvalid, _ := http.NewRequest(http.MethodGet, "/ws?token=malformed.invalid.token", nil)

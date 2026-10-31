@@ -1,13 +1,18 @@
 package midtrans
 
 import (
+	"context"
 	"crypto/sha512"
+	"crypto/subtle"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/midtrans/midtrans-go"
 	"github.com/midtrans/midtrans-go/coreapi"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/config"
@@ -15,8 +20,8 @@ import (
 )
 
 type Client struct {
-	coreClient coreapi.Client
-	serverKey  string
+	serverKey string
+	env       midtrans.EnvironmentType
 }
 
 func NewClient(cfg *config.Config) *Client {
@@ -29,79 +34,143 @@ func NewClient(cfg *config.Config) *Client {
 	c.New(cfg.MidtransServerKey, env)
 
 	return &Client{
-		coreClient: c,
-		serverKey:  cfg.MidtransServerKey,
+		serverKey: cfg.MidtransServerKey,
+		env:       env,
 	}
 }
 
-// ChargeQRIS initiates a dynamic QRIS payment using Midtrans Core API.
-// Uses stable order.OrderNumber as ProviderOrderID.
-func (c *Client) ChargeQRIS(order *domain.Order) (*coreapi.ChargeResponse, error) {
-	providerOrderID := order.OrderNumber
-	if providerOrderID == "" {
-		providerOrderID = order.ID.String()
+// ChargeRequest represents one immutable Midtrans payment attempt.
+type ChargeRequest struct {
+	OrderID        string
+	Amount         int64
+	Method         domain.PaymentMethod
+	Bank           string
+	IdempotencyKey string // UUID v4 (36 characters), stable for this payment attempt.
+	CallbackURL    string
+}
+
+// newCoreAPIClient creates a per-call SDK client so mutable SDK options are never shared
+// between concurrent payment attempts. SDK v1.3.8 has an 80s default timeout; use a
+// bounded client timeout because its ConfigOptions.SetContext currently does not replace
+// the request returned by http.Request.WithContext.
+func (c *Client) newCoreAPIClient() coreapi.Client {
+	client := coreapi.Client{}
+	client.New(c.serverKey, c.env)
+	client.HttpClient = &midtrans.HttpClientImplementation{
+		HttpClient: &http.Client{Timeout: 12 * time.Second},
+		Logger:     midtrans.GetDefaultLogger(c.env),
+	}
+	return client
+}
+
+// ChargeCoreAPI creates a single Midtrans charge for a persisted payment attempt.
+// OrderID and IdempotencyKey must be stable across retries of the same attempt.
+func (c *Client) ChargeCoreAPI(ctx context.Context, input ChargeRequest) (*coreapi.ChargeResponse, error) {
+	if c == nil || strings.TrimSpace(c.serverKey) == "" {
+		return nil, errors.New("midtrans client is not configured")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(input.OrderID) == "" || len(input.OrderID) > 100 {
+		return nil, errors.New("provider order ID must contain 1 to 100 characters")
+	}
+	if input.Amount <= 0 {
+		return nil, errors.New("payment amount must be positive")
+	}
+	if _, err := uuid.Parse(input.IdempotencyKey); err != nil {
+		return nil, errors.New("Midtrans payment idempotency key must be a UUID")
 	}
 
 	req := &coreapi.ChargeReq{
-		PaymentType: coreapi.PaymentTypeQris,
 		TransactionDetails: midtrans.TransactionDetails{
-			OrderID:  providerOrderID,
-			GrossAmt: order.TotalAmount,
-		},
-		Qris: &coreapi.QrisDetails{
-			Acquirer: "gopay",
+			OrderID:  input.OrderID,
+			GrossAmt: input.Amount,
 		},
 	}
-
-	resp, midtransErr := c.coreClient.ChargeTransaction(req)
-	if midtransErr != nil {
-		return nil, fmt.Errorf("midtrans charge qris error: %s (code: %d)", midtransErr.Message, midtransErr.StatusCode)
-	}
-
-	return resp, nil
-}
-
-// ChargeBankTransfer initiates a VA bank transfer using Midtrans Core API.
-// Uses stable order.OrderNumber as ProviderOrderID.
-func (c *Client) ChargeBankTransfer(order *domain.Order, bank string) (*coreapi.ChargeResponse, error) {
-	var midtransBank midtrans.Bank
-	switch strings.ToLower(bank) {
-	case "bca":
-		midtransBank = midtrans.BankBca
-	case "bni":
-		midtransBank = midtrans.BankBni
-	case "bri":
-		midtransBank = midtrans.BankBri
-	case "mandiri":
-		midtransBank = midtrans.BankMandiri
-	case "permata":
-		midtransBank = midtrans.BankPermata
+	switch input.Method {
+	case domain.PaymentMethodQRIS:
+		req.PaymentType = coreapi.PaymentTypeQris
+		req.Qris = &coreapi.QrisDetails{Acquirer: "gopay"}
+	case domain.PaymentMethodGoPay:
+		req.PaymentType = coreapi.PaymentTypeGopay
+		req.Gopay = &coreapi.GopayDetails{EnableCallback: input.CallbackURL != "", CallbackUrl: input.CallbackURL}
+	case domain.PaymentMethodShopeePay:
+		req.PaymentType = coreapi.PaymentTypeShopeepay
+		req.ShopeePay = &coreapi.ShopeePayDetails{CallbackUrl: input.CallbackURL}
+	case domain.PaymentMethodBankTransfer:
+		var bank midtrans.Bank
+		switch strings.ToLower(strings.TrimSpace(input.Bank)) {
+		case "bca":
+			bank = midtrans.BankBca
+		case "bni":
+			bank = midtrans.BankBni
+		case "bri":
+			bank = midtrans.BankBri
+		case "mandiri":
+			bank = midtrans.BankMandiri
+		case "permata":
+			bank = midtrans.BankPermata
+		default:
+			return nil, fmt.Errorf("unsupported bank transfer: %s", input.Bank)
+		}
+		req.PaymentType = coreapi.PaymentTypeBankTransfer
+		req.BankTransfer = &coreapi.BankTransferDetails{Bank: bank}
 	default:
-		return nil, errors.New("unsupported bank transfer: " + bank)
+		return nil, fmt.Errorf("unsupported Midtrans payment method: %s", input.Method)
 	}
 
-	providerOrderID := order.OrderNumber
-	if providerOrderID == "" {
-		providerOrderID = order.ID.String()
-	}
-
-	req := &coreapi.ChargeReq{
-		PaymentType: coreapi.PaymentTypeBankTransfer,
-		TransactionDetails: midtrans.TransactionDetails{
-			OrderID:  providerOrderID,
-			GrossAmt: order.TotalAmount,
-		},
-		BankTransfer: &coreapi.BankTransferDetails{
-			Bank: midtransBank,
-		},
-	}
-
-	resp, midtransErr := c.coreClient.ChargeTransaction(req)
+	client := c.newCoreAPIClient()
+	client.Options.SetPaymentIdempotencyKey(input.IdempotencyKey)
+	resp, midtransErr := client.ChargeTransaction(req)
 	if midtransErr != nil {
-		return nil, fmt.Errorf("midtrans charge va error: %s (code: %d)", midtransErr.Message, midtransErr.StatusCode)
+		return nil, fmt.Errorf("midtrans charge failed (status %d): %s", midtransErr.StatusCode, midtransErr.Message)
 	}
-
 	return resp, nil
+}
+
+// CheckTransaction retrieves the provider's current transaction state for webhook
+// reconciliation and ambiguous charge retries.
+func (c *Client) CheckTransaction(ctx context.Context, providerOrderID string) (*coreapi.TransactionStatusResponse, error) {
+	if c == nil || strings.TrimSpace(c.serverKey) == "" {
+		return nil, errors.New("midtrans client is not configured")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(providerOrderID) == "" {
+		return nil, errors.New("provider order ID is required")
+	}
+	client := c.newCoreAPIClient()
+	resp, midtransErr := client.CheckTransaction(providerOrderID)
+	if midtransErr != nil {
+		return nil, fmt.Errorf("midtrans status lookup failed (status %d): %s", midtransErr.StatusCode, midtransErr.Message)
+	}
+	return resp, nil
+}
+
+// ChargeQRIS is a compatibility wrapper. New payment flows must pass payments.id as
+// OrderID and IdempotencyKey through ChargeCoreAPI, not an order display number.
+func (c *Client) ChargeQRIS(order *domain.Order) (*coreapi.ChargeResponse, error) {
+	if order == nil || order.ID == uuid.Nil {
+		return nil, errors.New("order ID is required")
+	}
+	return c.ChargeCoreAPI(context.Background(), ChargeRequest{
+		OrderID: order.ID.String(), Amount: order.TotalAmount,
+		Method: domain.PaymentMethodQRIS, IdempotencyKey: order.ID.String(),
+	})
+}
+
+// ChargeBankTransfer is a compatibility wrapper. New payment flows must use a
+// payment-attempt UUID via ChargeCoreAPI.
+func (c *Client) ChargeBankTransfer(order *domain.Order, bank string) (*coreapi.ChargeResponse, error) {
+	if order == nil || order.ID == uuid.Nil {
+		return nil, errors.New("order ID is required")
+	}
+	return c.ChargeCoreAPI(context.Background(), ChargeRequest{
+		OrderID: order.ID.String(), Amount: order.TotalAmount,
+		Method: domain.PaymentMethodBankTransfer, Bank: bank, IdempotencyKey: order.ID.String(),
+	})
 }
 
 // VerifySignature verifies Midtrans notification signature key using the raw gross_amount string.
@@ -112,7 +181,15 @@ func (c *Client) VerifySignature(orderID, statusCode, grossAmount, incomingSigna
 	hasher.Write([]byte(raw))
 	expectedSignature := hex.EncodeToString(hasher.Sum(nil))
 
-	return strings.EqualFold(expectedSignature, incomingSignature)
+	providedSignature, err := hex.DecodeString(strings.TrimSpace(incomingSignature))
+	if err != nil || len(providedSignature) != sha512.Size {
+		return false
+	}
+	expectedBytes, err := hex.DecodeString(expectedSignature)
+	if err != nil {
+		return false
+	}
+	return subtle.ConstantTimeCompare(expectedBytes, providedSignature) == 1
 }
 
 // ParseGrossAmountIDR parses a Midtrans gross_amount string (e.g. "58905.00" or "58905")
@@ -178,10 +255,14 @@ func MapMidtransStatus(transactionStatus, fraudStatus string) (domain.PaymentSta
 			return "", fmt.Errorf("unsupported fraud_status %q for capture transaction", fraudStatus)
 		}
 	case "settlement":
-		if fStatus == "deny" {
+		switch fStatus {
+		case "", "accept":
+			return domain.PaymentStatusPaid, nil
+		case "deny":
 			return domain.PaymentStatusFailed, nil
+		default:
+			return "", fmt.Errorf("unsupported fraud_status %q for settlement transaction", fraudStatus)
 		}
-		return domain.PaymentStatusPaid, nil
 	case "pending":
 		return domain.PaymentStatusPending, nil
 	case "deny", "failure":

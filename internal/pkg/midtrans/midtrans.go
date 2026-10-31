@@ -30,9 +30,6 @@ func NewClient(cfg *config.Config) *Client {
 		env = midtrans.Production
 	}
 
-	c := coreapi.Client{}
-	c.New(cfg.MidtransServerKey, env)
-
 	return &Client{
 		serverKey: cfg.MidtransServerKey,
 		env:       env,

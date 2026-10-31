@@ -31,8 +31,8 @@
 - **MDR & Tax Configuration**:
   - Regular QRIS MDR, PB1 restaurant tax, and service charge are stored in Basis Points (`BPS`) per tenant on `stores` (`tax_bps`, `service_bps`, `qris_mdr_bps`).
 - **Fail-Closed Baseline**: Public HTTP order creation (`POST /api/v1/orders`) and WebSocket (`/ws`) return `503 Service Unavailable` in `staging` and `production` until signed table QR / staff JWT middleware is bound on public routes.
-- **Webhook Reconciliation**: Verifies SHA-512 signature over raw `gross_amount`, validates integer Rupiah amount and status mapping, and returns `503 Service Unavailable` (`Retry-After: 60`) until Phase 01 Sub-task 04 ledger persistence is wired.
-- **Webhook Idempotency**: Enforced via `payment_notification_logs` unique constraint `uq_notif_logs_event` on `(provider, order_number, transaction_status, status_code, transaction_id)`.
+- **Webhook Reconciliation**: Verifies SHA-512 signature over raw `gross_amount`, validates integer Rupiah amount and status mapping, then reconciles the payment ledger in one `WithTenantTx`. Returns `503 Service Unavailable` (`Retry-After: 60`) only when the commit fails, so Midtrans retries.
+- **Webhook Idempotency**: Enforced via unique index `uq_payment_notification_logs_event_hash` on `(store_id, event_hash)`, where `event_hash` is SHA-256 over provider order ID, transaction ID, status code, transaction/fraud status, and gross amount (migration `000004`).
 
 ## 5. Implementation Status (4-Tier Matrix)
 - **Implemented & Tested**:
@@ -45,10 +45,11 @@
 - **Guarded / Fail-Closed**:
   - `POST /api/v1/orders`: Returns `503 Service Unavailable` in `staging` and `production` until authenticated tenant middleware is wired on the HTTP route.
   - `GET /ws`: Returns `503 Service Unavailable` in `staging` and `production` until Phase 03 session ticket lifecycle is active.
-  - `POST /api/v1/payments/midtrans/webhook`: Verifies SHA-512 signature and returns `503 Service Unavailable` (`Retry-After: 60`) until Phase 01 Sub-task 04 payment ledger persistence is active.
+  - `POST /api/v1/orders/:id/payments/initiate`: Returns `503 Service Unavailable` in `staging` and `production` until Phase 02 staff/guest authentication replaces the client-supplied `store_id` and `actor_user_id`.
+- **Implemented & Tested (Phase 01 Sub-task 04)**:
+  - Payment initiation (cash/static QRIS/EDC + Midtrans Core API two-phase charge), durable webhook inbox, duplicate-settlement detection, order expiry and reconciliation worker (`internal/service/payment_service.go`).
 - **Planned**:
-  - Phase 01 Sub-task 04: Payment initiation (`payments` persistence + Midtrans `/v2/charge`) and durable webhook ledger reconciliation (`payment_notification_logs` + KDS transition).
-  - Phase 02: Signed table QR token & staff authentication HTTP middleware.
+  - Phase 02: Staff authentication, RBAC middleware, signed table QR, and guest table sessions — see `docs/architecture/roadmap.md`.
 - **Blocked by Dependency**:
   - Production Midtrans credentials, domain/DNS cutover, and live Hostinger KVM 2 VPS provisioning.
 

@@ -45,6 +45,10 @@ jobs:
           if [ -n "$diffs" ]; then
             echo "The following files are not formatted properly:"
             echo "$diffs"
+            while IFS= read -r file; do
+              echo "gofmt diff for $file:"
+              gofmt -d "$file"
+            done <<< "$diffs"
             exit 1
           fi
 

@@ -26,6 +26,7 @@ func setupTestOrderRouter(cfg *config.Config) *gin.Engine {
 	orderHandler := handler.NewOrderHandler(cfg, midtransClient, hub)
 
 	r.POST("/api/v1/orders", orderHandler.CreateOrder)
+	r.POST("/api/v1/orders/:id/payments/initiate", orderHandler.InitiateOrderPayment)
 	r.GET("/ws", orderHandler.HandleWebSocket)
 	return r
 }
@@ -66,6 +67,20 @@ func TestOrderHandlerProductionAndStagingFailClosed(t *testing.T) {
 			}
 			if strings.Contains(wsW.Body.String(), "[P0 CONTAINMENT]") {
 				t.Errorf("[%s] WebSocket response leaked internal diagnostic string: %s", env, wsW.Body.String())
+			}
+
+			// 3. Payment initiation in staging/production must fail-closed with 503
+			payBody := []byte(`{"store_id":"` + uuid.New().String() + `","idempotency_key":"idem-pay-1","method":"qris"}`)
+			payReq, _ := http.NewRequest(http.MethodPost, "/api/v1/orders/"+uuid.New().String()+"/payments/initiate", bytes.NewBuffer(payBody))
+			payReq.Header.Set("Content-Type", "application/json")
+			payW := httptest.NewRecorder()
+			r.ServeHTTP(payW, payReq)
+
+			if payW.Code != http.StatusServiceUnavailable {
+				t.Errorf("[%s] expected payment initiation to fail-closed with 503, got %d", env, payW.Code)
+			}
+			if !strings.Contains(payW.Body.String(), "request_id") {
+				t.Errorf("[%s] expected request_id in 503 payment response, got: %s", env, payW.Body.String())
 			}
 		})
 	}

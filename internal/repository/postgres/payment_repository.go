@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
@@ -223,12 +224,12 @@ func (r *PaymentRepository) UpdatePaymentStatus(
 
 	query := `
 		UPDATE payments
-		SET status = $3,
+		SET status = $3::varchar,
 			raw_provider_status = $4,
 			fraud_status = $5,
 			transaction_id = $6,
 			payment_type = $7,
-			paid_at = CASE WHEN $3 = 'paid' THEN COALESCE(paid_at, NOW()) ELSE paid_at END
+			paid_at = CASE WHEN $3::varchar = 'paid' THEN COALESCE(paid_at, NOW()) ELSE paid_at END
 		WHERE store_id = $1 AND id = $2
 		RETURNING updated_at, paid_at
 	`
@@ -271,4 +272,323 @@ func (r *PaymentRepository) UpdatePaymentGatewayDetails(
 		payment.VANumber, payment.Bank, payment.BillerCode, payment.BillKey,
 		payment.PaymentCode, payment.ExpiresAt, payment.RawProviderStatus, payment.FraudStatus,
 	).Scan(&payment.UpdatedAt)
+}
+
+func (r *PaymentRepository) InsertPayment(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	payment *domain.Payment,
+) error {
+	if tx == nil {
+		return ErrNilTransaction
+	}
+	if payment == nil || payment.ID == uuid.Nil || payment.StoreID == uuid.Nil || payment.OrderID == uuid.Nil {
+		return errors.New("payment identity, store_id, and order_id are required")
+	}
+
+	query := `
+		INSERT INTO payments (
+			id, store_id, order_id, split_id, attempt_no, idempotency_key, request_hash,
+			provider, provider_order_id, amount, refunded_amount, method, status,
+			raw_provider_status, fraud_status, transaction_id, payment_type, acquirer,
+			qr_string, deeplink_url, va_number, bank, biller_code, bill_key,
+			payment_code, reconciliation_ref, verified_by_user_id,
+			cash_tendered_amount, change_given_amount, failure_code, failure_reason,
+			paid_at, expires_at
+		) VALUES (
+			$1, $2, $3, $4, $5, $6, $7,
+			$8, $9, $10, $11, $12, $13,
+			$14, $15, $16, $17, $18,
+			$19, $20, $21, $22, $23, $24,
+			$25, $26, $27,
+			$28, $29, $30, $31,
+			$32, $33
+		)
+		RETURNING created_at, updated_at
+	`
+	return tx.QueryRowxContext(
+		ctx, query,
+		payment.ID, payment.StoreID, payment.OrderID, payment.SplitID, payment.AttemptNo,
+		payment.IdempotencyKey, payment.RequestHash, payment.Provider, payment.ProviderOrderID,
+		payment.Amount, payment.RefundedAmount, payment.Method, payment.Status,
+		payment.RawProviderStatus, payment.FraudStatus, payment.TransactionID,
+		payment.PaymentType, payment.Acquirer, payment.QRString, payment.DeeplinkURL,
+		payment.VANumber, payment.Bank, payment.BillerCode, payment.BillKey,
+		payment.PaymentCode, payment.ReconciliationRef, payment.VerifiedByUserID,
+		payment.CashTenderedAmount, payment.ChangeGivenAmount,
+		payment.FailureCode, payment.FailureReason, payment.PaidAt, payment.ExpiresAt,
+	).Scan(&payment.CreatedAt, &payment.UpdatedAt)
+}
+
+func (r *PaymentRepository) GetActivePaymentForSplitForUpdate(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	storeID, splitID uuid.UUID,
+) (*domain.Payment, error) {
+	if tx == nil {
+		return nil, ErrNilTransaction
+	}
+	if storeID == uuid.Nil || splitID == uuid.Nil {
+		return nil, ErrEmptyTenantContext
+	}
+
+	var payment domain.Payment
+	query := `SELECT ` + paymentSelectColumns + `
+		FROM payments
+		WHERE store_id = $1
+		  AND split_id = $2
+		  AND status IN ('pending', 'authorized')
+		ORDER BY attempt_no DESC, created_at DESC
+		LIMIT 1
+		FOR UPDATE
+	`
+	if err := tx.GetContext(ctx, &payment, query, storeID, splitID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrPaymentNotFound
+		}
+		return nil, fmt.Errorf("failed to query active payment attempt for split: %w", err)
+	}
+	return &payment, nil
+}
+
+func (r *PaymentRepository) NextAttemptNumberForSplit(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	storeID, splitID uuid.UUID,
+) (int, error) {
+	if tx == nil {
+		return 0, ErrNilTransaction
+	}
+	if storeID == uuid.Nil || splitID == uuid.Nil {
+		return 0, ErrEmptyTenantContext
+	}
+
+	var nextAttempt int
+	query := `
+		SELECT COALESCE(MAX(attempt_no), 0) + 1
+		FROM payments
+		WHERE store_id = $1 AND split_id = $2
+	`
+	if err := tx.GetContext(ctx, &nextAttempt, query, storeID, splitID); err != nil {
+		return 0, fmt.Errorf("failed to calculate next payment attempt number: %w", err)
+	}
+	return nextAttempt, nil
+}
+
+func (r *PaymentRepository) GetPaymentByIDForUpdate(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	storeID, paymentID uuid.UUID,
+) (*domain.Payment, error) {
+	if tx == nil {
+		return nil, ErrNilTransaction
+	}
+	if storeID == uuid.Nil || paymentID == uuid.Nil {
+		return nil, ErrEmptyTenantContext
+	}
+
+	var payment domain.Payment
+	query := `SELECT ` + paymentSelectColumns + `
+		FROM payments
+		WHERE store_id = $1 AND id = $2
+		FOR UPDATE
+	`
+	if err := tx.GetContext(ctx, &payment, query, storeID, paymentID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrPaymentNotFound
+		}
+		return nil, fmt.Errorf("failed to lock payment attempt by id: %w", err)
+	}
+	return &payment, nil
+}
+
+func (r *PaymentRepository) MarkPaymentFailed(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	payment *domain.Payment,
+	failureCode, failureReason string,
+) error {
+	if tx == nil {
+		return ErrNilTransaction
+	}
+	if payment == nil || payment.ID == uuid.Nil || payment.StoreID == uuid.Nil {
+		return errors.New("payment identity is required")
+	}
+
+	query := `
+		UPDATE payments
+		SET status = 'failed',
+			failure_code = $3,
+			failure_reason = $4
+		WHERE store_id = $1 AND id = $2
+		RETURNING updated_at
+	`
+	if err := tx.QueryRowxContext(ctx, query, payment.StoreID, payment.ID, failureCode, failureReason).Scan(&payment.UpdatedAt); err != nil {
+		return fmt.Errorf("failed to mark payment attempt failed: %w", err)
+	}
+	payment.Status = domain.PaymentStatusFailed
+	payment.FailureCode = failureCode
+	payment.FailureReason = failureReason
+	return nil
+}
+
+func (r *PaymentRepository) GetActiveCashierOrOwnerActor(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	storeID, userID uuid.UUID,
+) (*domain.User, error) {
+	if tx == nil {
+		return nil, ErrNilTransaction
+	}
+	if storeID == uuid.Nil || userID == uuid.Nil {
+		return nil, nil
+	}
+
+	var user domain.User
+	query := `
+		SELECT id, store_id, email, full_name, role, is_active, created_at, updated_at
+		FROM users
+		WHERE store_id = $1
+		  AND id = $2
+		  AND is_active = true
+		  AND role IN ('owner', 'cashier')
+	`
+	if err := tx.GetContext(ctx, &user, query, storeID, userID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to load active cashier/owner actor: %w", err)
+	}
+	return &user, nil
+}
+
+func (r *PaymentRepository) InsertAuditLog(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	audit *domain.AuditLog,
+) error {
+	if tx == nil {
+		return ErrNilTransaction
+	}
+	if audit == nil || audit.StoreID == uuid.Nil || audit.Action == "" || audit.Reason == "" {
+		return errors.New("audit log store_id, action, and reason are required")
+	}
+	if audit.ID == uuid.Nil {
+		audit.ID = uuid.New()
+	}
+	if audit.Metadata == "" {
+		audit.Metadata = "{}"
+	}
+
+	query := `
+		INSERT INTO audit_logs (
+			id, store_id, actor_id, actor_name, action, reason, reference_id, metadata
+		) VALUES (
+			$1, $2, $3, $4, $5, $6, $7, $8::jsonb
+		)
+		RETURNING created_at
+	`
+	return tx.QueryRowxContext(
+		ctx, query,
+		audit.ID, audit.StoreID, audit.ActorID, audit.ActorName,
+		audit.Action, audit.Reason, audit.ReferenceID, audit.Metadata,
+	).Scan(&audit.CreatedAt)
+}
+
+func (r *PaymentRepository) ExpirePendingPaymentsByOrder(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	storeID, orderID uuid.UUID,
+) error {
+	if tx == nil {
+		return ErrNilTransaction
+	}
+	_, err := tx.ExecContext(ctx, `
+		UPDATE payments
+		SET status = 'expired',
+			raw_provider_status = CASE WHEN raw_provider_status = '' THEN 'expire' ELSE raw_provider_status END
+		WHERE store_id = $1
+		  AND order_id = $2
+		  AND status IN ('pending', 'authorized')
+	`, storeID, orderID)
+	if err != nil {
+		return fmt.Errorf("failed to expire pending payment attempts for order: %w", err)
+	}
+	return nil
+}
+
+func (r *PaymentRepository) ListStoresWithPendingReconciliation(
+	ctx context.Context,
+	db *sqlx.DB,
+) ([]uuid.UUID, error) {
+	if db == nil {
+		return nil, errors.New("database connection pool is not initialized")
+	}
+	var storeIDs []uuid.UUID
+	query := `SELECT store_id FROM list_stores_with_pending_reconciliation()`
+	if err := db.SelectContext(ctx, &storeIDs, query); err != nil {
+		return nil, fmt.Errorf("failed to list stores with pending reconciliation: %w", err)
+	}
+	return storeIDs, nil
+}
+
+func (r *PaymentRepository) ListOverdueUnpaidOrderIDs(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	storeID uuid.UUID,
+	asOf time.Time,
+	limit int,
+) ([]uuid.UUID, error) {
+	if tx == nil {
+		return nil, ErrNilTransaction
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+	var orderIDs []uuid.UUID
+	query := `
+		SELECT id
+		FROM orders
+		WHERE store_id = $1
+		  AND status = 'pending_payment'
+		  AND payment_status IN ('unpaid', 'pending', 'failed')
+		  AND expires_at IS NOT NULL
+		  AND expires_at <= $2
+		ORDER BY expires_at ASC, id ASC
+		LIMIT $3
+		FOR UPDATE SKIP LOCKED
+	`
+	if err := tx.SelectContext(ctx, &orderIDs, query, storeID, asOf, limit); err != nil {
+		return nil, fmt.Errorf("failed to list overdue unpaid orders: %w", err)
+	}
+	return orderIDs, nil
+}
+
+func (r *PaymentRepository) ListStalePendingPayments(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	storeID uuid.UUID,
+	createdBefore time.Time,
+	limit int,
+) ([]domain.Payment, error) {
+	if tx == nil {
+		return nil, ErrNilTransaction
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+	var payments []domain.Payment
+	query := `SELECT ` + paymentSelectColumns + `
+		FROM payments
+		WHERE store_id = $1
+		  AND provider = 'midtrans'
+		  AND status IN ('pending', 'authorized')
+		  AND created_at <= $2
+		ORDER BY created_at ASC, id ASC
+		LIMIT $3
+	`
+	if err := tx.SelectContext(ctx, &payments, query, storeID, createdBefore, limit); err != nil {
+		return nil, fmt.Errorf("failed to list stale pending Midtrans payments: %w", err)
+	}
+	return payments, nil
 }

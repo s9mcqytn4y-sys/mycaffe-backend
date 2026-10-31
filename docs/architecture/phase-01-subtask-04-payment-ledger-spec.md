@@ -6,10 +6,10 @@ Dokumen ini mendefinisikan spesifikasi teknis, arsitektur database, aturan idemp
 
 ## 1. Masalah Inti yang Diselesaikan pada Phase 01 Sub-task 04
 
-Saat ini pada repositori `mycaffe-backend`:
-1. Pembuatan pesanan transaksional (`OrderService.CreateOrder`), reservasi stok (`stock_status = 'reserved'`), pelepasan stok saat kedaluwarsa (`CancelOrExpireUnpaidOrder`), dan komit stok saat lunas (`ConfirmOrderPaymentAndCommitStock`) telah **Implemented & Tested**.
-2. Klien HTTP Midtrans Core API (`internal/pkg/midtrans/midtrans.go`) dan verifikasi tanda tangan SHA-512 (`VerifySignature`, `ParseGrossAmountIDR`, `MapMidtransStatus`) telah **Implemented & Tested**.
-3. Namun, endpoint `POST /api/v1/payments/midtrans/webhook` masih berstatus **Guarded / Fail-Closed** (`503 Service Unavailable` dengan header `Retry-After: 60`) karena lapisan repositori dan servis transaksi untuk tabel `payments`, `payment_notification_logs`, dan rekonsiliasi `payment_splits` -> `orders` belum dihubungkan.
+Status terkini pada repositori `mycaffe-backend` (`feature/phase-01-subtask-04-payment-ledger` / **PR #5**):
+1. Pembuatan pesanan transaksional (`OrderService.CreateOrder`), reservasi stok (`stock_status = 'reserved'`), pelepasan stok saat kedaluwarsa (`CancelOrExpireUnpaidOrder`), dan komit stok saat lunas (`ConfirmOrderPaymentAndCommitStock`) telah **Implemented & Tested** (merged ke `staging` via **PR #4**).
+2. Klien HTTP Midtrans Core API (`internal/pkg/midtrans/midtrans.go`) dengan `ChargeCoreAPI`, `CheckTransaction`, `SetPaymentIdempotencyKey`, dan verifikasi tanda tangan SHA-512 (`VerifySignature`, `ParseGrossAmountIDR`, `MapMidtransStatus`) telah **Implemented & Tested**.
+3. Migrasi `20261031000004_harden_payment_idempotency_and_webhook_inbox.up.sql`, `PaymentRepository`, `PaymentService` (`InitiatePayment`, `ProcessMidtransWebhook`, `ExpireOverdueOrders`, `ReconcileStalePendingPayments`, `StartReconciliationWorker`), serta aktivasi HTTP `200 OK` pada `POST /api/v1/payments/midtrans/webhook` dan endpoint `POST /api/v1/orders/:id/payments/initiate` (fail-closed `503` di `staging`/`production` hingga Phase 02 Auth) telah **Implemented & Tested**.
 
 **Tujuan Phase 01 Sub-task 04:**
 Membangun `PaymentRepository` dan `PaymentService` yang menyimpan setiap percobaan pembayaran (`payments`), menginisiasi transaksi ke Midtrans Core API (`/v2/charge`) atau memproses pembayaran kasir (`cash`, `static_qris`, `edc`), serta memproses webhook Midtrans secara durabel, idempoten, dan tahan terhadap *out-of-order notifications* di PostgreSQL 18.

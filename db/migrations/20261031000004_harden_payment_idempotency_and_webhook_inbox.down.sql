@@ -1,6 +1,34 @@
 -- 20261031000004_harden_payment_idempotency_and_webhook_inbox.down.sql
 -- Rollback only after confirming the legacy notification uniqueness key has no collisions.
 
+DROP FUNCTION IF EXISTS list_stores_with_pending_reconciliation();
+
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM audit_logs
+        WHERE action IN ('CASH_PAYMENT_RECORDED', 'EDC_RECONCILE')
+    ) THEN
+        RAISE EXCEPTION 'Cannot restore legacy audit_logs action constraint: rows with CASH_PAYMENT_RECORDED or EDC_RECONCILE exist.';
+    END IF;
+END $$;
+
+ALTER TABLE audit_logs
+    DROP CONSTRAINT IF EXISTS chk_audit_logs_action;
+
+ALTER TABLE audit_logs
+    ADD CONSTRAINT chk_audit_logs_action
+    CHECK (action IN (
+        'VOID_ORDER',
+        'REFUND',
+        'STOCK_OVERRIDE',
+        'PRICE_CHANGE',
+        'SHIFT_CLOSE',
+        'ROLE_CHANGE',
+        'STATIC_QRIS_RECONCILE'
+    ));
+
 DROP INDEX IF EXISTS idx_payment_notification_logs_provider_order;
 DROP INDEX IF EXISTS uq_payment_notification_logs_event_hash;
 

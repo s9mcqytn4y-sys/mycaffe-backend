@@ -66,3 +66,46 @@ CREATE INDEX IF NOT EXISTS idx_payment_notification_logs_provider_order
 -- default PUBLIC EXECUTE privilege and keep the explicit application grant.
 REVOKE ALL ON FUNCTION resolve_payment_webhook_context(VARCHAR) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION resolve_payment_webhook_context(VARCHAR) TO mycaffe_app;
+
+-- Allow audit_logs to record direct cashier cash and EDC tender settlements alongside static_qris.
+ALTER TABLE audit_logs
+    DROP CONSTRAINT IF EXISTS chk_audit_logs_action;
+
+ALTER TABLE audit_logs
+    ADD CONSTRAINT chk_audit_logs_action
+    CHECK (action IN (
+        'VOID_ORDER',
+        'REFUND',
+        'STOCK_OVERRIDE',
+        'PRICE_CHANGE',
+        'SHIFT_CLOSE',
+        'ROLE_CHANGE',
+        'STATIC_QRIS_RECONCILE',
+        'CASH_PAYMENT_RECORDED',
+        'EDC_RECONCILE'
+    ));
+
+-- Narrowly-scoped SECURITY DEFINER helper returning only tenant store_ids that currently
+-- have overdue unpaid orders or pending Midtrans attempts requiring background reconciliation.
+CREATE OR REPLACE FUNCTION list_stores_with_pending_reconciliation()
+RETURNS TABLE (store_id UUID)
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+    SELECT DISTINCT o.store_id
+    FROM orders o
+    WHERE o.status = 'pending_payment'
+      AND o.payment_status IN ('unpaid', 'pending', 'failed')
+      AND o.expires_at IS NOT NULL
+      AND o.expires_at <= NOW()
+    UNION
+    SELECT DISTINCT p.store_id
+    FROM payments p
+    WHERE p.provider = 'midtrans'
+      AND p.status IN ('pending', 'authorized')
+$$;
+
+REVOKE ALL ON FUNCTION list_stores_with_pending_reconciliation() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION list_stores_with_pending_reconciliation() TO mycaffe_app;

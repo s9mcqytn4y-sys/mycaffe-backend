@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/auth"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/midtrans"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/realtime"
+	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/repository/postgres"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/service"
 )
 
@@ -22,6 +24,7 @@ type OrderHandler struct {
 	midtransClient *midtrans.Client
 	realtimeHub    *realtime.Hub
 	orderService   *service.OrderService
+	paymentService *service.PaymentService
 }
 
 func NewOrderHandler(cfg *config.Config, client *midtrans.Client, hub *realtime.Hub) *OrderHandler {
@@ -34,6 +37,22 @@ func NewOrderHandler(cfg *config.Config, client *midtrans.Client, hub *realtime.
 
 func (h *OrderHandler) SetOrderService(svc *service.OrderService) {
 	h.orderService = svc
+}
+
+func (h *OrderHandler) SetPaymentService(svc *service.PaymentService) {
+	h.paymentService = svc
+}
+
+type InitiateOrderPaymentRequest struct {
+	StoreID            uuid.UUID            `json:"store_id" binding:"required"`
+	SplitID            *uuid.UUID           `json:"split_id,omitempty"`
+	IdempotencyKey     string               `json:"idempotency_key" binding:"required"`
+	Method             domain.PaymentMethod `json:"method" binding:"required"`
+	Bank               string               `json:"bank,omitempty"`
+	CashTenderedAmount int64                `json:"cash_tendered_amount,omitempty"`
+	ReconciliationRef  string               `json:"reconciliation_ref,omitempty"`
+	CallbackURL        string               `json:"callback_url,omitempty"`
+	ActorUserID        *uuid.UUID           `json:"actor_user_id,omitempty"`
 }
 
 type CreateOrderItemRequest struct {
@@ -167,4 +186,88 @@ func (h *OrderHandler) HandleWebSocket(c *gin.Context) {
 
 	// Serve WebSocket with authenticated tenant StoreID derived exclusively from trusted claims
 	h.realtimeHub.ServeWS(c.Writer, c.Request, claims.StoreID)
+}
+
+// InitiateOrderPayment initiates a gateway or direct cashier payment for an existing order.
+// @Summary Initiate Order Payment
+// @Description Initiates a Midtrans Core API charge (QRIS, GoPay, ShopeePay, Bank Transfer) or settles a direct cashier tender (Cash, Static QRIS, EDC). Fails-closed in staging/production until trusted tenant auth middleware is wired.
+// @Tags Payments
+// @Accept json
+// @Produce json
+// @Param id path string true "Order ID (UUID)"
+// @Param payment body InitiateOrderPaymentRequest true "Payment Initiation Request"
+// @Success 200 {object} service.InitiatePaymentResult
+// @Failure 400 {object} map[string]interface{}
+// @Failure 403 {object} map[string]interface{}
+// @Failure 404 {object} map[string]interface{}
+// @Failure 409 {object} map[string]interface{}
+// @Failure 503 {object} map[string]interface{}
+// @Router /api/v1/orders/{id}/payments/initiate [post]
+func (h *OrderHandler) InitiateOrderPayment(c *gin.Context) {
+	if h.cfg.AppEnv == "production" || h.cfg.AppEnv == "staging" {
+		reqID := uuid.NewString()
+		log.Printf("[PAYMENT CONTAINMENT] request_id=%s env=%s ip=%s blocked payment initiation: trusted tenant identity binding not yet active", reqID, h.cfg.AppEnv, c.ClientIP())
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"error":      "Layanan pembayaran pesanan sedang dalam pemeliharaan. Silakan hubungi kasir untuk menyelesaikan pembayaran.",
+			"code":       "SERVICE_TEMPORARILY_UNAVAILABLE",
+			"request_id": reqID,
+		})
+		return
+	}
+
+	orderID, err := uuid.Parse(strings.TrimSpace(c.Param("id")))
+	if err != nil || orderID == uuid.Nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid order id"})
+		return
+	}
+
+	var req InitiateOrderPaymentRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if h.paymentService == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"error": "Layanan pembayaran belum terhubung ke basis data.",
+			"code":  "SERVICE_TEMPORARILY_UNAVAILABLE",
+		})
+		return
+	}
+
+	res, err := h.paymentService.InitiatePayment(c.Request.Context(), req.StoreID, service.InitiatePaymentInput{
+		OrderID:            orderID,
+		SplitID:            req.SplitID,
+		IdempotencyKey:     req.IdempotencyKey,
+		Method:             req.Method,
+		Bank:               req.Bank,
+		CashTenderedAmount: req.CashTenderedAmount,
+		ReconciliationRef:  req.ReconciliationRef,
+		CallbackURL:        req.CallbackURL,
+		ActorUserID:        req.ActorUserID,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrPaymentIdempotencyKeyRequired),
+			errors.Is(err, service.ErrUnsupportedPaymentMethod),
+			errors.Is(err, service.ErrPaymentMethodNotEnabled),
+			errors.Is(err, service.ErrInsufficientCashTendered),
+			errors.Is(err, service.ErrReconciliationRefRequired):
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		case errors.Is(err, service.ErrUnauthorizedCashierTender):
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+		case errors.Is(err, postgres.ErrOrderNotFound),
+			errors.Is(err, postgres.ErrStoreNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		case errors.Is(err, service.ErrPaymentIdempotencyConflict),
+			errors.Is(err, service.ErrSplitAlreadyPaid),
+			errors.Is(err, service.ErrOrderNotPayable):
+			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		default:
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "failed to initiate payment"})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, res)
 }

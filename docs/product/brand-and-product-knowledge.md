@@ -91,7 +91,7 @@ Seluruh identitas statis dari prototipe awal telah dihapus sepenuhnya dan digant
 | **Store (Tenant)** | `UUID v4` (`stores.id`) | Slug URL: `central-cafe`, `express-counter` | Ditetapkan per cabang/toko. |
 | **Order Number** | `UUID v4` (`orders.id`) | `{ORDER_PREFIX}-{YYYYMMDD}-{XXXX}` (Contoh: `ORD-20261029-0001`) | `order_prefix` dapat dikustomisasi per toko (mis. `ORD`, `EXP`). Nomor urut (`XXXX`) dialokasikan secara atomik per tanggal bisnis toko (`stores.timezone`) melalui tabel `store_daily_sequences`. |
 | **Queue Number** | Disimpan pada `orders.queue_number` | `{QUEUE_PREFIX}{XXX}` (Contoh: `A001`, `B001`) | `queue_prefix` dapat dikustomisasi per toko. Reset otomatis kembali ke `001` setiap pergantian tanggal bisnis lokal toko. |
-| **Payment Provider ID** | `UUID v4` (`payments.id`) | `{ORDER_NUMBER}-S{SPLIT}-A{ATTEMPT}` | Menjamin keunikan `provider_order_id` saat dikirim ke Midtrans Core API untuk skenario split bill maupun percobaan ulang (retry). |
+| **Payment Provider ID** | `UUID v4` (`payments.id`) | UUID payment attempt yang sama dengan `provider_order_id` | Menjamin keunikan global per provider pada akun gateway bersama; `order_number` tetap menjadi nomor operasional untuk pelanggan, bukan ID gateway. |
 | **Staff ID Card** | `UUID v4` (`users.id`) | `STF-{STORE_SLUG_UPPER}-{XXXX}` | Digunakan untuk pencetakan kartu identitas staf (ID Card) beserta PIN operasional kasir. |
 
 ---

@@ -178,7 +178,7 @@ paths:
       summary: Midtrans HTTP Notification Webhook
       description: |
         Verifies `SHA512(order_id + status_code + gross_amount + server_key)`, validates `IDR` currency and whole-integer `gross_amount`, and maps `transaction_status` + `fraud_status`.
-        Currently **Guarded / Fail-Closed** (`503 Service Unavailable` with `Retry-After: 60`) until `PaymentService.ProcessMidtransWebhook` is wired in Phase 01 Sub-task 04.
+        Implementation target for Phase 01 Sub-task 04. The handler must remain fail-closed (`503` + `Retry-After`) until durable inbox, ledger, order reconciliation, and PostgreSQL 18 integration tests are complete.
       requestBody:
         required: true
         content:
@@ -187,7 +187,7 @@ paths:
               $ref: "#/components/schemas/MidtransWebhookPayload"
       responses:
         "200":
-          description: Webhook verified and durably committed to payment_events, payments, payment_splits, orders, and outbox_events
+          description: Webhook verified and durably committed to payment_notification_logs, payments, payment_splits, orders, and outbox_events
           content:
             application/json:
               schema:

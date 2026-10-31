@@ -24,7 +24,7 @@ tags:
   - name: Payments
     description: Payment initiation (QRIS, VA, E-Wallet, Cash, Static QRIS, EDC) and Midtrans webhook reconciliation
   - name: Auth
-    description: "Staff authentication and session lifecycle (ADR-003). x-implementation-status planned: not served by the API yet."
+    description: "Staff authentication and session lifecycle (ADR-003). Implemented in Phase 02.01-B (login, refresh, logout, me)."
   - name: KDS
     description: Kitchen Display System and Barista preparation queue transitions
 
@@ -241,8 +241,8 @@ paths:
     post:
       tags: [Auth]
       operationId: staffLogin
-      summary: Staff login with store slug, email, and PIN (planned)
-      x-implementation-status: planned
+      summary: Staff login with store slug, email, and PIN
+      x-implementation-status: implemented
       x-adr: ADR-003 D1-D5
       description: |
         Verifies `store_slug + email + PIN`. Every failure (unknown store, unknown email, inactive or locked
@@ -299,8 +299,8 @@ paths:
     post:
       tags: [Auth]
       operationId: staffRefresh
-      summary: Rotate refresh token and issue a new access token (planned)
-      x-implementation-status: planned
+      summary: Rotate refresh token and issue a new access token
+      x-implementation-status: implemented
       x-adr: ADR-003 D4
       description: |
         Consumes the refresh cookie, rotates it, and returns a new access token. Presenting an already-rotated
@@ -339,8 +339,8 @@ paths:
     post:
       tags: [Auth]
       operationId: staffLogout
-      summary: Revoke the current staff session (planned)
-      x-implementation-status: planned
+      summary: Revoke the current staff session
+      x-implementation-status: implemented
       x-adr: ADR-003 D4
       description: Revokes the session bound to the refresh cookie and clears the cookie. Idempotent.
       security:
@@ -361,8 +361,8 @@ paths:
     get:
       tags: [Auth]
       operationId: staffMe
-      summary: Current staff profile and effective permissions (planned)
-      x-implementation-status: planned
+      summary: Current staff profile and effective permissions
+      x-implementation-status: implemented
       x-adr: ADR-003 D4, D7
       security:
         - BearerStaffJWT: []
@@ -374,7 +374,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/StaffMeResponse"
         "401":
-          description: Invalid token, revoked session, inactive user, or role changed since issuance (`code=SESSION_STALE`)
+          description: Invalid/expired token, revoked session, inactive or locked user (`code=SESSION_INVALID`), or role changed since issuance (`code=SESSION_STALE`, refresh to pick up the new role)
           content:
             application/json:
               schema:
@@ -516,7 +516,7 @@ components:
           $ref: "#/components/schemas/StaffProfile"
         permissions:
           type: array
-          description: Effective permission constants from the backend RBAC policy (ADR-003 D7). UI hints only; the backend re-checks every request.
+          description: Effective permission constants from the backend RBAC policy (ADR-003 D7). UI hints only; the backend re-checks every request. Returned as an empty array until the RBAC policy ships in 02.01-C.
           items:
             type: string
           example: [order.pos.create, payment.tender.direct, shift.open]

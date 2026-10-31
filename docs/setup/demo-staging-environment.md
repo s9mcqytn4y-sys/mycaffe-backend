@@ -8,7 +8,7 @@ through a Cloudflare Quick Tunnel. Defined in `deploy/docker/docker-compose.demo
 | `postgres` | PostgreSQL 18, triple-role init (`00-init-roles.sh`) | `unless-stopped` + healthcheck |
 | `migrate` | Builds `mycaffe-api:demo`, runs `migrate up` then the idempotent development seed | runs once per `up` |
 | `api` | MyCaffe API, `APP_ENV=staging`, Midtrans sandbox | `unless-stopped` + healthcheck |
-| `nginx` | Reverse proxy (`deploy/nginx/nginx.conf`), bound to `127.0.0.1:8088` only | `unless-stopped` + healthcheck |
+| `nginx` | Reverse proxy (`deploy/nginx/nginx.demo.conf`): `/api`, `/ws`, `/health` → API, everything else → Next.js on the host (`host.docker.internal:3000`); bound to `127.0.0.1:8088` only | `unless-stopped` + healthcheck |
 | `tunnel` | `cloudflared` Quick Tunnel → `http://nginx:80` | `unless-stopped` + healthcheck |
 
 ## Start
@@ -45,7 +45,8 @@ container restarts**. For a stable hostname, create a Named Tunnel in the Cloudf
 |-------|---------------|
 | `GET /health/live`, `/health/ready` | `200` |
 | `POST /api/v1/payments/midtrans/webhook` | Live: rejects unsigned/invalid payloads; signed sandbox notifications are processed |
-| `POST /api/v1/orders`, `POST /api/v1/orders/:id/payments/initiate`, `GET /ws` | `503` (by design, until staff/guest auth) |
+| `POST /api/v1/auth/staff/login`, `/refresh`, `/logout`, `GET /api/v1/auth/staff/me` | Live (Phase 02.01-B). Dev PIN `482913` for seeded staff; strict limit on `/login` only |
+| `POST /api/v1/orders`, `POST /api/v1/orders/:id/payments/initiate`, `GET /ws` | `503` (by design, until 02.01-C binds routes to the authenticated staff/guest identity) |
 
 To exercise the full order/payment flow locally, use the development stack
 (`deploy/docker/docker-compose.yml`, `APP_ENV=development`) which is **not** exposed publicly.
@@ -54,8 +55,10 @@ To exercise the full order/payment flow locally, use the development stack
 
 The edge network has a fixed subnet (`DEMO_EDGE_SUBNET`, default `172.29.10.0/24`) and the API
 trusts only that subnet (`TRUSTED_PROXIES`), so logs show the real visitor IP forwarded by
-`cloudflared` instead of a container address. Nginx `limit_req` still keys on the `cloudflared`
-container address, so its per-IP limits act as one shared limit for all tunnel traffic.
+`cloudflared` instead of a container address. Nginx restores the same visitor IP with
+`set_real_ip_from 172.29.10.0/24` (`nginx.demo.conf`), so `limit_req` is per visitor, not one
+shared bucket for all tunnel traffic. Keep both in sync if you change `DEMO_EDGE_SUBNET`.
+Full networking notes: [windows-dev-environment.md](windows-dev-environment.md).
 
 ## Midtrans sandbox webhook
 

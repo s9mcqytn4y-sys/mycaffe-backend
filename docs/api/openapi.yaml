@@ -23,6 +23,8 @@ tags:
     description: Transactional order creation, stock reservation lifecycle, and real-time order tracking
   - name: Payments
     description: Payment initiation (QRIS, VA, E-Wallet, Cash, Static QRIS, EDC) and Midtrans webhook reconciliation
+  - name: Auth
+    description: "Staff authentication and session lifecycle (ADR-003). Implemented in Phase 02.01-B (login, refresh, logout, me)."
   - name: KDS
     description: Kitchen Display System and Barista preparation queue transitions
 
@@ -234,18 +236,187 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+
+  /api/v1/auth/staff/login:
+    post:
+      tags: [Auth]
+      operationId: staffLogin
+      summary: Staff login with store slug, email, and PIN
+      x-implementation-status: implemented
+      x-adr: ADR-003 D1-D5
+      description: |
+        Verifies `store_slug + email + PIN`. Every failure (unknown store, unknown email, inactive or locked
+        account, wrong PIN) returns the same generic `401 INVALID_CREDENTIALS`. On success returns a 15-minute
+        access token in the body and sets the rotating refresh token as an HttpOnly cookie.
+        Responses carry `Cache-Control: no-store`.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StaffLoginRequest"
+      responses:
+        "200":
+          description: Authenticated
+          headers:
+            Set-Cookie:
+              description: "`__Secure-mc_staff_rt=<opaque>; HttpOnly; Secure; SameSite=Strict; Path=/api/v1/auth/staff`"
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+                example: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StaffSessionResponse"
+        "400":
+          description: Malformed request body (missing field, non-numeric PIN, PIN length outside 6-12)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Generic authentication failure (`code=INVALID_CREDENTIALS`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: Rate limited by IP or hashing concurrency cap (`code=RATE_LIMITED`)
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/auth/staff/refresh:
+    post:
+      tags: [Auth]
+      operationId: staffRefresh
+      summary: Rotate refresh token and issue a new access token
+      x-implementation-status: implemented
+      x-adr: ADR-003 D4
+      description: |
+        Consumes the refresh cookie, rotates it, and returns a new access token. Presenting an already-rotated
+        refresh token revokes the whole session (reuse detection). The session never outlives its 12-hour
+        absolute lifetime.
+      security:
+        - StaffRefreshCookie: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfProtectionHeader"
+      responses:
+        "200":
+          description: Rotated
+          headers:
+            Set-Cookie:
+              description: Replacement refresh cookie
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StaffSessionResponse"
+        "401":
+          description: Missing, expired, revoked, or reused refresh token (`code=SESSION_INVALID`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: The previous refresh generation arrived within 30 s of a rotation (concurrent tabs). Session kept; retry with the current cookie (`code=REFRESH_RACE`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Missing `X-CSRF-Protection` header (`code=CSRF_HEADER_REQUIRED`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/auth/staff/logout:
+    post:
+      tags: [Auth]
+      operationId: staffLogout
+      summary: Revoke the current staff session
+      x-implementation-status: implemented
+      x-adr: ADR-003 D4
+      description: Revokes the session bound to the refresh cookie and clears the cookie. Idempotent.
+      security:
+        - StaffRefreshCookie: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfProtectionHeader"
+      responses:
+        "204":
+          description: Session revoked (or already revoked); cookie cleared
+        "403":
+          description: Missing `X-CSRF-Protection` header (`code=CSRF_HEADER_REQUIRED`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/auth/staff/me:
+    get:
+      tags: [Auth]
+      operationId: staffMe
+      summary: Current staff profile and effective permissions
+      x-implementation-status: implemented
+      x-adr: ADR-003 D4, D7
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: Current staff identity derived from the verified session (database role is authoritative)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StaffMeResponse"
+        "401":
+          description: Invalid/expired token, revoked session, inactive or locked user (`code=SESSION_INVALID`), or role changed since issuance (`code=SESSION_STALE`, refresh to pick up the new role)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
 components:
   securitySchemes:
     BearerStaffJWT:
       type: http
       scheme: bearer
       bearerFormat: JWT
-      description: Stateless HMAC-SHA256 staff token containing `store_id`, `user_id`, and `role` (`owner`, `cashier`, `barista`, `kitchen`).
+      description: |
+        Staff access token (HS256 JWT, 15-minute TTL per ADR-003 D4). Claims: `iss=mycaffe-backend`, `aud=mycaffe-pos`,
+        `typ=staff_access`, `sub` (user id), `store_id`, `role` (`owner`, `cashier`, `barista`, `kitchen`), `sid` (session id),
+        `jti`, `iat`, `exp`; header `kid`. Not stateless: every request is revalidated against the server-side session and
+        current user role. Never sent in a query string.
+    StaffRefreshCookie:
+      type: apiKey
+      in: cookie
+      name: __Secure-mc_staff_rt
+      description: Opaque rotating refresh token (HttpOnly, Secure, SameSite=Strict, Path=/api/v1/auth/staff). Planned, ADR-003 D4.
     TableQRToken:
       type: apiKey
       in: header
       name: X-Table-QR-Token
       description: Signed HMAC token binding a public dine-in/takeaway session to a specific `store_id` and `table_number`.
+
+  parameters:
+    CsrfProtectionHeader:
+      name: X-CSRF-Protection
+      in: header
+      required: true
+      description: Must be `1`. Forces a CORS preflight so cross-site forms cannot use the refresh cookie.
+      schema:
+        type: string
+        enum: ["1"]
 
   schemas:
     HealthStatusResponse:
@@ -273,6 +444,91 @@ components:
           type: string
           format: uuid
           example: 8f9d2a1c-4b3e-4d5a-9c1b-2e3f4a5b6c7d
+
+    StaffRole:
+      type: string
+      enum: [owner, cashier, barista, kitchen]
+
+    StaffLoginRequest:
+      type: object
+      additionalProperties: false
+      required: [store_slug, email, pin]
+      properties:
+        store_slug:
+          type: string
+          minLength: 1
+          maxLength: 100
+          example: kopi-senja
+        email:
+          type: string
+          format: email
+          maxLength: 255
+          description: Normalized server-side to lower(trim(email)).
+          example: kasir1@kopisenja.id
+        pin:
+          type: string
+          pattern: "^[0-9]{6,12}$"
+          writeOnly: true
+          description: 6-12 digit numeric PIN. Never logged.
+
+    StaffProfile:
+      type: object
+      required: [id, full_name, role, store]
+      properties:
+        id:
+          type: string
+          format: uuid
+        full_name:
+          type: string
+        role:
+          $ref: "#/components/schemas/StaffRole"
+        store:
+          type: object
+          required: [id, slug, name]
+          properties:
+            id:
+              type: string
+              format: uuid
+            slug:
+              type: string
+            name:
+              type: string
+
+    StaffSessionResponse:
+      type: object
+      required: [access_token, token_type, access_token_expires_at, session_expires_at, staff]
+      properties:
+        access_token:
+          type: string
+          description: Keep in memory only; never persist to localStorage.
+        token_type:
+          type: string
+          enum: [Bearer]
+        access_token_expires_at:
+          type: string
+          format: date-time
+        session_expires_at:
+          type: string
+          format: date-time
+          description: Absolute session end (login time + 12 h); refresh cannot extend it.
+        staff:
+          $ref: "#/components/schemas/StaffProfile"
+
+    StaffMeResponse:
+      type: object
+      required: [staff, permissions, session_expires_at]
+      properties:
+        staff:
+          $ref: "#/components/schemas/StaffProfile"
+        permissions:
+          type: array
+          description: Effective permission constants from the backend RBAC policy (ADR-003 D7). UI hints only; the backend re-checks every request. Returned as an empty array until the RBAC policy ships in 02.01-C.
+          items:
+            type: string
+          example: [order.pos.create, payment.tender.direct, shift.open]
+        session_expires_at:
+          type: string
+          format: date-time
 
     OrderType:
       type: string

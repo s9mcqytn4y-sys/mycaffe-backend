@@ -177,6 +177,7 @@ jobs:
           go run ./cmd/migrate -action=down
           go run ./cmd/migrate -action=down
           go run ./cmd/migrate -action=down
+          go run ./cmd/migrate -action=down
 
       - name: Re-apply Migration & Verify Idempotent Up
         env:
@@ -219,10 +220,12 @@ jobs:
           fi
           echo "Idempotent Seed verified successfully; all row counts remained stable after the second execution."
 
-      - name: Verify Direct TCP Login, RLS & Transactional OrderService/PaymentService Connected as mycaffe_app
+      - name: Verify Direct TCP Login, RLS & Transactional Order/Payment/Auth Services Connected as mycaffe_app
         env:
           TEST_APP_DATABASE_URL: postgres://mycaffe_app:mycaffe_app_password@localhost:5432/mycaffe_test?sslmode=disable
+          TEST_MIGRATOR_DATABASE_URL: postgres://mycaffe_migrator:mycaffe_migrator_password@localhost:5432/mycaffe_test?sslmode=disable
         run: |
           go test -v -race -run TestDirectAppRoleLoginAndTenantRLS ./internal/pkg/database/...
           go test -v -race -run TestOrderServiceIntegration_EndToEnd ./internal/service/...
           go test -v -race -run TestPaymentServiceIntegration_EndToEnd ./internal/service/...
+          go test -v -race -run 'TestAuthServiceIntegration_EndToEnd|TestStaffAdminIntegration' ./internal/service/...

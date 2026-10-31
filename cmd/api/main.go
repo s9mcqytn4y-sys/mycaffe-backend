@@ -84,7 +84,7 @@ func main() {
 		if cfg.IsOriginAllowed(origin) {
 			c.Writer.Header().Set("Access-Control-Allow-Origin", origin)
 			c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
-			c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, Accept, Origin, Cache-Control, X-Requested-With")
+			c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Protection, Authorization, Accept, Origin, Cache-Control, X-Requested-With")
 			c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, DELETE, PATCH")
 		}
 
@@ -115,7 +115,18 @@ func main() {
 	healthHandler := handler.NewHealthHandler("MyCaffe POS Backend", cfg.AppEnv, db)
 	midtransHandler := handler.NewMidtransHandler(midtransClient, hub)
 	orderHandler := handler.NewOrderHandler(cfg, midtransClient, hub)
+	var authHandler *handler.AuthHandler
 	if db != nil {
+		authService := service.NewAuthService(db, postgres.NewAuthRepository(), cfg.JWTSecret, service.AuthPolicy{
+			AccessTokenTTL:     cfg.StaffAccessTokenTTL,
+			RefreshTokenTTL:    cfg.StaffRefreshTokenTTL,
+			SessionIdleTimeout: cfg.StaffSessionIdleTimeout,
+			MaxSessions:        cfg.StaffMaxSessions,
+			PINMaxFailures:     cfg.StaffPINMaxFailures,
+			PINLockout:         cfg.StaffPINLockout,
+		})
+		authHandler = handler.NewAuthHandler(authService)
+
 		orderRepo := postgres.NewOrderRepository()
 		orderService := service.NewOrderService(db, orderRepo)
 		orderHandler.SetOrderService(orderService)
@@ -135,6 +146,13 @@ func main() {
 		v1.POST("/orders", orderHandler.CreateOrder)
 		v1.POST("/orders/:id/payments/initiate", orderHandler.InitiateOrderPayment)
 		v1.POST("/payments/midtrans/webhook", midtransHandler.HandleWebhook)
+		if authHandler != nil {
+			staffAuth := v1.Group("/auth/staff")
+			staffAuth.POST("/login", authHandler.Login)
+			staffAuth.POST("/refresh", authHandler.Refresh)
+			staffAuth.POST("/logout", authHandler.Logout)
+			staffAuth.GET("/me", authHandler.Me)
+		}
 	}
 
 	// Health check endpoints for Docker / LB probes

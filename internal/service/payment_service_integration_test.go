@@ -724,4 +724,62 @@ func TestPaymentServiceIntegration_EndToEnd(t *testing.T) {
 				reconciledOrder.PaymentStatus, reconciledOrder.Status)
 		}
 	})
+
+	t.Run("6_DuplicateSettlement_QRISPaidAfterCash_FlagsRefundRequired", func(t *testing.T) {
+		ord := createStandardOrder(t, "dup-settle")
+		qris, err := paymentSvc.InitiatePayment(ctx, storeAID, service.InitiatePaymentInput{
+			OrderID:        ord.Order.ID,
+			IdempotencyKey: "idem-dup-qris-" + uuid.NewString()[:8],
+			Method:         domain.PaymentMethodQRIS,
+		})
+		if err != nil {
+			t.Fatalf("InitiatePayment (qris) failed: %v", err)
+		}
+		// Customer walks to the cashier and pays cash while the QRIS charge is still open at Midtrans.
+		if _, err := paymentSvc.InitiatePayment(ctx, storeAID, service.InitiatePaymentInput{
+			OrderID:            ord.Order.ID,
+			IdempotencyKey:     "idem-dup-cash-" + uuid.NewString()[:8],
+			Method:             domain.PaymentMethodCash,
+			CashTenderedAmount: 50000,
+			ActorUserID:        &cashierID,
+		}); err != nil {
+			t.Fatalf("InitiatePayment (cash) failed: %v", err)
+		}
+
+		// The customer also completes the QRIS payment: Midtrans sends a signed settlement.
+		res, err := paymentSvc.ProcessMidtransWebhook(ctx, service.MidtransWebhookInput{
+			OrderID:           qris.Payment.ProviderOrderID,
+			TransactionID:     qris.Payment.TransactionID,
+			StatusCode:        "200",
+			TransactionStatus: "settlement",
+			GrossAmount:       fmt.Sprintf("%d.00", qris.Payment.Amount),
+			FraudStatus:       "accept",
+			PaymentType:       "qris",
+			Currency:          "IDR",
+		}, `{"transaction_status":"settlement","status_code":"200"}`)
+		if err != nil {
+			t.Fatalf("ProcessMidtransWebhook failed: %v", err)
+		}
+		if !res.Anomaly {
+			t.Fatalf("expected duplicate settlement to be flagged as anomaly, got %+v", res)
+		}
+
+		var refundEvents int
+		var paidAmount int64
+		if err := database.WithTenantTx(ctx, db, storeAID, func(tx *sqlx.Tx) error {
+			if err := tx.GetContext(ctx, &refundEvents, `SELECT COUNT(*) FROM outbox_events WHERE store_id = $1 AND aggregate_id = $2 AND event_type = 'payment.refund_required'`,
+				storeAID, ord.Order.ID.String()); err != nil {
+				return err
+			}
+			return tx.GetContext(ctx, &paidAmount, `SELECT paid_amount FROM orders WHERE store_id = $1 AND id = $2`, storeAID, ord.Order.ID)
+		}); err != nil {
+			t.Fatalf("failed to read duplicate settlement state: %v", err)
+		}
+		if refundEvents != 1 {
+			t.Fatalf("expected exactly 1 payment.refund_required outbox event, got %d", refundEvents)
+		}
+		if paidAmount != ord.Order.TotalAmount {
+			t.Fatalf("order paid_amount must stay %d after duplicate settlement, got %d", ord.Order.TotalAmount, paidAmount)
+		}
+	})
 }

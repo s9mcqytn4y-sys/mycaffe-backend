@@ -273,6 +273,7 @@ func (s *PaymentService) ProcessMidtransWebhook(
 			return nil
 		}
 
+		priorStatus := payment.Status
 		if err := s.paymentRepo.UpdatePaymentStatus(
 			ctx, tx, payment, mappedStatus, input.TransactionStatus,
 			input.FraudStatus, input.TransactionID, input.PaymentType,
@@ -287,6 +288,18 @@ func (s *PaymentService) ProcessMidtransWebhook(
 			split, err := s.paymentRepo.GetPaymentSplitForUpdate(ctx, tx, resolved.StoreID, *payment.SplitID)
 			if err != nil {
 				return err
+			}
+			duplicate, err := s.flagDuplicateSettlementTx(ctx, tx, order, priorStatus)
+			if err != nil {
+				return err
+			}
+			if duplicate {
+				message := "duplicate settlement: order already paid by another attempt; refund required"
+				if _, err := tx.ExecContext(ctx, "UPDATE payment_notification_logs SET error_message = $3 WHERE store_id = $1 AND id = $2", resolved.StoreID, logEntry.ID, message); err != nil {
+					return err
+				}
+				result.Anomaly = true
+				return nil
 			}
 			if split.OrderID != order.ID || split.TotalAmount != payment.Amount {
 				message := "payment amount does not match the full payment split; manual reconciliation required"
@@ -321,6 +334,18 @@ func (s *PaymentService) ProcessMidtransWebhook(
 		return nil, err
 	}
 	return result, nil
+}
+
+// flagDuplicateSettlementTx reports whether the order was already paid by another attempt
+// (e.g. cash taken while a QRIS charge stayed open) and, if so, emits payment.refund_required.
+// priorStatus is the attempt status before it became paid; paid->paid (capture->settlement) is not a duplicate.
+func (s *PaymentService) flagDuplicateSettlementTx(ctx context.Context, tx *sqlx.Tx, order *domain.Order, priorStatus domain.PaymentAttemptStatus) (bool, error) {
+	if order.PaymentStatus != domain.OrderPaymentStatusPaid || priorStatus == domain.PaymentStatusPaid {
+		return false, nil
+	}
+	return true, s.insertPaymentOutboxTx(ctx, tx, order, "payment.refund_required", map[string]any{
+		"reason": "duplicate settlement: order already paid by another payment attempt",
+	})
 }
 
 func (s *PaymentService) commitPaidOrderTx(ctx context.Context, tx *sqlx.Tx, order *domain.Order) error {
@@ -997,6 +1022,7 @@ func (s *PaymentService) initiateMidtransGatewayPayment(
 			}
 			mapped, mapErr := midtrans.MapMidtransStatus(statusResp.TransactionStatus, statusResp.FraudStatus)
 			if mapErr == nil && domain.CanTransitionPaymentStatus(payment.Status, mapped) {
+				priorStatus := payment.Status
 				if err := s.paymentRepo.UpdatePaymentStatus(
 					ctx, tx, payment, mapped, statusResp.TransactionStatus,
 					statusResp.FraudStatus, statusResp.TransactionID, statusResp.PaymentType,
@@ -1004,6 +1030,9 @@ func (s *PaymentService) initiateMidtransGatewayPayment(
 					return err
 				}
 				if mapped == domain.PaymentStatusPaid && statusResp.StatusCode == "200" {
+					if duplicate, err := s.flagDuplicateSettlementTx(ctx, tx, order, priorStatus); err != nil || duplicate {
+						return err
+					}
 					if split.Status != domain.SplitBillStatusPaid {
 						if _, err := tx.ExecContext(ctx, `UPDATE payment_splits SET status = 'paid', paid_amount = total_amount WHERE store_id = $1 AND id = $2`, trustedStoreID, split.ID); err != nil {
 							return err
@@ -1186,6 +1215,7 @@ func (s *PaymentService) ReconcileStalePendingPayments(
 			if err := s.paymentRepo.UpdatePaymentGatewayDetails(ctx, tx, payment); err != nil {
 				return err
 			}
+			priorStatus := payment.Status
 			if err := s.paymentRepo.UpdatePaymentStatus(
 				ctx, tx, payment, mappedStatus, statusResp.TransactionStatus,
 				statusResp.FraudStatus, statusResp.TransactionID, statusResp.PaymentType,
@@ -1193,6 +1223,9 @@ func (s *PaymentService) ReconcileStalePendingPayments(
 				return err
 			}
 			if mappedStatus == domain.PaymentStatusPaid {
+				if duplicate, err := s.flagDuplicateSettlementTx(ctx, tx, order, priorStatus); err != nil || duplicate {
+					return err
+				}
 				if payment.SplitID != nil && *payment.SplitID != uuid.Nil {
 					split, err := s.paymentRepo.GetPaymentSplitForUpdate(ctx, tx, trustedStoreID, *payment.SplitID)
 					if err != nil {

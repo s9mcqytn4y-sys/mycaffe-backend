@@ -95,9 +95,13 @@ func main() {
 		c.Next()
 	})
 
+	// Background worker lifecycle context (stopped cleanly on SIGINT/SIGTERM)
+	workerCtx, workerCancel := context.WithCancel(context.Background())
+	defer workerCancel()
+
 	// Initialize Realtime Hub with allowed origins
 	hub := realtime.NewHub(cfg.AllowedOrigins)
-	go hub.Run()
+	go hub.RunWithContext(workerCtx)
 
 	// Initialize Midtrans Core API Client
 	midtransClient := midtrans.NewClient(cfg)
@@ -110,6 +114,13 @@ func main() {
 		orderRepo := postgres.NewOrderRepository()
 		orderService := service.NewOrderService(db, orderRepo)
 		orderHandler.SetOrderService(orderService)
+
+		paymentRepo := postgres.NewPaymentRepository()
+		paymentService := service.NewPaymentService(db, paymentRepo, orderRepo, midtransClient)
+		orderHandler.SetPaymentService(paymentService)
+		midtransHandler.SetPaymentService(paymentService)
+
+		go paymentService.StartReconciliationWorker(workerCtx, 30*time.Second, 2*time.Minute, 50)
 	}
 
 	// Register Routes
@@ -117,6 +128,7 @@ func main() {
 	{
 		v1.GET("/health", healthHandler.Check)
 		v1.POST("/orders", orderHandler.CreateOrder)
+		v1.POST("/orders/:id/payments/initiate", orderHandler.InitiateOrderPayment)
 		v1.POST("/payments/midtrans/webhook", midtransHandler.HandleWebhook)
 	}
 
@@ -157,6 +169,8 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 	log.Println("[SERVER] Shutting down server gracefully...")
+	workerCancel()
+	hub.Shutdown()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

@@ -114,3 +114,15 @@ type OutboxEvent struct {
 	RetryCount    int        `json:"retry_count" db:"retry_count"`
 	LastError     *string    `json:"last_error,omitempty" db:"last_error"`
 }
+
+type AuditLog struct {
+	ID          uuid.UUID  `json:"id" db:"id"`
+	StoreID     uuid.UUID  `json:"store_id" db:"store_id"`
+	ActorID     *uuid.UUID `json:"actor_id,omitempty" db:"actor_id"`
+	ActorName   string     `json:"actor_name" db:"actor_name"`
+	Action      string     `json:"action" db:"action"`
+	Reason      string     `json:"reason" db:"reason"`
+	ReferenceID string     `json:"reference_id,omitempty" db:"reference_id"`
+	Metadata    string     `json:"metadata" db:"metadata"`
+	CreatedAt   time.Time  `json:"created_at" db:"created_at"`
+}

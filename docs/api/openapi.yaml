@@ -140,7 +140,8 @@ paths:
       tags: [Payments]
       operationId: initiatePayment
       summary: Initiate a payment attempt for a payment split (Dynamic QRIS, GoPay, ShopeePay, VA, Cash, Static QRIS, EDC)
-      description: Status in Roadmap - Planned (Phase 01 Sub-task 04 PaymentService).
+      description: |
+        Status in Roadmap - Implemented & Tested in `PaymentService.InitiatePayment` (Phase 01 Sub-task 04); Guarded / Fail-Closed (`503`) at HTTP layer in `staging`/`production` until Phase 02 auth middleware is wired.
       security:
         - BearerStaffJWT: []
         - TableQRToken: []
@@ -158,14 +159,20 @@ paths:
             schema:
               $ref: "#/components/schemas/InitiatePaymentRequest"
       responses:
-        "201":
+        "200":
           description: Payment attempt recorded and gateway charge initiated (or cashier tender settled)
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/InitiatePaymentResponse"
         "409":
-          description: Split already paid, order expired, or active pending payment with different method
+          description: Split already paid, order expired, or conflicting idempotency_key payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Fail-closed in staging/production while trusted tenant identity middleware is not yet bound
           content:
             application/json:
               schema:
@@ -177,8 +184,8 @@ paths:
       operationId: handleMidtransWebhook
       summary: Midtrans HTTP Notification Webhook
       description: |
-        Verifies `SHA512(order_id + status_code + gross_amount + server_key)`, validates `IDR` currency and whole-integer `gross_amount`, and maps `transaction_status` + `fraud_status`.
-        Currently **Guarded / Fail-Closed** (`503 Service Unavailable` with `Retry-After: 60`) until `PaymentService.ProcessMidtransWebhook` is wired in Phase 01 Sub-task 04.
+        Status in Roadmap - Implemented & Tested (Phase 01 Sub-task 04).
+        Verifies `SHA512(order_id + status_code + gross_amount + server_key)`, validates `IDR` currency and whole-integer `gross_amount`, resolves tenant context via `resolve_payment_webhook_context`, and durably commits the notification inbox, payment status, split, order state, stock reservation, and outbox event in one tenant-scoped PostgreSQL 18 transaction.
       requestBody:
         required: true
         content:
@@ -187,7 +194,7 @@ paths:
               $ref: "#/components/schemas/MidtransWebhookPayload"
       responses:
         "200":
-          description: Webhook verified and durably committed to payment_events, payments, payment_splits, orders, and outbox_events
+          description: Webhook verified and durably committed to payment_notification_logs, payments, payment_splits, orders, and outbox_events
           content:
             application/json:
               schema:

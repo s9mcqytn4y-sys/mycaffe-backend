@@ -293,10 +293,13 @@ func extractTableColumnsAcrossMigrations(t *testing.T, sqlText, tableName string
 		}
 	}
 
-	alterPattern := `(?is)ALTER\s+TABLE\s+` + regexp.QuoteMeta(tableName) + `\s+ADD\s+COLUMN(?:\s+IF\s+NOT\s+EXISTS)?\s+([a-z_][a-z0-9_]*)\b`
-	alterRe := regexp.MustCompile(alterPattern)
-	for _, match := range alterRe.FindAllStringSubmatch(sqlText, -1) {
-		cols[match[1]] = true
+	alterStatementPattern := `(?is)ALTER\s+TABLE\s+` + regexp.QuoteMeta(tableName) + `\s+([^;]+);`
+	alterStatementRe := regexp.MustCompile(alterStatementPattern)
+	columnRe := regexp.MustCompile(`(?is)ADD\s+COLUMN(?:\s+IF\s+NOT\s+EXISTS)?\s+([a-z_][a-z0-9_]*)\b`)
+	for _, statement := range alterStatementRe.FindAllStringSubmatch(sqlText, -1) {
+		for _, match := range columnRe.FindAllStringSubmatch(statement[1], -1) {
+			cols[match[1]] = true
+		}
 	}
 
 	return cols
@@ -318,7 +321,6 @@ func extractCheckInValues(t *testing.T, sqlText, constraintName string) []string
 	}
 	return vals
 }
-
 
 func TestStockReservationMigrationUsesSafeLegacyDefault(t *testing.T) {
 	migrationPath := filepath.Join("..", "..", "db", "migrations", "20261030000003_add_orders_stock_reservation.up.sql")

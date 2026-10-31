@@ -92,13 +92,14 @@ BEGIN
     INSERT INTO payment_splits (store_id, order_id, split_number, label, split_mode, subtotal_amount, total_amount, status)
     VALUES (v_store_a, v_order_a, 1, 'Split 1', 'full', 33000, 33000, 'pending') RETURNING id INTO v_split_a;
 
-    INSERT INTO payments (store_id, order_id, split_id, attempt_no, idempotency_key, provider_order_id, amount, method, status, transaction_id)
-    VALUES (v_store_a, v_order_a, v_split_a, 1, 'idem-test-001', 'ORD-TEST-001-S1-A1', 33000, 'qris', 'pending', 'tx-unique-001') RETURNING id INTO v_payment_a;
+    v_payment_a := uuid_generate_v4();
+    INSERT INTO payments (id, store_id, order_id, split_id, attempt_no, idempotency_key, provider_order_id, amount, method, status, transaction_id)
+    VALUES (v_payment_a, v_store_a, v_order_a, v_split_a, 1, 'idem-test-001', v_payment_a::text, 33000, 'qris', 'pending', 'tx-unique-001');
 
     -- 5B. Verify Payment Attempt Idempotency Constraint (uq_payments_store_idempotency_key)
     BEGIN
         INSERT INTO payments (store_id, order_id, split_id, attempt_no, idempotency_key, provider_order_id, amount, method, status)
-        VALUES (v_store_a, v_order_a, v_split_a, 2, 'idem-test-001', 'ORD-TEST-001-S1-A2', 33000, 'qris', 'pending');
+        VALUES (v_store_a, v_order_a, v_split_a, 2, 'idem-test-001', uuid_generate_v4()::text, 33000, 'qris', 'pending');
         RAISE EXCEPTION 'Duplicate payment idempotency_key was permitted!';
     EXCEPTION WHEN unique_violation THEN
         RAISE NOTICE 'SUCCESS: Duplicate payment idempotency_key rejected by uq_payments_store_idempotency_key.';
@@ -158,22 +159,28 @@ BEGIN
     END IF;
     RAISE NOTICE 'SUCCESS: Product deletion set product_id to NULL while preserving historical order_item.';
 
-    -- 9. Test Webhook Idempotency (Unique constraint on provider, order_number, transaction_status, status_code, transaction_id)
+    -- 9. Test webhook idempotency using the durable (store_id, event_hash) inbox key.
     INSERT INTO payment_notification_logs (
-        store_id, order_id, provider, transaction_id, order_number, status_code, transaction_status, gross_amount, raw_payload
+        store_id, order_id, provider, provider_order_id, event_hash, transaction_id,
+        order_number, status_code, transaction_status, gross_amount, raw_payload
     ) VALUES (
-        v_store_a, v_order_a, 'midtrans', 'trx-test-12345', 'ORD-TEST-001-S1-A1', '200', 'settlement', 33000, '{"status": "settlement"}'::jsonb
+        v_store_a, v_order_a, 'midtrans', v_payment_a::text, repeat('a', 64),
+        'trx-test-12345', 'ORD-TEST-001-S1-A1', '200', 'settlement', 33000,
+        '{"status": "settlement"}'::jsonb
     );
 
     BEGIN
         INSERT INTO payment_notification_logs (
-            store_id, order_id, provider, transaction_id, order_number, status_code, transaction_status, gross_amount, raw_payload
+            store_id, order_id, provider, provider_order_id, event_hash, transaction_id,
+            order_number, status_code, transaction_status, gross_amount, raw_payload
         ) VALUES (
-            v_store_a, v_order_a, 'midtrans', 'trx-test-12345', 'ORD-TEST-001-S1-A1', '200', 'settlement', 33000, '{"status": "settlement"}'::jsonb
+            v_store_a, v_order_a, 'midtrans', v_payment_a::text, repeat('a', 64),
+            'trx-test-12345', 'ORD-TEST-001-S1-A1', '200', 'settlement', 33000,
+            '{"status": "settlement"}'::jsonb
         );
         RAISE EXCEPTION 'Duplicate webhook insert was permitted!';
     EXCEPTION WHEN unique_violation THEN
-        RAISE NOTICE 'SUCCESS: Duplicate webhook notification was safely rejected by unique constraint.';
+        RAISE NOTICE 'SUCCESS: Duplicate webhook event rejected by uq_payment_notification_logs_event_hash.';
     END;
 END $$;
 
@@ -183,6 +190,7 @@ DECLARE
     v_store_a UUID;
     v_store_b UUID;
     v_resolved_store UUID;
+    v_provider_order_id VARCHAR(100);
     v_visible_stores INT;
     v_visible_orders INT;
     v_visible_notifs INT;
@@ -194,11 +202,17 @@ BEGIN
     SELECT id INTO v_store_a FROM stores WHERE slug = 'demo-store-a';
     SELECT id INTO v_store_b FROM stores WHERE slug = 'demo-store-b';
 
+    -- Resolve the provider ID before switching to the app role; RLS intentionally hides
+    -- payment rows until a tenant context is set.
+    SELECT provider_order_id INTO v_provider_order_id
+    FROM payments
+    WHERE store_id = v_store_a AND idempotency_key = 'idem-test-001';
+
     -- Switch to runtime application role (NOBYPASSRLS)
     EXECUTE 'SET LOCAL ROLE mycaffe_app';
 
     -- 10A. Verify controlled SECURITY DEFINER webhook context resolver works before setting tenant context
-    SELECT store_id INTO v_resolved_store FROM resolve_payment_webhook_context('ORD-TEST-001-S1-A1');
+    SELECT store_id INTO v_resolved_store FROM resolve_payment_webhook_context(v_provider_order_id);
     IF v_resolved_store IS DISTINCT FROM v_store_a THEN
         RAISE EXCEPTION 'resolve_payment_webhook_context failed: expected %, got %', v_store_a, v_resolved_store;
     END IF;

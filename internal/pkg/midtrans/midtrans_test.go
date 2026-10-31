@@ -78,7 +78,10 @@ func TestMapMidtransStatus(t *testing.T) {
 		wantErr           bool
 	}{
 		{"authorize is authorized", "authorize", "accept", domain.PaymentStatusAuthorized, false},
-		{"settlement is paid", "settlement", "", domain.PaymentStatusPaid, false},
+		{"settlement is paid without fraud status", "settlement", "", domain.PaymentStatusPaid, false},
+		{"settlement accept is paid", "settlement", "accept", domain.PaymentStatusPaid, false},
+		{"settlement deny is failed", "settlement", "deny", domain.PaymentStatusFailed, false},
+		{"settlement challenge is rejected", "settlement", "challenge", "", true},
 		{"capture accept is paid", "capture", "accept", domain.PaymentStatusPaid, false},
 		{"capture challenge is pending", "capture", "challenge", domain.PaymentStatusPending, false},
 		{"capture deny is failed", "capture", "deny", domain.PaymentStatusFailed, false},

@@ -78,7 +78,7 @@ Three layers, outermost first:
 | Refresh token | opaque, 256-bit `crypto/rand`, base64url; **absolute session lifetime 12 h** (one shift), rotated on every refresh |
 | Server state | `auth_sessions` row per login; only **SHA-256** of refresh tokens is stored |
 | Reuse detection | presenting an already-rotated refresh token revokes the whole session (`revoked_reason = 'refresh_reuse'`) and writes `STAFF_SESSION_REVOKED` |
-| Multi-device | allowed; **default cap 5 active sessions per user** (oldest revoked on overflow) — *see open decision O3* |
+| Multi-device | allowed; **max 3 active sessions per user** (oldest revoked on overflow), **idle timeout 2 h** — *owner decision O3* |
 | Logout | revokes the current session; access token dies within ≤15 min and is rejected sooner by D4 revalidation |
 | Forced revocation | deactivation, PIN reset, role change → revoke **all** sessions of that user in the same transaction |
 
@@ -97,9 +97,9 @@ Three layers, outermost first:
 
 **Per-request revalidation:** authentication middleware, inside `WithTenantTx(store_id)`, loads `auth_sessions` + `users` by `(store_id, sid, sub)` and rejects if the session is revoked/expired, the user is inactive or locked, or `users.role` differs from the `role` claim. The **database role is authoritative**; a stale claim yields `401 SESSION_STALE` and the client refreshes. Cost: one indexed lookup per request — acceptable at 100–500 orders/day/store (ADR-002).
 
-**Refresh-token transport:** HttpOnly cookie `__Secure-mc_staff_rt`, `Secure`, `SameSite=Strict`, `Path=/api/v1/auth/staff`. Refresh and logout additionally require header `X-CSRF-Protection: 1` (forces a CORS preflight, blocking cross-site form posts). Access tokens are kept in client memory only, never `localStorage`. *Depends on the frontend and API sharing a registrable domain — see open decision O2.*
+**Refresh-token transport:** HttpOnly cookie `__Secure-mc_staff_rt`, `Secure`, `SameSite=Strict`, `Path=/api/v1/auth/staff`. Refresh and logout additionally require header `X-CSRF-Protection: 1` (forces a CORS preflight, blocking cross-site form posts). Access tokens are kept in client memory only, never `localStorage`. *Frontend and API share one registrable domain — owner decision O2.*
 
-**Config changes:** `STAFF_ACCESS_TOKEN_TTL=15m`, `STAFF_REFRESH_TOKEN_TTL=12h`, `STAFF_MAX_SESSIONS_PER_USER=5`, `STAFF_PIN_MAX_FAILURES=5`, `STAFF_PIN_LOCKOUT=15m`, `STAFF_JWT_KEYS` (optional key ring). `JWT_EXPIRED_HOURS` is ignored once 02.01-B ships and is removed in a later release. Production validation fails closed if TTLs exceed 1 h (access) / 24 h (refresh).
+**Config changes:** `STAFF_ACCESS_TOKEN_TTL=15m`, `STAFF_REFRESH_TOKEN_TTL=12h`, `STAFF_MAX_SESSIONS_PER_USER=3`, `STAFF_SESSION_IDLE_TIMEOUT=2h`, `STAFF_PIN_MAX_FAILURES=5`, `STAFF_PIN_LOCKOUT=15m`, `STAFF_JWT_KEYS` (optional key ring). `JWT_EXPIRED_HOURS` is ignored once 02.01-B ships and is removed in a later release. Production validation fails closed if TTLs exceed 1 h (access) / 24 h (refresh).
 
 ### D5 — Pre-authentication tenant resolution
 - New function `resolve_store_for_login(p_slug VARCHAR) RETURNS TABLE (store_id UUID, is_active BOOLEAN)`, `SECURITY DEFINER`, `SET search_path = public, pg_temp`, owned by `mycaffe_migrator`, `EXECUTE` granted to `mycaffe_app` only, `REVOKE … FROM PUBLIC`.
@@ -107,12 +107,12 @@ Three layers, outermost first:
 - All user lookups then run as `mycaffe_app` inside `WithTenantTx(store_id)` under normal RLS. No other RLS bypass is introduced.
 - This follows the existing pattern of `resolve_payment_webhook_context` and `list_stores_with_pending_reconciliation` and must be added to the allow-list in AGENTS.md when implemented.
 
-### D6 — Sensitive-action PIN re-authentication *(proposed resolution — confirm, see O1)*
+### D6 — Sensitive-action PIN re-authentication *(owner decision O1, 2026-10-31)*
 The design review flagged a conflict between Module 3 ("cashier must not void/refund without the configured authorization flow") and the brand guide ("cashier can void/refund with mandatory reason"). `docs/architecture/decisions-before-code.md` §6 (already approved) resolves it: *"Sensitive cashier actions require a PIN and mandatory reason logged to append-only `audit_logs`."* Proposed contract:
 - Void/refund/stock override/price override/shift-close discrepancy require the **acting user to re-enter their own PIN** plus a non-empty reason in the same request.
 - No owner approval step, no second actor (preserves the "no multi-step approval" rule).
 - Re-auth PIN failures count toward the same D3 lockout counter.
-- Owner may later configure a per-store amount threshold above which owner PIN is required — out of scope for 02.01.
+- Void/refund above a per-store amount threshold (`void_refund_owner_threshold`, default Rp100.000) requires the **owner PIN** instead of the acting cashier PIN (owner decision O1). Discounts above `cashier_max_discount_bps` (default 10%) and every stock override also require the owner PIN (O4).
 
 ### D7 — RBAC: single permission policy, four fixed roles
 - Roles stay exactly `owner`, `cashier`, `barista`, `kitchen`. No new role, no per-store custom roles in Phase 02.
@@ -133,10 +133,10 @@ The design review flagged a conflict between Module 3 ("cashier must not void/re
 | `payment.initiate.gateway` (dynamic QRIS, e-wallet, VA) | ✓ | ✓ | | | |
 | `tab.manage`, `split_bill.manage` | ✓ | ✓ | | | |
 | `shift.open`, `shift.close` | ✓ | ✓ | | | close with discrepancy → D6 PIN + reason |
-| `order.void` | ✓ | ✓ (D6) | | | **O1** |
-| `payment.refund` | ✓ | ✓ (D6) | | | **O1** |
-| `order.discount.apply` | ✓ | | | | **O4** — fail-closed default |
-| `stock.override` | ✓ | | | | **O4** — fail-closed default |
+| `order.void` | ✓ | ✓ (D6; owner PIN above threshold) | | | O1 approved |
+| `payment.refund` | ✓ | ✓ (D6; owner PIN above threshold) | | | O1 approved |
+| `order.discount.apply` | ✓ | ✓ up to `cashier_max_discount_bps` (default 10%) + reason; above → owner PIN | | | O4 approved |
+| `stock.override` | ✓ | owner PIN required | | | O4 approved |
 | `kds.ticket.read.barista` / `.update.barista` | ✓ | read | ✓ | | |
 | `kds.ticket.read.kitchen` / `.update.kitchen` | ✓ | read | | ✓ | |
 | `item.availability.toggle.beverage` | ✓ | | ✓ | | |
@@ -205,15 +205,15 @@ Down migration drops the new objects and columns, restores the previous audit CH
 - Never log PIN, refresh token, access token, `Authorization` header, or `Set-Cookie`.
 - Failed-login log line: `request_id`, trusted client IP, `store_slug` (already public in QR URLs), a truncated SHA-256 of the normalized email (for correlation without storing the address), and the outcome category (`invalid_credentials`, `rate_limited`). The internal reason (unknown email vs wrong PIN vs locked) is logged server-side only, never returned.
 
-## 7. Open decisions (still require the owner)
+## 7. Owner decisions (resolved 2026-10-31)
 
-| # | Question | Default if not decided |
-|---|---|---|
-| O1 | Void/refund flow: confirm D6 (cashier own PIN + reason, no owner approval)? | D6 as written |
-| O2 | Production domains of the POS frontend and API — same registrable domain (cookie refresh works) or different (needs body-based refresh)? | Block 02.01-B refresh transport until answered |
-| O3 | Max concurrent sessions per staff (default 5); separate idle timeout (e.g. 2 h) in addition to the 12 h absolute limit? | 5 sessions, no idle timeout |
-| O4 | Cashier powers for discounts and stock override | owner-only |
-| O5–O8 | Printed QR lifecycle, guest session lifecycle, QR generator output (backend URL vs SVG/PNG), table lifecycle | Deferred to ADR-004 (02.01-D/E) |
+| # | Decision |
+|---|---|
+| O1 | D6 confirmed: cashier own PIN + reason; above `void_refund_owner_threshold` (default Rp100.000) owner PIN required |
+| O2 | POS frontend and API share one registrable domain; refresh via HttpOnly cookie |
+| O3 | Max 3 active sessions per staff, idle timeout 2 h, absolute 12 h |
+| O4 | Cashier discount up to `cashier_max_discount_bps` (default 10%) with reason; above that and every stock override need owner PIN |
+| O5–O8 | Printed QR: no time expiry, version rotation + per-store emergency pause. Guest: one session per device, 3 h. Recorded in `docs/architecture/decision-register.md`; detailed in ADR-004 (02.01-D/E) |
 
 ## 8. Rollback
 This ADR is documentation only. Each later increment is independently reversible: migration 000005 has a tested down migration; new routes are additive; the contained routes remain `503` in staging/production until 02.01-C passes, so reverting 02.01-B/C restores today's behaviour.

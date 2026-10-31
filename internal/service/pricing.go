@@ -402,6 +402,11 @@ func priceSingleOrderItem(
 	if err != nil {
 		return nil, err
 	}
+	if unitSnapshotPrice < 0 {
+		// Negative modifier deltas are allowed (owner decision P1) but never below a free item.
+		return nil, fmt.Errorf("%w: item %q would cost %d after modifiers; the unit price cannot be negative",
+			ErrInvalidModifierSelection, product.Name, unitSnapshotPrice)
+	}
 	lineSubtotal, err := safeMulInt64(unitSnapshotPrice, int64(reqItem.Quantity))
 	if err != nil {
 		return nil, err

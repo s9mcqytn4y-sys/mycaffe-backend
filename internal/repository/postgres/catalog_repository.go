@@ -63,10 +63,10 @@ func (r *CatalogRepository) LoadCatalog(ctx context.Context, tx *sqlx.Tx, storeI
 			FROM product_variants WHERE store_id = $1 AND archived_at IS NULL ORDER BY product_id, display_order, name`},
 		{&out.ModifierGroups, `SELECT id, store_id, name, selection_type, is_required, min_select, max_select,
 			display_order, is_active, created_at, updated_at
-			FROM modifier_groups WHERE store_id = $1 AND is_active ORDER BY display_order, name`},
+			FROM modifier_groups WHERE store_id = $1 AND is_active AND archived_at IS NULL ORDER BY display_order, name`},
 		{&out.ModifierOptions, `SELECT id, store_id, group_id, name, price_delta, is_available, track_stock,
 			stock_quantity, max_quantity, display_order, created_at, updated_at
-			FROM modifier_options WHERE store_id = $1 ORDER BY group_id, display_order, name`},
+			FROM modifier_options WHERE store_id = $1 AND archived_at IS NULL ORDER BY group_id, display_order, name`},
 		{&out.ProductGroups, `SELECT store_id, product_id, group_id, display_order, override_required, created_at
 			FROM product_modifier_groups WHERE store_id = $1 ORDER BY product_id, display_order`},
 		{&out.OptionGroups, `SELECT store_id, parent_option_id, child_group_id, display_order, created_at

@@ -181,6 +181,7 @@ jobs:
           go run ./cmd/migrate -action=down
           go run ./cmd/migrate -action=down
           go run ./cmd/migrate -action=down
+          go run ./cmd/migrate -action=down
 
       - name: Re-apply Migration & Verify Idempotent Up
         env:

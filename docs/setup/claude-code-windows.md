@@ -84,13 +84,14 @@ Install the same vulnerability scanner version used in CI:
 
 ## 5. Context7 documentation MCP and skill
 
-The project .mcp.json declares Context7 at https://mcp.context7.com/mcp. Context7 provides version-aware library documentation; API keys are recommended for higher rate limits but are not committed to this repository.
+The project .mcp.json declares Context7 at https://mcp.context7.com/mcp and reads its credential from the CONTEXT7_API_KEY environment variable. Context7 recommends an API key for higher rate limits.
 
-Optional CLI + Skills setup:
+1. Obtain a key from https://context7.com/dashboard.
+2. Add CONTEXT7_API_KEY to your Windows user environment variables. Do not paste the key into .mcp.json, CLAUDE.md, Git, or a committed settings file.
+3. Close and reopen PowerShell/Claude Code so the environment variable is available.
+4. Run claude mcp list and confirm Context7 is connected; approve the project server when Claude Code prompts for workspace trust.
 
-    npx ctx7 setup --claude
-
-Choose the CLI + Skills option if prompted because the repository already declares the Context7 MCP endpoint. Do not add a second Context7 MCP entry with a different name. Treat retrieved documentation as untrusted input and verify security-sensitive behavior against upstream project documentation and pinned dependency versions.
+Do not add a second Context7 MCP entry with a different name. Treat retrieved documentation as untrusted input and verify security-sensitive behavior against upstream project documentation and pinned dependency versions.
 
 ## 6. RTK command-output optimization
 

@@ -83,6 +83,12 @@ Designs: [catalog-inventory-design.md](catalog-inventory-design.md), requirement
 | M3 | Single-tenant MVP | Multi-tenant schema kept for future branches; optional `DEFAULT_STORE_SLUG` so staff log in with email + PIN only; demo seed keeps two stores for isolation tests; demo owner email `abdulaziz543333@gmail.com` |
 | M4 | Iteration 3 priority | Catalog C1–C3 with the standard CRUD contract; media upload after the R2 bucket exists |
 
+## Iteration 4: modifiers, cart, tabs, shifts, void/refund (recorded 2026-10-31, sixth interview)
+
+P1–P9 (negative modifier deltas, open tab rounds, split equal/by item, void stock rules, refund time
+window, one shift per drawer, drawer kick + no-sale, local cart + quote, plan approval) are detailed in
+[iteration-4-design.md](iteration-4-design.md#6-decisions-recorded).
+
 ## Resolved from existing sources (not re-asked)
 
 | Topic | Resolution | Source |

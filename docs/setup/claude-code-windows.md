@@ -100,7 +100,7 @@ Install RTK on Windows from its official release archive:
 
     https://github.com/rtk-ai/rtk/releases/latest
 
-Download rtk-x86_64-pc-windows-msvc.zip, extract rtk.exe to %USERPROFILE%\\.local\\bin, and add that directory to your user PATH. Install ripgrep for the filters that call rg:
+Download rtk-x86_64-pc-windows-msvc.zip, extract rtk.exe to %USERPROFILE%\.local\bin, and add that directory to your user PATH. Install ripgrep for the filters that call rg:
 
     winget install --id BurntSushi.ripgrep.MSVC -e
 

@@ -24,7 +24,8 @@
       "Bash(ssh *)",
       "Bash(scp *)",
       "Bash(rsync *)",
-      "Bash(docker compose -f deploy/docker/docker-compose.prod.yml *)"
+      "Bash(docker compose -f deploy/docker/docker-compose.prod.yml *)",
+      "Bash(docker compose *docker-compose.prod.yml*)"
     ]
   },
   "enabledPlugins": {

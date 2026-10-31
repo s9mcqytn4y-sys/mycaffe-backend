@@ -40,17 +40,17 @@ The official Anthropic marketplace is normally registered on the first interacti
 
 Install the official plugins recommended for this repository:
 
-    /plugin install gopls-lsp@claude-plugins-official --scope project
-    /plugin install security-guidance@claude-plugins-official --scope project
-    /plugin install pr-review-toolkit@claude-plugins-official --scope project
-    /plugin install github@claude-plugins-official --scope project
+    claude plugin install gopls-lsp@claude-plugins-official --scope project
+    claude plugin install security-guidance@claude-plugins-official --scope project
+    claude plugin install pr-review-toolkit@claude-plugins-official --scope project
+    claude plugin install github@claude-plugins-official --scope project
 
 The project settings already declares these plugins as enabled. The install step obtains the plugin packages and asks for consent. The GitHub plugin uses the official GitHub integration; complete its OAuth flow when prompted. Do not create a broad personal access token merely to avoid OAuth.
 
 Install the repository-local MyCaffe plugin from the repository root:
 
     /plugin marketplace add .
-    /plugin install mycaffe-engineering@mycaffe-tools --scope project
+    claude plugin install mycaffe-engineering@mycaffe-tools --scope project
 
 Then run /reload-plugins if prompted. Verify with /plugin and invoke:
 - /mycaffe-engineering:phase02-auth-rbac
@@ -96,9 +96,13 @@ Choose the CLI + Skills option if prompted because the repository already declar
 
 The repository already documents RTK for Antigravity, but that Antigravity hook does not configure Claude Code. RTK has a separate native Claude Code hook.
 
-Install RTK on Windows:
+Install RTK on Windows from its official release archive:
 
-    winget install rtk-ai.rtk
+    https://github.com/rtk-ai/rtk/releases/latest
+
+Download rtk-x86_64-pc-windows-msvc.zip, extract rtk.exe to %USERPROFILE%\\.local\\bin, and add that directory to your user PATH. Install ripgrep for the filters that call rg:
+
+    winget install --id BurntSushi.ripgrep.MSVC -e
 
 Open a new terminal and verify:
 
@@ -123,7 +127,7 @@ DBHub is optional. Do not connect it to production or staging. Before enabling i
 
 Install Node.js 22.5 or later before using the current DBHub package. From the repository root, after the local DSN and dbhub.toml are ready, register it at local scope:
 
-    claude mcp add dbhub --scope local -- npx -y @bytebase/dbhub@latest --config ./dbhub.toml
+    claude mcp add --scope local --transport stdio dbhub -- npx -y @bytebase/dbhub@latest --config ./dbhub.toml
 
 Review the connection and use /mcp to confirm it is connected. Do not use the existing migrator or superuser credentials for DBHub. DBHub read-only mode is an additional guardrail, not a replacement for a database role with minimal privileges.
 
@@ -131,7 +135,7 @@ Review the connection and use /mcp to confirm it is connected. Do not use the ex
 
 Use the same commands as CI before requesting review:
 
-    gofmt -w <changed-go-files>
+    gofmt -l .
     go mod tidy -diff
     go vet ./...
     govulncheck ./...

@@ -77,7 +77,7 @@ Three layers, outermost first:
 | Access token | JWT HS256, **TTL 15 min**, sent as `Authorization: Bearer` |
 | Refresh token | opaque, 256-bit `crypto/rand`, base64url; **absolute session lifetime 12 h** (one shift), rotated on every refresh |
 | Server state | `auth_sessions` row per login; only **SHA-256** of refresh tokens is stored |
-| Reuse detection | presenting an already-rotated refresh token revokes the whole session (`revoked_reason = 'refresh_reuse'`) and writes `STAFF_SESSION_REVOKED` |
+| Reuse detection | presenting an already-rotated refresh token revokes the whole session (`revoked_reason = 'refresh_reuse'`) and writes `STAFF_SESSION_REVOKED`. Within 30 s of a rotation the previous generation gets `409 REFRESH_RACE` instead (concurrent POS tabs), never new tokens |
 | Multi-device | allowed; **max 3 active sessions per user** (oldest revoked on overflow), **idle timeout 2 h** — *owner decision O3* |
 | Logout | revokes the current session; access token dies within ≤15 min and is rejected sooner by D4 revalidation |
 | Forced revocation | deactivation, PIN reset, role change → revoke **all** sessions of that user in the same transaction |

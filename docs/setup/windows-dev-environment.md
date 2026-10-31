@@ -87,6 +87,11 @@ Browser / tablet (HTTPS)
 ./scripts/dev.ps1 demo-down
 ```
 
+`dev.ps1 migrate|seed|run` always target the local Docker PostgreSQL: they build `DATABASE_URL` and
+`DATABASE_MIGRATION_URL` from the `DB_*` values in `.env` with host `127.0.0.1` and ignore any
+remote URL in `.env`. VS Code F5 (`.vscode/launch.json`) loads `.env` as-is, so keep
+`DATABASE_URL` in `.env` pointing at `127.0.0.1` before debugging.
+
 Dev login (seed only, never production): store `central-cafe` or `express-counter`, emails in
 `db/seeds/development.sql`, PIN `482913`. Five wrong PINs lock an account for 15 minutes.
 

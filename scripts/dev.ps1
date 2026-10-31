@@ -44,6 +44,30 @@ function Assert-EnvFile {
     }
 }
 
+# Force dev commands onto the local Docker PostgreSQL. DATABASE_URL in .env may point to a
+# remote database; godotenv never overrides variables that are already set, so these win.
+function Set-LocalDatabaseEnv {
+    $vars = @{}
+    Get-Content .env | Where-Object { $_ -match '^\s*([A-Z0-9_]+)\s*=\s*(.*)$' } | ForEach-Object {
+        $vars[$Matches[1]] = $Matches[2].Trim().Trim('"').Trim("'")
+    }
+    $get = { param($key, $default) if ($vars[$key]) { $vars[$key] } else { $default } }
+    $db = & $get 'DB_NAME' 'mycaffe_dev'
+    $migUser = & $get 'DB_MIGRATOR_USER' 'mycaffe_migrator'
+    $migPass = [uri]::EscapeDataString((& $get 'DB_MIGRATOR_PASSWORD' 'mycaffe_local_migrator_password'))
+    $appUser = & $get 'DB_APP_USER' 'mycaffe_app'
+    $appPass = & $get 'DB_APP_PASSWORD' 'mycaffe_local_app_password'
+    $port = & $get 'DB_PORT' '5432'
+    $env:DB_APP_USER = $appUser
+    $env:DB_APP_PASSWORD = $appPass
+    $env:DATABASE_MIGRATION_URL = "postgres://${migUser}:${migPass}@127.0.0.1:${port}/${db}?sslmode=disable"
+    $env:DATABASE_URL = "postgres://${appUser}:$([uri]::EscapeDataString($appPass))@127.0.0.1:${port}/${db}?sslmode=disable"
+    if (-not $env:APP_ENV) { $env:APP_ENV = 'development' }
+    if ($vars['DATABASE_URL'] -and $vars['DATABASE_URL'] -notmatch '@(localhost|127\.0\.0\.1)[:/]') {
+        Write-Host 'Catatan: DATABASE_URL di .env menunjuk ke host remote; dev.ps1 mengabaikannya dan memakai Postgres lokal.' -ForegroundColor Yellow
+    }
+}
+
 function Wait-Healthy([string]$Container, [int]$Seconds = 60) {
     for ($i = 0; $i -lt $Seconds; $i++) {
         $status = docker inspect -f '{{.State.Health.Status}}' $Container 2>$null
@@ -98,19 +122,19 @@ switch ($Command) {
         Wait-Healthy 'mycaffe-postgres-dev'
     }
 
-    'migrate' { Assert-EnvFile; Invoke-Native go @('run', './cmd/migrate', '-action=up') }
+    'migrate' { Assert-EnvFile; Set-LocalDatabaseEnv; Invoke-Native go @('run', './cmd/migrate', '-action=up') }
 
-    'seed' { Assert-EnvFile; Invoke-Native go @('run', './cmd/migrate', '-action=seed') }
+    'seed' { Assert-EnvFile; Set-LocalDatabaseEnv; Invoke-Native go @('run', './cmd/migrate', '-action=seed') }
 
-    'run' { Assert-EnvFile; Invoke-Native go @('run', './cmd/api') }
+    'run' { Assert-EnvFile; Set-LocalDatabaseEnv; Invoke-Native go @('run', './cmd/api') }
 
     'login' {
         Write-Step 'POST /api/v1/auth/staff/login (central-cafe / cashier.central@mycaffe.local / PIN dev 482913)'
         $body = @{ store_slug = 'central-cafe'; email = 'cashier.central@mycaffe.local'; pin = '482913' } | ConvertTo-Json
         $resp = Invoke-RestMethod -Method Post -Uri 'http://localhost:8080/api/v1/auth/staff/login' -ContentType 'application/json' -Body $body
-        Write-Host "Masuk sebagai $($resp.staff.full_name) ($($resp.staff.role)); access token berlaku $($resp.expires_in) detik."
+        Write-Host "Masuk sebagai $($resp.staff.full_name) ($($resp.staff.role)) di $($resp.staff.store.name); access token sampai $($resp.access_token_expires_at), sesi sampai $($resp.session_expires_at)."
         $me = Invoke-RestMethod -Uri 'http://localhost:8080/api/v1/auth/staff/me' -Headers @{ Authorization = "Bearer $($resp.access_token)" }
-        Write-Host "GET /me -> $($me.email) di toko $($me.store_id)" -ForegroundColor Green
+        Write-Host "GET /me -> $($me.staff.full_name) / $($me.staff.role) / toko $($me.staff.store.slug)" -ForegroundColor Green
     }
 
     'test' { Invoke-Native go @('test', '-race', './...') }

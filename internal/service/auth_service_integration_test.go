@@ -173,7 +173,15 @@ func TestAuthServiceIntegration_EndToEnd(t *testing.T) {
 		if second.RefreshToken == first.RefreshToken || second.SessionID != first.SessionID {
 			t.Fatal("refresh must rotate the secret within the same session")
 		}
-		// Replaying the rotated token is theft: the whole session dies, including the new token.
+		// Within the grace window the previous generation is a tab race: rejected, session kept.
+		if _, err := svc.Refresh(ctx, first.RefreshToken, "go-test-tab-2", "203.0.113.7"); !errors.Is(err, service.ErrRefreshRace) {
+			t.Fatalf("concurrent-tab refresh: %v, want ErrRefreshRace", err)
+		}
+		if got := sessionRevokedReason(t, storeAID, first.SessionID); got != "" {
+			t.Fatalf("race must not revoke the session, got %q", got)
+		}
+		advance(time.Minute)
+		// After the grace window, replaying the rotated token is theft: the whole session dies.
 		if _, err := svc.Refresh(ctx, first.RefreshToken, "attacker", "198.51.100.9"); !errors.Is(err, service.ErrInvalidSession) {
 			t.Fatalf("reuse: %v", err)
 		}

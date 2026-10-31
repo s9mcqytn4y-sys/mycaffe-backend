@@ -328,6 +328,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: The previous refresh generation arrived within 30 s of a rotation (concurrent tabs). Session kept; retry with the current cookie (`code=REFRESH_RACE`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "403":
           description: Missing `X-CSRF-Protection` header (`code=CSRF_HEADER_REQUIRED`)
           content:

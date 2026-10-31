@@ -29,7 +29,14 @@ var (
 	ErrAuthBusy           = errors.New("too many concurrent login attempts")
 	ErrInvalidSession     = errors.New("session is invalid or expired")
 	ErrSessionStale       = errors.New("session no longer matches the current user state")
+	// ErrRefreshRace means the previous refresh generation arrived right after a rotation,
+	// e.g. two POS tabs refreshing at once. The client retries with the cookie it now holds.
+	ErrRefreshRace = errors.New("refresh token was rotated moments ago; retry")
 )
+
+// refreshRaceGrace is how long after a rotation the previous generation is answered with
+// ErrRefreshRace instead of being treated as theft. It never yields tokens.
+const refreshRaceGrace = 30 * time.Second
 
 // AuthPolicy carries the ADR-003 D3/D4 and owner decision O3 limits.
 type AuthPolicy struct {
@@ -293,6 +300,10 @@ func (s *AuthService) Refresh(ctx context.Context, refreshToken, userAgent, clie
 		switch {
 		case constantTimeEqual(presented, session.RefreshTokenHash):
 		case session.PreviousRefreshTokenHash != "" && constantTimeEqual(presented, session.PreviousRefreshTokenHash):
+			if now.Sub(session.LastUsedAt) < refreshRaceGrace {
+				refreshErr = ErrRefreshRace
+				return nil
+			}
 			return s.revokeWithAudit(ctx, tx, session, "refresh_reuse", now, clientIP)
 		default:
 			return nil

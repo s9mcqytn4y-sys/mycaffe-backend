@@ -136,6 +136,11 @@ func (h *AuthHandler) Refresh(c *gin.Context) {
 		return
 	}
 	tokens, err := h.authService.Refresh(c.Request.Context(), cookie, c.Request.UserAgent(), c.ClientIP())
+	if errors.Is(err, service.ErrRefreshRace) {
+		// Keep the cookie: the browser already holds the rotated one from the concurrent request.
+		authError(c, http.StatusConflict, "REFRESH_RACE", "Sesi baru saja diperbarui. Ulangi permintaan.")
+		return
+	}
 	if errors.Is(err, service.ErrInvalidSession) {
 		h.clearRefreshCookie(c)
 		authError(c, http.StatusUnauthorized, "SESSION_INVALID", "Sesi berakhir. Silakan masuk kembali.")

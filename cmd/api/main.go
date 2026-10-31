@@ -175,11 +175,13 @@ func main() {
 			// POS (ADR-003 D8 "staff" class): store and actor come from the access token only.
 			pos := v1.Group("/pos")
 			pos.POST("/orders", authHandler.RequirePermission(rbac.OrderPOSCreate), posHandler.CreateOrder)
+			pos.POST("/orders/quote", authHandler.RequireStaff(), posHandler.QuoteOrder)
 			pos.POST("/orders/:id/payments", authHandler.RequireStaff(), posHandler.InitiatePayment)
 			pos.GET("/catalog", authHandler.RequireStaff(), catalogHandler.StaffCatalog)
 
-			// Guest menu (public, cacheable). Ordering stays contained until 02.01-D/E.
+			// Guest menu & quote (public, cacheable catalog; dynamic quote for guest carts).
 			v1.GET("/public/stores/:slug/catalog", catalogHandler.PublicCatalog)
+			v1.POST("/public/stores/:slug/orders/quote", posHandler.PublicQuoteOrder)
 
 			// Catalog management (catalog C3): owner CRUD; availability toggles follow the station permission.
 			manage := authHandler.RequirePermission(rbac.CatalogManage)
@@ -194,6 +196,18 @@ func main() {
 			cat.POST("/products/:id/variants", manage, catalogHandler.CreateVariant)
 			cat.PATCH("/variants/:id", manage, catalogHandler.UpdateVariant)
 			cat.DELETE("/variants/:id", manage, catalogHandler.ArchiveVariant)
+			cat.POST("/modifier-groups", manage, catalogHandler.CreateModifierGroup)
+			cat.GET("/modifier-groups", manage, catalogHandler.ListModifierGroups)
+			cat.GET("/modifier-groups/:id", manage, catalogHandler.GetModifierGroup)
+			cat.PATCH("/modifier-groups/:id", manage, catalogHandler.UpdateModifierGroup)
+			cat.DELETE("/modifier-groups/:id", manage, catalogHandler.ArchiveModifierGroup)
+			cat.POST("/products/:id/modifier-groups", manage, catalogHandler.AttachModifierGroupToProduct)
+			cat.DELETE("/products/:id/modifier-groups/:group_id", manage, catalogHandler.DetachModifierGroupFromProduct)
+			cat.POST("/modifier-groups/:id/options", manage, catalogHandler.CreateModifierOption)
+			cat.PATCH("/modifier-groups/:id/options/:option_id", manage, catalogHandler.UpdateModifierOption)
+			cat.DELETE("/modifier-groups/:id/options/:option_id", manage, catalogHandler.ArchiveModifierOption)
+			cat.POST("/modifier-options/:id/child-groups", manage, catalogHandler.AttachChildGroupToOption)
+			cat.DELETE("/modifier-options/:id/child-groups/:group_id", manage, catalogHandler.DetachChildGroupFromOption)
 		}
 	}
 

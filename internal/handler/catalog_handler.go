@@ -249,3 +249,162 @@ func (h *CatalogHandler) ArchiveVariant(c *gin.Context) {
 	}
 	c.Status(http.StatusNoContent)
 }
+
+// ---------- Modifier groups & options (Iteration 4a, decision P1) ----------
+
+func (h *CatalogHandler) CreateModifierGroup(c *gin.Context) {
+	var in service.ModifierGroupInput
+	if !bindJSON(c, &in) {
+		return
+	}
+	out, err := h.catalog.CreateModifierGroup(c.Request.Context(), currentStaff(c), in)
+	if err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, out)
+}
+
+func (h *CatalogHandler) GetModifierGroup(c *gin.Context) {
+	id, ok := pathID(c, "id")
+	if !ok {
+		return
+	}
+	out, err := h.catalog.GetModifierGroup(c.Request.Context(), currentStaff(c), id)
+	if err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, out)
+}
+
+func (h *CatalogHandler) ListModifierGroups(c *gin.Context) {
+	includeArchived := c.Query("include_archived") == "true"
+	out, err := h.catalog.ListModifierGroups(c.Request.Context(), currentStaff(c), includeArchived)
+	if err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, out)
+}
+
+func (h *CatalogHandler) UpdateModifierGroup(c *gin.Context) {
+	id, ok := pathID(c, "id")
+	var in service.ModifierGroupInput
+	if !ok || !bindJSON(c, &in) {
+		return
+	}
+	out, err := h.catalog.UpdateModifierGroup(c.Request.Context(), currentStaff(c), id, in)
+	if err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, out)
+}
+
+func (h *CatalogHandler) ArchiveModifierGroup(c *gin.Context) {
+	id, ok := pathID(c, "id")
+	if !ok {
+		return
+	}
+	forceUnlink := c.Query("force_unlink") == "true"
+	if err := h.catalog.ArchiveModifierGroup(c.Request.Context(), currentStaff(c), id, forceUnlink); err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+func (h *CatalogHandler) AttachModifierGroupToProduct(c *gin.Context) {
+	productID, ok := pathID(c, "id")
+	var in service.AttachModifierGroupInput
+	if !ok || !bindJSON(c, &in) {
+		return
+	}
+	if err := h.catalog.AttachModifierGroupToProduct(c.Request.Context(), currentStaff(c), productID, in); err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+func (h *CatalogHandler) DetachModifierGroupFromProduct(c *gin.Context) {
+	productID, ok1 := pathID(c, "id")
+	groupID, ok2 := pathID(c, "group_id")
+	if !ok1 || !ok2 {
+		return
+	}
+	if err := h.catalog.DetachModifierGroupFromProduct(c.Request.Context(), currentStaff(c), productID, groupID); err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+func (h *CatalogHandler) CreateModifierOption(c *gin.Context) {
+	groupID, ok := pathID(c, "id")
+	var in service.ModifierOptionInput
+	if !ok || !bindJSON(c, &in) {
+		return
+	}
+	out, err := h.catalog.CreateModifierOption(c.Request.Context(), currentStaff(c), groupID, in)
+	if err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, out)
+}
+
+func (h *CatalogHandler) UpdateModifierOption(c *gin.Context) {
+	groupID, ok1 := pathID(c, "id")
+	optionID, ok2 := pathID(c, "option_id")
+	var in service.ModifierOptionInput
+	if !ok1 || !ok2 || !bindJSON(c, &in) {
+		return
+	}
+	out, err := h.catalog.UpdateModifierOption(c.Request.Context(), currentStaff(c), groupID, optionID, in)
+	if err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, out)
+}
+
+func (h *CatalogHandler) ArchiveModifierOption(c *gin.Context) {
+	groupID, ok1 := pathID(c, "id")
+	optionID, ok2 := pathID(c, "option_id")
+	if !ok1 || !ok2 {
+		return
+	}
+	if err := h.catalog.ArchiveModifierOption(c.Request.Context(), currentStaff(c), groupID, optionID); err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+func (h *CatalogHandler) AttachChildGroupToOption(c *gin.Context) {
+	optionID, ok := pathID(c, "id")
+	var in service.AttachChildGroupInput
+	if !ok || !bindJSON(c, &in) {
+		return
+	}
+	if err := h.catalog.AttachChildGroupToOption(c.Request.Context(), currentStaff(c), optionID, in); err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+func (h *CatalogHandler) DetachChildGroupFromOption(c *gin.Context) {
+	optionID, ok1 := pathID(c, "id")
+	childGroupID, ok2 := pathID(c, "group_id")
+	if !ok1 || !ok2 {
+		return
+	}
+	if err := h.catalog.DetachChildGroupFromOption(c.Request.Context(), currentStaff(c), optionID, childGroupID); err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}

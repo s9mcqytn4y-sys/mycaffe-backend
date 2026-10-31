@@ -6,6 +6,8 @@
 
 # Antigravity local MCP config can contain project identifiers/auth config
 .agents/mcp_config.json
+.agents/skills/
+skills-lock.json
 
 # Frontend/build outputs (useful if any tooling runs in this repo)
 node_modules/

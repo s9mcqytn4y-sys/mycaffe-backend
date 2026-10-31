@@ -190,6 +190,14 @@ func (s *OrderService) executeCreateOrderTx(ctx context.Context, trustedStoreID 
 			return err
 		}
 
+		if normalizedInput.ExpectedTotal != nil && *normalizedInput.ExpectedTotal != priced.TotalAmount {
+			return &QuoteChangedError{
+				ExpectedTotal: *normalizedInput.ExpectedTotal,
+				ActualTotal:   priced.TotalAmount,
+				Quote:         buildQuoteResult(catalogData.Store, priced),
+			}
+		}
+
 		// Deduct product stock in deterministic sorted UUID order.
 		for _, prodID := range sortedUUIDKeysFromIntMap(priced.ProductStockDeducts) {
 			qty := priced.ProductStockDeducts[prodID]
@@ -647,4 +655,140 @@ func sortedUUIDKeysFromIntMap(m map[uuid.UUID]int) []uuid.UUID {
 		}
 	}
 	return keys
+}
+
+// ---------- Order Quotes & Expected Total (Iteration 4a, decision P8) ----------
+
+type OrderQuoteInput struct {
+	OrderType   domain.OrderType   `json:"order_type"`
+	BillingMode domain.BillingMode `json:"billing_mode,omitempty"`
+	Items       []OrderItemInput   `json:"items"`
+}
+
+type PricedQuoteLine struct {
+	ProductID          uuid.UUID  `json:"product_id"`
+	ProductName        string     `json:"product_name"`
+	VariantID          *uuid.UUID `json:"variant_id,omitempty"`
+	VariantName        string     `json:"variant_name,omitempty"`
+	SKU                string     `json:"sku,omitempty"`
+	UnitBasePrice      int64      `json:"unit_base_price"`
+	ModifierTotalPrice int64      `json:"modifier_total_price"`
+	UnitSnapshotPrice  int64      `json:"unit_snapshot_price"`
+	Quantity           int        `json:"quantity"`
+	SubtotalAmount     int64      `json:"subtotal_amount"`
+	SelectedOptions    string     `json:"selected_options"`
+}
+
+type OrderQuoteResult struct {
+	SubtotalAmount      int64             `json:"subtotal_amount"`
+	DiscountAmount      int64             `json:"discount_amount"`
+	ServiceChargeAmount int64             `json:"service_charge_amount"`
+	TaxAmount           int64             `json:"tax_amount"`
+	TotalAmount         int64             `json:"total_amount"`
+	Currency            string            `json:"currency"`
+	Lines               []PricedQuoteLine `json:"lines"`
+}
+
+type QuoteChangedError struct {
+	ExpectedTotal int64             `json:"expected_total"`
+	ActualTotal   int64             `json:"actual_total"`
+	Quote         *OrderQuoteResult `json:"quote"`
+}
+
+func (e *QuoteChangedError) Error() string {
+	return fmt.Sprintf("total harga telah berubah: expected Rp%d, aktual Rp%d", e.ExpectedTotal, e.ActualTotal)
+}
+
+func buildQuoteResult(store domain.Store, priced *PricedOrderResult) *OrderQuoteResult {
+	lines := make([]PricedQuoteLine, 0, len(priced.Items))
+	for _, item := range priced.Items {
+		prodID := uuid.Nil
+		if item.Item.ProductID != nil {
+			prodID = *item.Item.ProductID
+		}
+		lines = append(lines, PricedQuoteLine{
+			ProductID:          prodID,
+			ProductName:        item.Item.SnapshotName,
+			VariantID:          item.Item.VariantID,
+			VariantName:        item.Item.SnapshotVariant,
+			SKU:                item.Item.SnapshotSKU,
+			UnitBasePrice:      item.Item.UnitBasePrice,
+			ModifierTotalPrice: item.Item.ModifierTotalPrice,
+			UnitSnapshotPrice:  item.Item.SnapshotPrice,
+			Quantity:           item.Item.Quantity,
+			SubtotalAmount:     item.Item.SubtotalAmount,
+			SelectedOptions:    item.Item.SelectedOptions,
+		})
+	}
+	return &OrderQuoteResult{
+		SubtotalAmount:      priced.SubtotalAmount,
+		DiscountAmount:      priced.DiscountAmount,
+		ServiceChargeAmount: priced.ServiceChargeAmount,
+		TaxAmount:           priced.TaxAmount,
+		TotalAmount:         priced.TotalAmount,
+		Currency:            store.Currency,
+		Lines:               lines,
+	}
+}
+
+// ResolveStoreBySlug looks up a store ID and active status using the sanctioned security-definer resolver.
+func (s *OrderService) ResolveStoreBySlug(ctx context.Context, slug string) (uuid.UUID, bool, error) {
+	return postgres.NewAuthRepository().ResolveStoreForLogin(ctx, s.db, strings.ToLower(strings.TrimSpace(slug)))
+}
+
+// QuoteOrder computes priced lines, taxes, service fees, and totals without locking rows or reserving stock.
+func (s *OrderService) QuoteOrder(ctx context.Context, trustedStoreID uuid.UUID, input OrderQuoteInput) (*OrderQuoteResult, error) {
+	if trustedStoreID == uuid.Nil {
+		return nil, postgres.ErrEmptyTenantContext
+	}
+	if len(input.Items) == 0 {
+		return nil, fmt.Errorf("%w: order must contain at least one item", ErrInvalidOrderInput)
+	}
+
+	var result *OrderQuoteResult
+	err := database.WithTenantTx(ctx, s.db, trustedStoreID, func(tx *sqlx.Tx) error {
+		productIDs := make([]uuid.UUID, 0, len(input.Items))
+		for _, item := range input.Items {
+			productIDs = append(productIDs, item.ProductID)
+		}
+
+		catalogData, err := s.repo.LoadCatalogForQuote(ctx, tx, trustedStoreID, productIDs)
+		if err != nil {
+			return err
+		}
+
+		snapshot := CatalogSnapshot{
+			Products:          catalogData.Products,
+			ModifierGroups:    catalogData.ModifierGroups,
+			ModifierOptions:   catalogData.ModifierOptions,
+			ProductGroups:     catalogData.ProductModifierGroups,
+			OptionChildGroups: catalogData.OptionModifierGroups,
+			Variants:          catalogData.Variants,
+		}
+
+		billingMode := input.BillingMode
+		if billingMode == "" {
+			billingMode = catalogData.Store.DefaultBillingMode
+		}
+
+		creationInput := OrderCreationInput{
+			IdempotencyKey: "quote-" + uuid.NewString(),
+			CustomerName:   "Quote",
+			OrderType:      input.OrderType,
+			BillingMode:    billingMode,
+			Items:          input.Items,
+		}
+
+		priced, err := ValidateAndPriceOrder(catalogData.Store, creationInput, snapshot)
+		if err != nil {
+			return err
+		}
+
+		result = buildQuoteResult(catalogData.Store, priced)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
 }

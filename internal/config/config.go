@@ -7,6 +7,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/joho/godotenv"
 )
@@ -23,6 +24,14 @@ type Config struct {
 	DBAppPassword        string
 	JWTSecret            string
 	JWTExpiryHours       int
+
+	// Staff authentication (ADR-003 D3/D4, owner decision O3)
+	StaffAccessTokenTTL     time.Duration
+	StaffRefreshTokenTTL    time.Duration
+	StaffSessionIdleTimeout time.Duration
+	StaffMaxSessions        int
+	StaffPINMaxFailures     int
+	StaffPINLockout         time.Duration
 
 	// Midtrans Core API
 	MidtransMerchantID   string
@@ -71,6 +80,31 @@ func LoadConfig() (*Config, error) {
 		return nil, errors.New("APP_ENV cannot be empty: environment must be explicitly defined (development, test, staging, production)")
 	}
 
+	var parseErrs []error
+	duration := func(key, def string) time.Duration {
+		d, err := time.ParseDuration(getEnv(key, def))
+		if err != nil || d <= 0 {
+			parseErrs = append(parseErrs, fmt.Errorf("invalid positive duration for %s", key))
+		}
+		return d
+	}
+	positiveInt := func(key, def string) int {
+		n, err := strconv.Atoi(getEnv(key, def))
+		if err != nil || n <= 0 {
+			parseErrs = append(parseErrs, fmt.Errorf("invalid positive integer for %s", key))
+		}
+		return n
+	}
+	staffAccessTTL := duration("STAFF_ACCESS_TOKEN_TTL", "15m")
+	staffRefreshTTL := duration("STAFF_REFRESH_TOKEN_TTL", "12h")
+	staffIdle := duration("STAFF_SESSION_IDLE_TIMEOUT", "2h")
+	staffMaxSessions := positiveInt("STAFF_MAX_SESSIONS_PER_USER", "3")
+	staffPINMaxFailures := positiveInt("STAFF_PIN_MAX_FAILURES", "5")
+	staffPINLockout := duration("STAFF_PIN_LOCKOUT", "15m")
+	if err := errors.Join(parseErrs...); err != nil {
+		return nil, err
+	}
+
 	frontendURL := getEnv("FRONTEND_URL", "http://localhost:3000")
 
 	// Strict origin parsing
@@ -80,29 +114,35 @@ func LoadConfig() (*Config, error) {
 	}
 
 	cfg := &Config{
-		AppEnv:               appEnv,
-		Port:                 getEnv("PORT", "8080"),
-		FrontendURL:          frontendURL,
-		AllowedOrigins:       allowedOrigins,
-		TrustedProxies:       splitCSV(getEnv("TRUSTED_PROXIES", "")),
-		DatabaseURL:          getEnv("DATABASE_URL", ""),
-		DatabaseMigrationURL: getEnv("DATABASE_MIGRATION_URL", getEnv("DATABASE_URL", "")),
-		DBAppUser:            getEnv("DB_APP_USER", "mycaffe_app"),
-		DBAppPassword:        getEnv("DB_APP_PASSWORD", ""),
-		JWTSecret:            getEnv("JWT_SECRET_KEY", ""),
-		JWTExpiryHours:       jwtHours,
-		MidtransMerchantID:   getEnv("MIDTRANS_MERCHANT_ID", ""),
-		MidtransServerKey:    getEnv("MIDTRANS_SERVER_KEY", ""),
-		MidtransClientKey:    getEnv("MIDTRANS_CLIENT_KEY", ""),
-		MidtransIsProduction: isProd,
-		StorageDriver:        getEnv("STORAGE_DRIVER", "local"),
-		R2AccountID:          getEnv("R2_ACCOUNT_ID", ""),
-		R2AccessKeyID:        getEnv("R2_ACCESS_KEY_ID", ""),
-		R2SecretAccessKey:    getEnv("R2_SECRET_ACCESS_KEY", ""),
-		R2BucketName:         getEnv("R2_BUCKET_NAME", ""),
-		R2PublicURL:          getEnv("R2_PUBLIC_URL", ""),
-		SentryDSN:            getEnv("SENTRY_DSN", ""),
-		SentryEnvironment:    getEnv("SENTRY_ENVIRONMENT", "development"),
+		AppEnv:                  appEnv,
+		Port:                    getEnv("PORT", "8080"),
+		FrontendURL:             frontendURL,
+		AllowedOrigins:          allowedOrigins,
+		TrustedProxies:          splitCSV(getEnv("TRUSTED_PROXIES", "")),
+		DatabaseURL:             getEnv("DATABASE_URL", ""),
+		DatabaseMigrationURL:    getEnv("DATABASE_MIGRATION_URL", getEnv("DATABASE_URL", "")),
+		DBAppUser:               getEnv("DB_APP_USER", "mycaffe_app"),
+		DBAppPassword:           getEnv("DB_APP_PASSWORD", ""),
+		JWTSecret:               getEnv("JWT_SECRET_KEY", ""),
+		JWTExpiryHours:          jwtHours,
+		StaffAccessTokenTTL:     staffAccessTTL,
+		StaffRefreshTokenTTL:    staffRefreshTTL,
+		StaffSessionIdleTimeout: staffIdle,
+		StaffMaxSessions:        staffMaxSessions,
+		StaffPINMaxFailures:     staffPINMaxFailures,
+		StaffPINLockout:         staffPINLockout,
+		MidtransMerchantID:      getEnv("MIDTRANS_MERCHANT_ID", ""),
+		MidtransServerKey:       getEnv("MIDTRANS_SERVER_KEY", ""),
+		MidtransClientKey:       getEnv("MIDTRANS_CLIENT_KEY", ""),
+		MidtransIsProduction:    isProd,
+		StorageDriver:           getEnv("STORAGE_DRIVER", "local"),
+		R2AccountID:             getEnv("R2_ACCOUNT_ID", ""),
+		R2AccessKeyID:           getEnv("R2_ACCESS_KEY_ID", ""),
+		R2SecretAccessKey:       getEnv("R2_SECRET_ACCESS_KEY", ""),
+		R2BucketName:            getEnv("R2_BUCKET_NAME", ""),
+		R2PublicURL:             getEnv("R2_PUBLIC_URL", ""),
+		SentryDSN:               getEnv("SENTRY_DSN", ""),
+		SentryEnvironment:       getEnv("SENTRY_ENVIRONMENT", "development"),
 	}
 
 	if err := ValidateConfig(cfg); err != nil {
@@ -199,6 +239,9 @@ func ValidateConfig(cfg *Config) error {
 		}
 		if len(cfg.JWTSecret) < 32 {
 			return errors.New("[SECURITY FAIL-CLOSED] production requires a strong JWT_SECRET_KEY of at least 32 characters")
+		}
+		if cfg.StaffAccessTokenTTL > time.Hour || cfg.StaffRefreshTokenTTL > 24*time.Hour {
+			return errors.New("[SECURITY FAIL-CLOSED] production staff token TTLs cannot exceed 1h (access) / 24h (refresh)")
 		}
 
 		if cfg.DatabaseURL == "" || containsPlaceholderPattern(cfg.DatabaseURL) {

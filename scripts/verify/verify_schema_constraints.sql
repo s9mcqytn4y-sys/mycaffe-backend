@@ -276,6 +276,25 @@ BEGIN
     END IF;
 
     EXECUTE 'RESET ROLE';
+
+    -- 10F. Staff auth sessions (migration 000005): RLS enabled, runtime role cannot DELETE,
+    --      and the pre-auth resolver is not executable by PUBLIC.
+    IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.auth_sessions'::regclass) THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: auth_sessions does not have row-level security enabled!';
+    END IF;
+    IF has_table_privilege('mycaffe_app', 'public.auth_sessions', 'DELETE') THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may DELETE auth_sessions (sessions must be revoked, not deleted)!';
+    END IF;
+    IF NOT has_function_privilege('mycaffe_app', 'public.resolve_store_for_login(character varying)', 'EXECUTE') THEN
+        RAISE EXCEPTION 'resolve_store_for_login is not executable by mycaffe_app';
+    END IF;
+    IF EXISTS (
+        SELECT 1 FROM pg_proc p, aclexplode(p.proacl) a
+        WHERE p.proname = 'resolve_store_for_login' AND a.grantee = 0 AND a.privilege_type = 'EXECUTE'
+    ) THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: resolve_store_for_login is executable by PUBLIC!';
+    END IF;
+
     RAISE NOTICE 'SUCCESS: Row-Level Security (RLS) on stores/orders/payments/notifications and DELETE privilege revocation verified.';
     RAISE NOTICE 'ALL CONSTRAINTS, RLS POLICIES, AND BEHAVIORAL VERIFICATIONS PASSED SUCCESSFULLY.';
 END $$;

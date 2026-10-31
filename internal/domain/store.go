@@ -51,6 +51,26 @@ type User struct {
 	IsActive  bool      `json:"is_active" db:"is_active"`
 	CreatedAt time.Time `json:"created_at" db:"created_at"`
 	UpdatedAt time.Time `json:"updated_at" db:"updated_at"`
+
+	FailedPINAttempts int        `json:"-" db:"failed_pin_attempts"`
+	LockedUntil       *time.Time `json:"-" db:"locked_until"`
+}
+
+// AuthSession is a persisted staff login session (auth_sessions). Only SHA-256 hashes of
+// refresh secrets are stored; the raw secret exists only in the client cookie.
+type AuthSession struct {
+	ID                       uuid.UUID  `db:"id"`
+	StoreID                  uuid.UUID  `db:"store_id"`
+	UserID                   uuid.UUID  `db:"user_id"`
+	RefreshTokenHash         string     `db:"refresh_token_hash"`
+	PreviousRefreshTokenHash string     `db:"previous_refresh_token_hash"`
+	CreatedAt                time.Time  `db:"created_at"`
+	LastUsedAt               time.Time  `db:"last_used_at"`
+	ExpiresAt                time.Time  `db:"expires_at"`
+	RevokedAt                *time.Time `db:"revoked_at"`
+	RevokedReason            *string    `db:"revoked_reason"`
+	UserAgent                string     `db:"user_agent"`
+	ClientIP                 string     `db:"client_ip"`
 }
 
 type Category struct {

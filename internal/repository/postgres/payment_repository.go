@@ -467,6 +467,11 @@ func (r *PaymentRepository) InsertAuditLog(
 	tx *sqlx.Tx,
 	audit *domain.AuditLog,
 ) error {
+	return InsertAuditLog(ctx, tx, audit)
+}
+
+// InsertAuditLog appends an audit_logs row inside the caller's tenant transaction.
+func InsertAuditLog(ctx context.Context, tx *sqlx.Tx, audit *domain.AuditLog) error {
 	if tx == nil {
 		return ErrNilTransaction
 	}

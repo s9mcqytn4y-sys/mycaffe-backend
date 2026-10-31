@@ -1,0 +1,20 @@
+# Local MyCaffe PostgreSQL 18 schema inspection only.
+# Set MYCAFFE_DEV_READONLY_DATABASE_URL in the local environment.
+# Never point this file at staging or production.
+
+[[sources]]
+id = "mycaffe-local"
+description = "Local MyCaffe PostgreSQL 18 development database only"
+dsn = "${MYCAFFE_DEV_READONLY_DATABASE_URL}"
+connection_timeout = 10
+query_timeout = 15
+
+[[tools]]
+name = "execute_sql"
+source = "mycaffe-local"
+readonly = true
+max_rows = 200
+
+[[tools]]
+name = "search_objects"
+source = "mycaffe-local"

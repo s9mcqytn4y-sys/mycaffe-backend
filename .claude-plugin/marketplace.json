@@ -1,0 +1,26 @@
+{
+  "name": "mycaffe-tools",
+  "owner": {
+    "name": "MyCaffe Engineering"
+  },
+  "description": "Project-specific Claude Code workflows for the MyCaffe backend.",
+  "version": "0.1.0",
+  "plugins": [
+    {
+      "name": "mycaffe-engineering",
+      "source": "./plugins/mycaffe-engineering",
+      "description": "Security-aware architecture, authentication, signed QR, PostgreSQL RLS, and delivery workflows for MyCaffe.",
+      "version": "0.1.0",
+      "category": "development",
+      "tags": [
+        "go",
+        "postgresql",
+        "multi-tenant",
+        "authentication",
+        "rbac",
+        "qr",
+        "security"
+      ]
+    }
+  ]
+}

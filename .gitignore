@@ -30,3 +30,8 @@ Thumbs.db
 !.vscode/extensions.json
 !.vscode/launch.json
 .idea/
+
+# Local Claude Code and read-only DBHub configuration
+CLAUDE.local.md
+.claude/settings.local.json
+dbhub.toml

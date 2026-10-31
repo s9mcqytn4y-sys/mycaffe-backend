@@ -14,11 +14,11 @@ import (
 var ErrPaymentNotFound = errors.New("payment not found")
 
 type WebhookPaymentContext struct {
-	StoreID       uuid.UUID                 `db:"store_id"`
-	OrderID       uuid.UUID                 `db:"order_id"`
-	PaymentID     uuid.UUID                 `db:"payment_id"`
-	ExpectedAmount int64                    `db:"expected_amount"`
-	CurrentStatus domain.PaymentAttemptStatus `db:"current_status"`
+	StoreID        uuid.UUID                   `db:"store_id"`
+	OrderID        uuid.UUID                   `db:"order_id"`
+	PaymentID      uuid.UUID                   `db:"payment_id"`
+	ExpectedAmount int64                       `db:"expected_amount"`
+	CurrentStatus  domain.PaymentAttemptStatus `db:"current_status"`
 }
 
 type PaymentRepository struct{}

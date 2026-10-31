@@ -132,14 +132,14 @@ func (h *MidtransHandler) HandleWebhook(c *gin.Context) {
 	}
 
 	result, err := h.paymentService.ProcessMidtransWebhook(c.Request.Context(), service.MidtransWebhookInput{
-		OrderID: notif.OrderID,
-		TransactionID: notif.TransactionID,
-		StatusCode: notif.StatusCode,
+		OrderID:           notif.OrderID,
+		TransactionID:     notif.TransactionID,
+		StatusCode:        notif.StatusCode,
 		TransactionStatus: notif.TransactionStatus,
-		GrossAmount: notif.GrossAmount,
-		FraudStatus: notif.FraudStatus,
-		PaymentType: notif.PaymentType,
-		Currency: notif.Currency,
+		GrossAmount:       notif.GrossAmount,
+		FraudStatus:       notif.FraudStatus,
+		PaymentType:       notif.PaymentType,
+		Currency:          notif.Currency,
 	}, string(sanitizedBytes))
 	if err != nil {
 		if errors.Is(err, service.ErrInvalidMidtransWebhook) {
@@ -160,10 +160,10 @@ func (h *MidtransHandler) HandleWebhook(c *gin.Context) {
 		log.Printf("[WEBHOOK ANOMALY] provider_order_id=%s amount=%d status=%s; durable event stored for reconciliation", trimmedOrderID, grossAmountIDR, result.Status)
 	}
 	c.JSON(http.StatusOK, gin.H{
-		"status": "ok",
+		"status":    "ok",
 		"duplicate": result.Duplicate,
-		"ignored": result.Ignored,
-		"anomaly": result.Anomaly,
+		"ignored":   result.Ignored,
+		"anomaly":   result.Anomaly,
 	})
 
 }

@@ -339,8 +339,8 @@ func (s *PaymentService) commitPaidOrderTx(ctx context.Context, tx *sqlx.Tx, ord
 		return err
 	}
 	return s.insertPaymentOutboxTx(ctx, tx, order, "order.paid", map[string]any{
-		"paid_amount": order.PaidAmount,
-		"status": order.Status,
+		"paid_amount":  order.PaidAmount,
+		"status":       order.Status,
 		"stock_status": order.StockStatus,
 	})
 }
@@ -413,14 +413,14 @@ func (s *PaymentService) insertPaymentOutboxTx(
 	extra map[string]any,
 ) error {
 	payload := map[string]any{
-		"order_id": order.ID.String(),
-		"store_id": order.StoreID.String(),
-		"order_number": order.OrderNumber,
-		"queue_number": order.QueueNumber,
-		"status": order.Status,
+		"order_id":       order.ID.String(),
+		"store_id":       order.StoreID.String(),
+		"order_number":   order.OrderNumber,
+		"queue_number":   order.QueueNumber,
+		"status":         order.Status,
 		"payment_status": order.PaymentStatus,
-		"stock_status": order.StockStatus,
-		"paid_amount": order.PaidAmount,
+		"stock_status":   order.StockStatus,
+		"paid_amount":    order.PaidAmount,
 	}
 	for key, value := range extra {
 		payload[key] = value
@@ -430,24 +430,24 @@ func (s *PaymentService) insertPaymentOutboxTx(
 		return err
 	}
 	event := domain.OutboxEvent{
-		ID: uuid.New(),
-		StoreID: order.StoreID,
-		EventType: eventType,
+		ID:            uuid.New(),
+		StoreID:       order.StoreID,
+		EventType:     eventType,
 		AggregateType: "order",
-		AggregateID: order.ID.String(),
-		Payload: string(bytes),
+		AggregateID:   order.ID.String(),
+		Payload:       string(bytes),
 	}
 	return s.orderRepo.InsertOutboxEvent(ctx, tx, &event)
 }
 
 func midtransWebhookEventHash(input MidtransWebhookInput, grossAmount int64) string {
 	canonical, _ := json.Marshal(struct {
-		ProviderOrderID string `json:"provider_order_id"`
-		TransactionID string `json:"transaction_id"`
-		StatusCode string `json:"status_code"`
+		ProviderOrderID   string `json:"provider_order_id"`
+		TransactionID     string `json:"transaction_id"`
+		StatusCode        string `json:"status_code"`
 		TransactionStatus string `json:"transaction_status"`
-		FraudStatus string `json:"fraud_status"`
-		GrossAmount int64 `json:"gross_amount"`
+		FraudStatus       string `json:"fraud_status"`
+		GrossAmount       int64  `json:"gross_amount"`
 	}{
 		ProviderOrderID: input.OrderID, TransactionID: input.TransactionID,
 		StatusCode: input.StatusCode, TransactionStatus: input.TransactionStatus,

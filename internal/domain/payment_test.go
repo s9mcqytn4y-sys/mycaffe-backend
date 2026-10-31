@@ -319,7 +319,6 @@ func extractCheckInValues(t *testing.T, sqlText, constraintName string) []string
 	return vals
 }
 
-
 func TestStockReservationMigrationUsesSafeLegacyDefault(t *testing.T) {
 	migrationPath := filepath.Join("..", "..", "db", "migrations", "20261030000003_add_orders_stock_reservation.up.sql")
 	raw, err := os.ReadFile(migrationPath)

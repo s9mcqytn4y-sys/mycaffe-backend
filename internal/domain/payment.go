@@ -284,41 +284,41 @@ func ValidateSplitAllocations(orderTotal int64, orderItems []OrderItem, splits [
 }
 
 type Payment struct {
-	ID                  uuid.UUID            `json:"id" db:"id"`
-	StoreID             uuid.UUID            `json:"store_id" db:"store_id"`
-	OrderID             uuid.UUID            `json:"order_id" db:"order_id"`
-	SplitID             *uuid.UUID           `json:"split_id,omitempty" db:"split_id"`
-	AttemptNo           int                  `json:"attempt_no" db:"attempt_no"`
-	IdempotencyKey      string               `json:"idempotency_key" db:"idempotency_key"`
-	RequestHash         string               `json:"-" db:"request_hash"`
-	Provider            string               `json:"provider" db:"provider"`
-	ProviderOrderID     string               `json:"provider_order_id" db:"provider_order_id"`
-	Amount              int64                `json:"amount" db:"amount"`
-	RefundedAmount      int64                `json:"refunded_amount" db:"refunded_amount"`
-	Method              PaymentMethod        `json:"method" db:"method"`
-	Status              PaymentAttemptStatus `json:"status" db:"status"`
-	RawProviderStatus   string               `json:"raw_provider_status,omitempty" db:"raw_provider_status"`
-	FraudStatus         string               `json:"fraud_status,omitempty" db:"fraud_status"`
-	TransactionID       string               `json:"transaction_id,omitempty" db:"transaction_id"`
-	PaymentType         string               `json:"payment_type,omitempty" db:"payment_type"`
-	Acquirer            string               `json:"acquirer,omitempty" db:"acquirer"`
-	QRString            string               `json:"qr_string,omitempty" db:"qr_string"`
-	DeeplinkURL         string               `json:"deeplink_url,omitempty" db:"deeplink_url"`
-	VANumber            string               `json:"va_number,omitempty" db:"va_number"`
-	Bank                string               `json:"bank,omitempty" db:"bank"`
-	BillerCode          string               `json:"biller_code,omitempty" db:"biller_code"`
-	BillKey             string               `json:"bill_key,omitempty" db:"bill_key"`
-	PaymentCode         string               `json:"payment_code,omitempty" db:"payment_code"`
-	ReconciliationRef   string               `json:"reconciliation_ref,omitempty" db:"reconciliation_ref"`
-	VerifiedByUserID    *uuid.UUID           `json:"verified_by_user_id,omitempty" db:"verified_by_user_id"`
-	CashTenderedAmount  int64                `json:"cash_tendered_amount,omitempty" db:"cash_tendered_amount"`
-	ChangeGivenAmount   int64                `json:"change_given_amount,omitempty" db:"change_given_amount"`
-	FailureCode         string               `json:"failure_code,omitempty" db:"failure_code"`
-	FailureReason       string               `json:"failure_reason,omitempty" db:"failure_reason"`
-	PaidAt              *time.Time           `json:"paid_at,omitempty" db:"paid_at"`
-	ExpiresAt           *time.Time           `json:"expires_at,omitempty" db:"expires_at"`
-	CreatedAt           time.Time            `json:"created_at" db:"created_at"`
-	UpdatedAt           time.Time            `json:"updated_at" db:"updated_at"`
+	ID                 uuid.UUID            `json:"id" db:"id"`
+	StoreID            uuid.UUID            `json:"store_id" db:"store_id"`
+	OrderID            uuid.UUID            `json:"order_id" db:"order_id"`
+	SplitID            *uuid.UUID           `json:"split_id,omitempty" db:"split_id"`
+	AttemptNo          int                  `json:"attempt_no" db:"attempt_no"`
+	IdempotencyKey     string               `json:"idempotency_key" db:"idempotency_key"`
+	RequestHash        string               `json:"-" db:"request_hash"`
+	Provider           string               `json:"provider" db:"provider"`
+	ProviderOrderID    string               `json:"provider_order_id" db:"provider_order_id"`
+	Amount             int64                `json:"amount" db:"amount"`
+	RefundedAmount     int64                `json:"refunded_amount" db:"refunded_amount"`
+	Method             PaymentMethod        `json:"method" db:"method"`
+	Status             PaymentAttemptStatus `json:"status" db:"status"`
+	RawProviderStatus  string               `json:"raw_provider_status,omitempty" db:"raw_provider_status"`
+	FraudStatus        string               `json:"fraud_status,omitempty" db:"fraud_status"`
+	TransactionID      string               `json:"transaction_id,omitempty" db:"transaction_id"`
+	PaymentType        string               `json:"payment_type,omitempty" db:"payment_type"`
+	Acquirer           string               `json:"acquirer,omitempty" db:"acquirer"`
+	QRString           string               `json:"qr_string,omitempty" db:"qr_string"`
+	DeeplinkURL        string               `json:"deeplink_url,omitempty" db:"deeplink_url"`
+	VANumber           string               `json:"va_number,omitempty" db:"va_number"`
+	Bank               string               `json:"bank,omitempty" db:"bank"`
+	BillerCode         string               `json:"biller_code,omitempty" db:"biller_code"`
+	BillKey            string               `json:"bill_key,omitempty" db:"bill_key"`
+	PaymentCode        string               `json:"payment_code,omitempty" db:"payment_code"`
+	ReconciliationRef  string               `json:"reconciliation_ref,omitempty" db:"reconciliation_ref"`
+	VerifiedByUserID   *uuid.UUID           `json:"verified_by_user_id,omitempty" db:"verified_by_user_id"`
+	CashTenderedAmount int64                `json:"cash_tendered_amount,omitempty" db:"cash_tendered_amount"`
+	ChangeGivenAmount  int64                `json:"change_given_amount,omitempty" db:"change_given_amount"`
+	FailureCode        string               `json:"failure_code,omitempty" db:"failure_code"`
+	FailureReason      string               `json:"failure_reason,omitempty" db:"failure_reason"`
+	PaidAt             *time.Time           `json:"paid_at,omitempty" db:"paid_at"`
+	ExpiresAt          *time.Time           `json:"expires_at,omitempty" db:"expires_at"`
+	CreatedAt          time.Time            `json:"created_at" db:"created_at"`
+	UpdatedAt          time.Time            `json:"updated_at" db:"updated_at"`
 }
 
 type PaymentNotificationLog struct {

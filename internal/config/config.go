@@ -46,6 +46,10 @@ type Config struct {
 	// AppPublicURL is the frontend origin used in links inside emails.
 	AppPublicURL string
 
+	// DefaultStoreSlug lets a single-cafe deployment omit the store code on login and forgot-PIN
+	// (owner decision Q3, single-tenant MVP). Multi-branch deployments leave it empty.
+	DefaultStoreSlug string
+
 	// Midtrans Core API
 	MidtransMerchantID   string
 	MidtransServerKey    string
@@ -166,6 +170,7 @@ func LoadConfig() (*Config, error) {
 		EmailFromEmail:          getEnv("EMAIL_FROM_ADDRESS", getEnv("SMTP_USERNAME", "")),
 		EmailFromName:           getEnv("EMAIL_FROM_NAME", "MyCaffe"),
 		AppPublicURL:            strings.TrimRight(getEnv("APP_PUBLIC_URL", frontendURL), "/"),
+		DefaultStoreSlug:        strings.ToLower(strings.TrimSpace(getEnv("DEFAULT_STORE_SLUG", ""))),
 		MidtransMerchantID:      getEnv("MIDTRANS_MERCHANT_ID", ""),
 		MidtransServerKey:       getEnv("MIDTRANS_SERVER_KEY", ""),
 		MidtransClientKey:       getEnv("MIDTRANS_CLIENT_KEY", ""),

@@ -16,12 +16,12 @@ ON CONFLICT (id) DO NOTHING;
 -- store_slug "central-cafe" or "express-counter" + the email below. Never seed PINs in production.
 INSERT INTO users (id, store_id, email, full_name, role, pin_hash, is_active, pin_set_at)
 VALUES
-    ('a0000001-0000-4000-8000-000000000001', '11111111-1111-4111-8111-111111111111', 'owner@mycaffe.local', 'Alexander (Owner)', 'owner', '$argon2id$v=19$m=19456,t=2,p=1$asaQjWwUQ7vf35jdVNPtlw$giPi5ZwfklHxgmJ2rcCuvkNw3zn5mEfDTdbaGvy+sFY', true, NOW()),
+    ('a0000001-0000-4000-8000-000000000001', '11111111-1111-4111-8111-111111111111', 'abdulaziz543333@gmail.com', 'Alexander (Owner)', 'owner', '$argon2id$v=19$m=19456,t=2,p=1$asaQjWwUQ7vf35jdVNPtlw$giPi5ZwfklHxgmJ2rcCuvkNw3zn5mEfDTdbaGvy+sFY', true, NOW()),
     ('a0000002-0000-4000-8000-000000000002', '11111111-1111-4111-8111-111111111111', 'kitchen.central@mycaffe.local', 'Sarah Jenkins (Kitchen)', 'kitchen', '$argon2id$v=19$m=19456,t=2,p=1$asaQjWwUQ7vf35jdVNPtlw$giPi5ZwfklHxgmJ2rcCuvkNw3zn5mEfDTdbaGvy+sFY', true, NOW()),
     ('a0000003-0000-4000-8000-000000000003', '11111111-1111-4111-8111-111111111111', 'cashier.central@mycaffe.local', 'Maya Putri (Cashier)', 'cashier', '$argon2id$v=19$m=19456,t=2,p=1$asaQjWwUQ7vf35jdVNPtlw$giPi5ZwfklHxgmJ2rcCuvkNw3zn5mEfDTdbaGvy+sFY', true, NOW()),
     ('a0000004-0000-4000-8000-000000000004', '11111111-1111-4111-8111-111111111111', 'barista.central@mycaffe.local', 'Doni Pratama (Barista)', 'barista', '$argon2id$v=19$m=19456,t=2,p=1$asaQjWwUQ7vf35jdVNPtlw$giPi5ZwfklHxgmJ2rcCuvkNw3zn5mEfDTdbaGvy+sFY', true, NOW()),
     ('a0000005-0000-4000-8000-000000000005', '22222222-2222-4222-8222-222222222222', 'cashier.express@mycaffe.local', 'Lestari Indah (Cashier)', 'cashier', '$argon2id$v=19$m=19456,t=2,p=1$asaQjWwUQ7vf35jdVNPtlw$giPi5ZwfklHxgmJ2rcCuvkNw3zn5mEfDTdbaGvy+sFY', true, NOW())
-ON CONFLICT (id) DO UPDATE SET pin_hash = EXCLUDED.pin_hash, pin_set_at = COALESCE(users.pin_set_at, NOW());
+ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email, pin_hash = EXCLUDED.pin_hash, pin_set_at = COALESCE(users.pin_set_at, NOW());
 
 -- 3. CATEGORIES
 INSERT INTO categories (id, store_id, name, display_order, is_active)
@@ -135,4 +135,23 @@ INSERT INTO audit_logs (
     'Initial stock replenishment for Gayo beans', 'd0000004-0000-4000-8000-000000000004',
     '{"old_stock": 0, "new_stock": 45}'::jsonb
 )
+ON CONFLICT (id) DO NOTHING;
+
+-- 12. CATALOG TYPES, STATIONS & VARIANTS (migration 000008, owner decision K1)
+-- Croissant is a ready-to-serve kitchen item; drinks are prepared at the bar (column default).
+UPDATE products SET product_type = 'ready_to_serve', prep_station = 'kitchen'
+WHERE id = 'd0000005-0000-4000-8000-000000000005';
+
+-- Every product sells through at least one default variant (idempotent backfill).
+INSERT INTO product_variants (store_id, product_id, name, sku, price, is_default, is_available)
+SELECT p.store_id, p.id, 'Reguler', '', p.base_price, true, true
+FROM products p
+WHERE NOT EXISTS (SELECT 1 FROM product_variants v WHERE v.store_id = p.store_id AND v.product_id = p.id);
+
+-- A sized drink: Caffe Latte Regular (default) and Large with their own SKUs.
+UPDATE product_variants SET sku = 'LAT-R'
+WHERE product_id = 'd0000002-0000-4000-8000-000000000002' AND is_default AND sku = '';
+INSERT INTO product_variants (id, store_id, product_id, name, sku, price, is_default, display_order)
+VALUES ('e0000002-0000-4000-8000-000000000022', '11111111-1111-4111-8111-111111111111',
+        'd0000002-0000-4000-8000-000000000002', 'Large', 'LAT-L', 32000, false, 1)
 ON CONFLICT (id) DO NOTHING;

@@ -182,6 +182,7 @@ func (s *OrderService) executeCreateOrderTx(ctx context.Context, trustedStoreID 
 			ModifierOptions:   catalogData.ModifierOptions,
 			ProductGroups:     catalogData.ProductModifierGroups,
 			OptionChildGroups: catalogData.OptionModifierGroups,
+			Variants:          catalogData.Variants,
 		}
 
 		priced, err := ValidateAndPriceOrder(catalogData.Store, normalizedInput, snapshot)

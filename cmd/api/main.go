@@ -120,6 +120,7 @@ func main() {
 	orderHandler := handler.NewOrderHandler(cfg, midtransClient, hub)
 	var authHandler *handler.AuthHandler
 	var posHandler *handler.POSHandler
+	var catalogHandler *handler.CatalogHandler
 	if db != nil {
 		authService := service.NewAuthService(db, postgres.NewAuthRepository(), cfg.JWTSecret, service.AuthPolicy{
 			AccessTokenTTL:     cfg.StaffAccessTokenTTL,
@@ -130,6 +131,7 @@ func main() {
 			PINLockout:         cfg.StaffPINLockout,
 		}, service.WithAuthEmail(newEmailService(cfg, db, workerCtx), cfg.AppPublicURL, ""))
 		authHandler = handler.NewAuthHandler(authService)
+		authHandler.DefaultStoreSlug = cfg.DefaultStoreSlug
 
 		orderRepo := postgres.NewOrderRepository()
 		orderService := service.NewOrderService(db, orderRepo)
@@ -139,6 +141,7 @@ func main() {
 		paymentService := service.NewPaymentService(db, paymentRepo, orderRepo, midtransClient)
 		midtransHandler.SetPaymentService(paymentService)
 		posHandler = handler.NewPOSHandler(orderService, paymentService, service.NewSettingsService(db))
+		catalogHandler = handler.NewCatalogHandler(service.NewCatalogService(db))
 
 		go paymentService.StartReconciliationWorker(workerCtx, 30*time.Second, 2*time.Minute, 50)
 	}
@@ -173,6 +176,24 @@ func main() {
 			pos := v1.Group("/pos")
 			pos.POST("/orders", authHandler.RequirePermission(rbac.OrderPOSCreate), posHandler.CreateOrder)
 			pos.POST("/orders/:id/payments", authHandler.RequireStaff(), posHandler.InitiatePayment)
+			pos.GET("/catalog", authHandler.RequireStaff(), catalogHandler.StaffCatalog)
+
+			// Guest menu (public, cacheable). Ordering stays contained until 02.01-D/E.
+			v1.GET("/public/stores/:slug/catalog", catalogHandler.PublicCatalog)
+
+			// Catalog management (catalog C3): owner CRUD; availability toggles follow the station permission.
+			manage := authHandler.RequirePermission(rbac.CatalogManage)
+			cat := v1.Group("/catalog")
+			cat.POST("/categories", manage, catalogHandler.CreateCategory)
+			cat.PATCH("/categories/:id", manage, catalogHandler.UpdateCategory)
+			cat.DELETE("/categories/:id", manage, catalogHandler.DeleteCategory)
+			cat.POST("/products", manage, catalogHandler.CreateProduct)
+			cat.PATCH("/products/:id", manage, catalogHandler.UpdateProduct)
+			cat.DELETE("/products/:id", manage, catalogHandler.ArchiveProduct)
+			cat.PATCH("/products/:id/availability", authHandler.RequireStaff(), catalogHandler.SetAvailability)
+			cat.POST("/products/:id/variants", manage, catalogHandler.CreateVariant)
+			cat.PATCH("/variants/:id", manage, catalogHandler.UpdateVariant)
+			cat.DELETE("/variants/:id", manage, catalogHandler.ArchiveVariant)
 		}
 	}
 

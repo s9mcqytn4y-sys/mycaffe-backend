@@ -74,6 +74,15 @@ Full evaluation and ordered backlog: [pos-operations-evaluation.md](pos-operatio
 Designs: [catalog-inventory-design.md](catalog-inventory-design.md), requirements:
 [../product/requirements-owner-staff-customer.md](../product/requirements-owner-staff-customer.md).
 
+## Cleanup, single tenant & iteration 3 (recorded 2026-10-31, fifth interview)
+
+| ID | Decision | Approved option |
+|----|----------|-----------------|
+| M1 | Docker cleanup | MyCaffe + safe garbage only (stopped containers, unused anonymous volumes, unused images, build cache); other projects' volumes and the MyCaffe demo/dev volumes kept |
+| M2 | Supabase | Removed from the repo, local `.env`, local MCP config, global CLI and `~/.supabase`; the Claude account connector is disconnected by the owner |
+| M3 | Single-tenant MVP | Multi-tenant schema kept for future branches; optional `DEFAULT_STORE_SLUG` so staff log in with email + PIN only; demo seed keeps two stores for isolation tests; demo owner email `abdulaziz543333@gmail.com` |
+| M4 | Iteration 3 priority | Catalog C1–C3 with the standard CRUD contract; media upload after the R2 bucket exists |
+
 ## Resolved from existing sources (not re-asked)
 
 | Topic | Resolution | Source |

@@ -96,6 +96,10 @@ type Product struct {
 	IsAvailable   bool       `json:"is_available" db:"is_available"`
 	TrackStock    bool       `json:"track_stock" db:"track_stock"`
 	StockQuantity int        `json:"stock_quantity" db:"stock_quantity"`
+	ProductType   string     `json:"product_type" db:"product_type"`
+	PrepStation   string     `json:"prep_station" db:"prep_station"`
+	DisplayOrder  int        `json:"display_order" db:"display_order"`
+	ArchivedAt    *time.Time `json:"archived_at,omitempty" db:"archived_at"`
 	CreatedAt     time.Time  `json:"created_at" db:"created_at"`
 	UpdatedAt     time.Time  `json:"updated_at" db:"updated_at"`
 }
@@ -212,4 +216,31 @@ func DefaultStoreSettings(storeID uuid.UUID) StoreSettings {
 		StoreID: storeID, VoidRefundOwnerThreshold: 100000, CashierMaxDiscountBPS: 1000, CashVarianceTolerance: 5000,
 		TableIdleCloseMinutes: 30, StaticQRISFallbackMode: StaticQRISFallbackAuto,
 	}
+}
+
+// Product types and preparation stations (migration 000008, owner decision K2).
+const (
+	ProductTypePrepared     = "prepared"
+	ProductTypeReadyToServe = "ready_to_serve"
+
+	PrepStationBar     = "bar"
+	PrepStationKitchen = "kitchen"
+	PrepStationNone    = "none"
+)
+
+// ProductVariant is a sellable form of a product with its own SKU and price (owner decision K1),
+// e.g. Caffe Latte "Reguler" / "Large". Every active product has exactly one default variant.
+type ProductVariant struct {
+	ID           uuid.UUID  `json:"id" db:"id"`
+	StoreID      uuid.UUID  `json:"-" db:"store_id"`
+	ProductID    uuid.UUID  `json:"product_id" db:"product_id"`
+	Name         string     `json:"name" db:"name"`
+	SKU          string     `json:"sku" db:"sku"`
+	Price        int64      `json:"price" db:"price"`
+	IsDefault    bool       `json:"is_default" db:"is_default"`
+	IsAvailable  bool       `json:"is_available" db:"is_available"`
+	DisplayOrder int        `json:"display_order" db:"display_order"`
+	ArchivedAt   *time.Time `json:"archived_at,omitempty" db:"archived_at"`
+	CreatedAt    time.Time  `json:"created_at" db:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at" db:"updated_at"`
 }

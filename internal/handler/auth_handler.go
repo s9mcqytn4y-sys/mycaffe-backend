@@ -26,6 +26,8 @@ const (
 type AuthHandler struct {
 	authService *service.AuthService
 	limiter     *loginFailureLimiter
+	// DefaultStoreSlug fills an omitted store_slug (single-cafe deployments, DEFAULT_STORE_SLUG).
+	DefaultStoreSlug string
 }
 
 func NewAuthHandler(authService *service.AuthService) *AuthHandler {
@@ -36,7 +38,7 @@ func NewAuthHandler(authService *service.AuthService) *AuthHandler {
 }
 
 type StaffLoginRequest struct {
-	StoreSlug string `json:"store_slug" binding:"required"`
+	StoreSlug string `json:"store_slug"`
 	Email     string `json:"email" binding:"required"`
 	PIN       string `json:"pin" binding:"required"`
 }
@@ -92,6 +94,9 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil || !pinFormat.MatchString(req.PIN) {
 		authError(c, http.StatusBadRequest, "INVALID_REQUEST", "Kode toko, email, dan PIN 6 digit wajib diisi.")
 		return
+	}
+	if req.StoreSlug == "" {
+		req.StoreSlug = h.DefaultStoreSlug
 	}
 
 	tokens, err := h.authService.Login(c.Request.Context(), service.LoginInput{

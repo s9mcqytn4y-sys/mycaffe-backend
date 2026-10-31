@@ -70,8 +70,13 @@ paths:
       security: []
       tags: [Catalog]
       operationId: getPublicStoreCatalog
-      summary: Retrieve active store catalog, modifier groups, and 1-level sub-addons
-      description: Status in Roadmap - Planned (Phase 02 Public QR Table Ordering API).
+      summary: Guest menu of a store (categories, products, variants, modifier groups)
+      x-implementation-status: implemented
+      description: |
+        Inactive categories and archived products are hidden; unavailable items stay listed with
+        `available=false` and `sold_out_reason`. Stock counts are not exposed. Responses carry a content
+        `ETag` (excluding `generated_at`) and `Cache-Control: public, max-age=30`; send `If-None-Match`
+        to get `304`.
       parameters:
         - name: store_slug
           in: path
@@ -79,19 +84,266 @@ paths:
           schema:
             type: string
             example: central-cafe
+        - $ref: "#/components/parameters/IfNoneMatch"
       responses:
         "200":
-          description: Store profile and active menu catalog
+          description: Menu
+          headers:
+            ETag:
+              schema:
+                type: string
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/PublicCatalogResponse"
+                $ref: "#/components/schemas/CatalogView"
+        "304":
+          description: Not modified
         "404":
-          description: Store not found or inactive
+          description: Store not found or inactive (`NOT_FOUND`)
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/pos/catalog:
+    get:
+      tags: [Catalog]
+      operationId: getStaffCatalog
+      summary: POS menu for signed-in staff (includes inactive categories and stock counts)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - $ref: "#/components/parameters/IfNoneMatch"
+      responses:
+        "200":
+          description: Menu
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CatalogView"
+        "304":
+          description: Not modified
+
+  /api/v1/catalog/categories:
+    post:
+      tags: [Catalog]
+      operationId: createCategory
+      summary: Create a category (owner, catalog.manage)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CategoryInput"
+      responses:
+        "201":
+          description: Created
+        "400":
+          $ref: "#/components/responses/InvalidJSON"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+
+  /api/v1/catalog/categories/{id}:
+    parameters:
+      - $ref: "#/components/parameters/ResourceID"
+    patch:
+      tags: [Catalog]
+      operationId: updateCategory
+      summary: Update a category (partial)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CategoryInput"
+      responses:
+        "200":
+          description: Updated
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+    delete:
+      tags: [Catalog]
+      operationId: deleteCategory
+      summary: Delete a category (its products remain, uncategorized)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "204":
+          description: Deleted
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/catalog/products:
+    post:
+      tags: [Catalog]
+      operationId: createProduct
+      summary: Create a product with its variants (owner)
+      x-implementation-status: implemented
+      description: At least one variant; exactly one default when there are several (a single variant becomes the default). `base_price` follows the default variant. SKUs are normalized to upper case.
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProductInput"
+      responses:
+        "201":
+          description: Created product with variants
+        "400":
+          $ref: "#/components/responses/InvalidJSON"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+
+  /api/v1/catalog/products/{id}:
+    parameters:
+      - $ref: "#/components/parameters/ResourceID"
+    patch:
+      tags: [Catalog]
+      operationId: updateProduct
+      summary: Update product fields (partial; variants have their own endpoints)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProductInput"
+      responses:
+        "200":
+          description: Updated
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+    delete:
+      tags: [Catalog]
+      operationId: archiveProduct
+      summary: Archive a product and its variants (order history keeps its snapshots)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "204":
+          description: Archived
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/catalog/products/{id}/availability:
+    parameters:
+      - $ref: "#/components/parameters/ResourceID"
+    patch:
+      tags: [Catalog]
+      operationId: setProductAvailability
+      summary: Mark a product available or sold out
+      x-implementation-status: implemented
+      description: Bar items need `item.availability.toggle.beverage` (barista, owner, cashier with `cashier_handles_bar`); kitchen items need `item.availability.toggle.food`.
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [is_available]
+              properties:
+                is_available:
+                  type: boolean
+      responses:
+        "204":
+          description: Updated
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/catalog/products/{id}/variants:
+    parameters:
+      - $ref: "#/components/parameters/ResourceID"
+    post:
+      tags: [Catalog]
+      operationId: createVariant
+      summary: Add a variant to a product (owner)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VariantInput"
+      responses:
+        "201":
+          description: Created
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+
+  /api/v1/catalog/variants/{id}:
+    parameters:
+      - $ref: "#/components/parameters/ResourceID"
+    patch:
+      tags: [Catalog]
+      operationId: updateVariant
+      summary: Update a variant (partial); price changes are audited (PRICE_CHANGE)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VariantInput"
+      responses:
+        "200":
+          description: Updated
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+    delete:
+      tags: [Catalog]
+      operationId: archiveVariant
+      summary: Archive a non-default variant
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "204":
+          description: Archived
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
 
   /api/v1/orders:
     post:
@@ -805,6 +1057,21 @@ components:
       description: Signed HMAC token binding a public dine-in/takeaway session to a specific `store_id` and `table_number`.
 
   parameters:
+    IfNoneMatch:
+      name: If-None-Match
+      in: header
+      required: false
+      schema:
+        type: string
+      description: ETag from a previous response; the server answers 304 when unchanged.
+    ResourceID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
     CsrfProtectionHeader:
       name: X-CSRF-Protection
       in: header
@@ -814,7 +1081,237 @@ components:
         type: string
         enum: ["1"]
 
+  responses:
+    InvalidJSON:
+      description: Malformed JSON body (`INVALID_JSON`)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Forbidden:
+      description: Missing permission (`FORBIDDEN`)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    NotFound:
+      description: Not found in the caller's store (`NOT_FOUND`)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Conflict:
+      description: Uniqueness clash (`CONFLICT`) on `field`
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ConflictResponse"
+    ValidationFailed:
+      description: Field-level validation errors (`VALIDATION_FAILED`)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ValidationErrorResponse"
+
   schemas:
+    ValidationErrorResponse:
+      type: object
+      required: [code, error, fields]
+      properties:
+        code:
+          type: string
+          enum: [VALIDATION_FAILED]
+        error:
+          type: string
+        fields:
+          type: object
+          additionalProperties:
+            type: string
+          description: "JSON field path to message, e.g. variants[0].price: harus antara 0 dan 100000000"
+    ConflictResponse:
+      type: object
+      required: [code, error, field]
+      properties:
+        code:
+          type: string
+          enum: [CONFLICT]
+        error:
+          type: string
+        field:
+          type: string
+    CategoryInput:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 100
+          description: Required on create.
+        display_order:
+          type: integer
+          minimum: 0
+          maximum: 10000
+        is_active:
+          type: boolean
+    VariantInput:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 60
+          description: Required on create.
+        sku:
+          type: string
+          maxLength: 64
+          pattern: "^[A-Za-z0-9._-]*$"
+          description: Optional; stored upper case; unique per store among active variants.
+        price:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 100000000
+          description: Integer Rupiah. Required on create.
+        is_default:
+          type: boolean
+        is_available:
+          type: boolean
+        display_order:
+          type: integer
+          minimum: 0
+          maximum: 10000
+    ProductInput:
+      type: object
+      properties:
+        category_id:
+          type: string
+          format: uuid
+        clear_category:
+          type: boolean
+          description: PATCH only; set true to remove the category.
+        name:
+          type: string
+          maxLength: 120
+          description: Required on create; unique per store (case-insensitive) among active products.
+        description:
+          type: string
+          maxLength: 1000
+        product_type:
+          type: string
+          enum: [prepared, ready_to_serve]
+        prep_station:
+          type: string
+          enum: [bar, kitchen, none]
+        display_order:
+          type: integer
+          minimum: 0
+          maximum: 10000
+        is_available:
+          type: boolean
+        track_stock:
+          type: boolean
+        stock_quantity:
+          type: integer
+          minimum: 0
+          maximum: 1000000
+        variants:
+          type: array
+          maxItems: 20
+          items:
+            $ref: "#/components/schemas/VariantInput"
+          description: Create only (at least one).
+    CatalogView:
+      type: object
+      required: [store, categories, products, generated_at]
+      properties:
+        store:
+          type: object
+          properties:
+            id:
+              type: string
+              format: uuid
+            slug:
+              type: string
+            name:
+              type: string
+            currency:
+              type: string
+            tax_bps:
+              type: integer
+            service_bps:
+              type: integer
+            qr_ordering_paused:
+              type: boolean
+        categories:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+                format: uuid
+              name:
+                type: string
+              display_order:
+                type: integer
+              is_active:
+                type: boolean
+        products:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+                format: uuid
+              category_id:
+                type: ["string", "null"]
+                format: uuid
+              name:
+                type: string
+              description:
+                type: string
+              type:
+                type: string
+                enum: [prepared, ready_to_serve]
+              prep_station:
+                type: string
+                enum: [bar, kitchen, none]
+              image_url:
+                type: ["string", "null"]
+              available:
+                type: boolean
+              sold_out_reason:
+                type: ["string", "null"]
+              stock_quantity:
+                type: integer
+                description: Staff view only.
+              variants:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: string
+                      format: uuid
+                    name:
+                      type: string
+                    sku:
+                      type: string
+                    price:
+                      type: integer
+                      format: int64
+                    is_default:
+                      type: boolean
+                    available:
+                      type: boolean
+              modifier_groups:
+                type: array
+                items:
+                  type: object
+                  description: "{id, name, selection, required, min, max, options[{id, name, price_delta, available, max_quantity, sub_groups[]}]}"
+        generated_at:
+          type: string
+          format: date-time
+
     HealthStatusResponse:
       type: object
       required: [status, service]

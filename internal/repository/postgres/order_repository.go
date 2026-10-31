@@ -28,6 +28,7 @@ type CatalogData struct {
 	ModifierOptions       map[uuid.UUID]domain.ModifierOption
 	OptionsByGroup        map[uuid.UUID][]domain.ModifierOption
 	OptionModifierGroups  map[uuid.UUID][]domain.OptionModifierGroup
+	Variants              map[uuid.UUID]domain.ProductVariant
 }
 
 type OrderRepository struct{}
@@ -252,6 +253,7 @@ func (r *OrderRepository) LockAndLoadCatalogForOrder(ctx context.Context, tx *sq
 		ModifierOptions:       make(map[uuid.UUID]domain.ModifierOption),
 		OptionsByGroup:        make(map[uuid.UUID][]domain.ModifierOption),
 		OptionModifierGroups:  make(map[uuid.UUID][]domain.OptionModifierGroup),
+		Variants:              make(map[uuid.UUID]domain.ProductVariant),
 	}
 
 	if len(uniqueProdIDs) == 0 {
@@ -263,9 +265,9 @@ func (r *OrderRepository) LockAndLoadCatalogForOrder(ctx context.Context, tx *sq
 		SELECT
 			id, store_id, category_id, name, COALESCE(description, '') AS description,
 			base_price, COALESCE(image_url, '') AS image_url, is_available,
-			track_stock, stock_quantity, created_at, updated_at
+			track_stock, stock_quantity, product_type, prep_station, display_order, created_at, updated_at
 		FROM products
-		WHERE store_id = ? AND id IN (?)
+		WHERE store_id = ? AND id IN (?) AND archived_at IS NULL
 		ORDER BY id ASC
 		FOR UPDATE
 	`, storeID, uniqueProdIDs)
@@ -280,6 +282,23 @@ func (r *OrderRepository) LockAndLoadCatalogForOrder(ctx context.Context, tx *sq
 	}
 	for _, p := range products {
 		data.Products[p.ID] = p
+	}
+
+	// Active variants of the requested products (owner decision K1).
+	varQuery, varArgs, err := sqlx.In(`
+		SELECT id, store_id, product_id, name, sku, price, is_default, is_available, display_order, created_at, updated_at
+		FROM product_variants
+		WHERE store_id = ? AND product_id IN (?) AND archived_at IS NULL
+	`, storeID, uniqueProdIDs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build product_variants query: %w", err)
+	}
+	var variants []domain.ProductVariant
+	if err := tx.SelectContext(ctx, &variants, tx.Rebind(varQuery), varArgs...); err != nil {
+		return nil, fmt.Errorf("failed to query product_variants: %w", err)
+	}
+	for _, v := range variants {
+		data.Variants[v.ID] = v
 	}
 
 	// Load product_modifier_groups for requested products.
@@ -584,11 +603,11 @@ func (r *OrderRepository) InsertOrderItem(ctx context.Context, tx *sqlx.Tx, item
 		INSERT INTO order_items (
 			id, store_id, order_id, product_id, config_hash, snapshot_name,
 			unit_base_price, modifier_total_price, snapshot_price, quantity,
-			subtotal_amount, selected_options, notes
+			subtotal_amount, selected_options, notes, variant_id, snapshot_variant_name, snapshot_sku
 		) VALUES (
 			$1, $2, $3, $4, $5, $6,
 			$7, $8, $9, $10,
-			$11, $12::jsonb, $13
+			$11, $12::jsonb, $13, $14, $15, $16
 		)
 		RETURNING created_at
 	`
@@ -596,7 +615,7 @@ func (r *OrderRepository) InsertOrderItem(ctx context.Context, tx *sqlx.Tx, item
 		ctx, query,
 		item.ID, item.StoreID, item.OrderID, item.ProductID, item.ConfigHash, item.SnapshotName,
 		item.UnitBasePrice, item.ModifierTotalPrice, item.SnapshotPrice, item.Quantity,
-		item.SubtotalAmount, selectedOptsJSON, item.Notes,
+		item.SubtotalAmount, selectedOptsJSON, item.Notes, item.VariantID, item.SnapshotVariant, item.SnapshotSKU,
 	).Scan(&item.CreatedAt)
 }
 

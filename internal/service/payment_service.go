@@ -86,7 +86,7 @@ func (s *PaymentService) ProcessMidtransWebhook(
 	if input.OrderID == "" || input.StatusCode == "" || input.TransactionStatus == "" || input.GrossAmount == "" {
 		return nil, ErrInvalidMidtransWebhook
 	}
-	if input.Currency != "IDR" {
+	if input.Currency != "" && input.Currency != "IDR" {
 		return nil, fmt.Errorf("%w: only IDR is accepted", ErrInvalidMidtransWebhook)
 	}
 

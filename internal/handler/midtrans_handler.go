@@ -75,13 +75,13 @@ func (h *MidtransHandler) HandleWebhook(c *gin.Context) {
 		return
 	}
 	if notif.OrderID == "" || notif.StatusCode == "" || notif.GrossAmount == "" ||
-		notif.SignatureKey == "" || notif.TransactionStatus == "" || notif.Currency == "" {
+		notif.SignatureKey == "" || notif.TransactionStatus == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "missing required notification fields"})
 		return
 	}
-	if h.midtransClient == nil || h.paymentService == nil {
+	if h.midtransClient == nil {
 		c.Header("Retry-After", "60")
-		c.JSON(http.StatusServiceUnavailable, gin.H{"status": "deferred", "message": "payment webhook service is not ready"})
+		c.JSON(http.StatusServiceUnavailable, gin.H{"status": "deferred", "message": "payment gateway verifier is not ready"})
 		return
 	}
 
@@ -114,6 +114,15 @@ func (h *MidtransHandler) HandleWebhook(c *gin.Context) {
 	}
 	if mappedStatus == "paid" && notif.StatusCode != "200" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "paid notification must have status_code 200"})
+		return
+	}
+
+	// Only require durable service availability after the payload has passed
+	// signature, currency, amount, and status validation. Invalid requests should
+	// retain their 4xx response even when the database-backed service is not wired.
+	if h.paymentService == nil {
+		c.Header("Retry-After", "60")
+		c.JSON(http.StatusServiceUnavailable, gin.H{"status": "deferred", "message": "payment webhook service is not ready"})
 		return
 	}
 

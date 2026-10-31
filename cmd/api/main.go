@@ -13,11 +13,11 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/jmoiron/sqlx"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/config"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/domain"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/handler"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/database"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/mailer"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/midtrans"
+	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/rbac"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/realtime"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/repository/postgres"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/service"
@@ -78,6 +78,7 @@ func main() {
 	if err := router.SetTrustedProxies(cfg.TrustedProxies); err != nil {
 		log.Fatalf("[FATAL CONFIG] invalid TRUSTED_PROXIES: %v", err)
 	}
+	router.Use(handler.RequestID(), handler.LimitBody(1<<20))
 
 	// Strict Origin-Validated CORS Middleware (No Wildcard + Credentials violation)
 	router.Use(func(c *gin.Context) {
@@ -118,6 +119,7 @@ func main() {
 	midtransHandler := handler.NewMidtransHandler(midtransClient, hub)
 	orderHandler := handler.NewOrderHandler(cfg, midtransClient, hub)
 	var authHandler *handler.AuthHandler
+	var posHandler *handler.POSHandler
 	if db != nil {
 		authService := service.NewAuthService(db, postgres.NewAuthRepository(), cfg.JWTSecret, service.AuthPolicy{
 			AccessTokenTTL:     cfg.StaffAccessTokenTTL,
@@ -135,8 +137,8 @@ func main() {
 
 		paymentRepo := postgres.NewPaymentRepository()
 		paymentService := service.NewPaymentService(db, paymentRepo, orderRepo, midtransClient)
-		orderHandler.SetPaymentService(paymentService)
 		midtransHandler.SetPaymentService(paymentService)
+		posHandler = handler.NewPOSHandler(orderService, paymentService, service.NewSettingsService(db))
 
 		go paymentService.StartReconciliationWorker(workerCtx, 30*time.Second, 2*time.Minute, 50)
 	}
@@ -146,7 +148,6 @@ func main() {
 	{
 		v1.GET("/health", healthHandler.Check)
 		v1.POST("/orders", orderHandler.CreateOrder)
-		v1.POST("/orders/:id/payments/initiate", orderHandler.InitiateOrderPayment)
 		v1.POST("/payments/midtrans/webhook", midtransHandler.HandleWebhook)
 		if authHandler != nil {
 			staffAuth := v1.Group("/auth/staff")
@@ -158,11 +159,20 @@ func main() {
 			staffAuth.POST("/pin/setup", authHandler.SetupPIN)
 			staffAuth.POST("/pin/change", authHandler.RequireStaff(), authHandler.ChangePIN)
 
-			owner := v1.Group("/staff", authHandler.RequireStaff(domain.RoleOwner))
+			owner := v1.Group("/staff", authHandler.RequirePermission(rbac.StaffManage))
 			owner.GET("", authHandler.ListStaff)
 			owner.POST("", authHandler.InviteStaff)
 			owner.POST("/:id/pin-reset", authHandler.SendPINReset)
 			owner.POST("/:id/temporary-pin", authHandler.IssueTemporaryPIN)
+
+			store := v1.Group("/store")
+			store.GET("/settings", authHandler.RequireStaff(), posHandler.GetSettings)
+			store.PATCH("/settings", authHandler.RequirePermission(rbac.StoreSettingsManage), posHandler.UpdateSettings)
+
+			// POS (ADR-003 D8 "staff" class): store and actor come from the access token only.
+			pos := v1.Group("/pos")
+			pos.POST("/orders", authHandler.RequirePermission(rbac.OrderPOSCreate), posHandler.CreateOrder)
+			pos.POST("/orders/:id/payments", authHandler.RequireStaff(), posHandler.InitiatePayment)
 		}
 	}
 
@@ -184,9 +194,11 @@ func main() {
 	})
 
 	srv := &http.Server{
-		Addr:        ":" + cfg.Port,
-		Handler:     router,
-		ReadTimeout: 15 * time.Second,
+		Addr:              ":" + cfg.Port,
+		Handler:           router,
+		ReadTimeout:       15 * time.Second,
+		ReadHeaderTimeout: 5 * time.Second,
+		MaxHeaderBytes:    64 << 10,
 		// Payment initiation may spend a 12s Midtrans charge plus a 12s CheckTransaction fallback;
 		// keep this above that budget and at or below Nginx proxy_read_timeout (30s) for /api.
 		WriteTimeout: 30 * time.Second,

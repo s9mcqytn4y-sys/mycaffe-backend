@@ -13,7 +13,7 @@ Disusun 2026-10-31 setelah wawancara owner (keputusan E1–E5, T1–T2, C1–C3,
 | Password | **Tidak dipakai** (keputusan E1). Kompensasinya lockout 5×/15 menit, limit per-IP, limit Nginx, dan email ke owner saat akun terkunci | Implemented & Tested |
 | Aktivasi & reset PIN | Undangan email (48 jam), lupa PIN (30 menit), PIN sementara dari owner yang wajib diganti, link sekali pakai, hash-only | Implemented & Tested |
 | Sesi | Access 15 menit, refresh berotasi, maksimal 3 sesi, idle 2 jam, reuse → sesi dicabut, race antar-tab → 409 | Implemented & Tested |
-| RBAC | `RequireStaff(role)` dipakai untuk rute manajemen staf; matriks izin lengkap, PIN owner untuk ambang O1/O4, dan pencabutan `store_id`/`actor_user_id` dari body | **Planned (02.01-C)** |
+| RBAC | ✅ 02.01-C: matriks izin `internal/pkg/rbac`, `RequirePermission`, `/me.permissions`, identitas dari token di rute POS, `store_settings` (ambang O1/O4/C1, toggle C3). PIN owner untuk ambang O1/O4 diterapkan saat fitur void/refund/diskon dibuat; dan pencabutan `store_id`/`actor_user_id` dari body | **Planned (02.01-C)** |
 | Risiko tersisa | PIN 6 digit = 10⁶ kombinasi. Penyerang yang tahu email + kode toko bisa sengaja mengunci akun (DoS terarah); mitigasinya unlock oleh owner dan notifikasi email | Accepted risk |
 
 ## 2. Meja, kunjungan meja, group order, split bill
@@ -151,7 +151,7 @@ Klaim baris memakai `FOR UPDATE SKIP LOCKED` agar aman bila ada lebih dari satu 
 | # | Item | Bergantung pada | Status |
 |---|------|-----------------|--------|
 | 1 | Email outbox + aktivasi/reset PIN + PIN 6 digit | — | **Selesai di PR ini** |
-| 2 | 02.01-C RBAC: matriks izin, `/me.permissions`, identitas tepercaya di rute order/pembayaran, PIN owner untuk ambang O1/O4, toggle C3 | 1 | Next |
+| 2 | ✅ Selesai — 02.01-C RBAC: matriks izin, `/me.permissions`, identitas tepercaya di rute order/pembayaran, PIN owner untuk ambang O1/O4, toggle C3 | 1 | Next |
 | 3 | 02.01-D Tabel meja + signed QR + jeda darurat | 2 | Planned |
 | 4 | 02.01-E Guest session + `table_sessions` + form email/consent (E4) | 3 | Planned |
 | 5 | Outbox relay → WebSocket + WS ticket + replay | 2 | Planned (Phase 03) |

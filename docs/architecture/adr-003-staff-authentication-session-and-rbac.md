@@ -21,7 +21,7 @@ Classification used below: *Implemented & Tested*, *Guarded / Fail-Closed*, *Pla
 | JWT validation (`internal/pkg/auth/token.go`) | HS256 only, required `exp`, `iss=mycaffe-backend`, `aud=mycaffe-pos`, UUID `store_id`/`user_id`, role enum | Implemented & Tested |
 | JWT issuance | Only `GenerateTestToken`; no production issuer, no `sid`/`jti`/purpose claim, no refresh/revocation | Planned |
 | Config | `JWT_SECRET_KEY` (≥32 chars, fail-closed in production), `JWT_EXPIRED_HOURS` default 24 | Implemented |
-| Routes | `POST /api/v1/orders`, `POST /api/v1/orders/:id/payments/initiate`, `GET /ws` fail-closed (`503`) in staging/production; webhook protected by Midtrans SHA-512 | Guarded / Fail-Closed |
+| Routes | (historical, before 02.01-C) `POST /api/v1/orders`, `POST /api/v1/orders/:id/payments/initiate`, `GET /ws` fail-closed (`503`) in staging/production; webhook protected by Midtrans SHA-512 | Guarded / Fail-Closed |
 | Request identity | `CreateOrderRequest.store_id` and `InitiateOrderPaymentRequest.store_id` / `actor_user_id` are client-supplied | Guarded (contained routes only) |
 | Audit | `audit_logs` with composite FK `(store_id, actor_id) → users(store_id, id)`; action CHECK has no auth/session actions | Implemented |
 | Staff login, middleware, RBAC policy | None wired | Planned |
@@ -32,7 +32,7 @@ Classification used below: *Implemented & Tested*, *Guarded / Fail-Closed*, *Pla
 |---|---|---|---|
 | F1 | Pre-auth `store_slug → store_id` lookup is impossible for `mycaffe_app` because of `stores` RLS. | Login cannot resolve the tenant without either a bypass or a dedicated resolver. | D5: narrowly-scoped `SECURITY DEFINER` resolver returning only `(id, is_active)`. |
 | F2 | Gin trusted proxies are not configured (`router.SetTrustedProxies` is never called), so `c.ClientIP()` honours any client-supplied `X-Forwarded-For`. | Per-IP login throttling and IP logging can be spoofed/bypassed. | Must be fixed in 02.01-B **before** per-IP limits are relied upon: trust only the Nginx container network, read `X-Real-IP` set by Nginx. |
-| F3 | `GET /ws` accepts the staff JWT via `?token=` query string (dev only today). | Once real access tokens exist, they would land in Nginx access logs and browser history. | 02.01-C removes query-string acceptance of staff access tokens; WebSocket gets a separate one-time ticket in Phase 03. Route stays contained until then. |
+| F3 | `GET /ws` accepted the staff JWT via `?token=` query string (dev only). **Removed in 02.01-C.** | Once real access tokens exist, they would land in Nginx access logs and browser history. | 02.01-C removes query-string acceptance of staff access tokens; WebSocket gets a separate one-time ticket in Phase 03. Route stays contained until then. |
 | F4 | `uq_users_store_email` is case-sensitive. | `Owner@x.id` and `owner@x.id` can coexist; login lookup becomes ambiguous. | Normalize emails to `lower(trim(email))` at write and lookup; add `UNIQUE (store_id, lower(email))` after a duplicate pre-check. |
 | F5 | `JWT_EXPIRED_HOURS=24` is incompatible with the approved 15-minute access TTL. | Long-lived bearer tokens survive role change/deactivation. | Deprecate; replace with `STAFF_ACCESS_TOKEN_TTL` / `STAFF_REFRESH_TOKEN_TTL` (D4). |
 | F6 | `audit_logs.store_id` is `NOT NULL`. | Failed logins against an unknown/invalid store cannot be written to `audit_logs`. | Unknown-store failures go to structured application logs only (no raw email, see §6). |
@@ -158,7 +158,7 @@ Every route gets exactly one class; a route accepting more than one token type i
 | `provider-webhook` | provider signature | `POST /api/v1/payments/midtrans/webhook` (unchanged) |
 | `ws-ticket` | one-time ticket | `/ws` (Phase 03; stays contained) |
 
-Consequence for current routes (02.01-C): `POST /api/v1/orders` and `POST /api/v1/orders/:id/payments/initiate` move under `staff` (POS path) and lose `store_id` / `actor_user_id` from their request bodies — a **breaking contract change**, approved as part of this ADR. The guest ordering path is a separate route in 02.01-E. Both stay contained in staging/production until their middleware and integration tests land.
+Consequence for current routes (02.01-C): `POST /api/v1/orders` and `POST /api/v1/orders/:id/payments/initiate` move under `staff` (POS path) and lose `store_id` / `actor_user_id` from their request bodies — a **breaking contract change**, approved as part of this ADR. The guest ordering path is a separate route in 02.01-E. Both stay contained in staging/production until their middleware and integration tests land. **Implemented 2026-10-31:** POS routes are `POST /api/v1/pos/orders` and `POST /api/v1/pos/orders/{id}/payments`; the old initiate route was removed.
 
 ## 3. Threat model (STRIDE, staff-auth surface)
 

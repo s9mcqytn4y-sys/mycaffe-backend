@@ -10,7 +10,7 @@ tests and docs exist — a table or domain model alone is not an implementation.
 `payment_notification_logs`, `outbox_events`, `audit_logs`.
 
 **HTTP routes today:** `GET /health*`, `POST /api/v1/orders` (staging/prod `503`),
-`POST /api/v1/orders/:id/payments/initiate` (staging/prod `503`),
+`POST /api/v1/pos/orders`, `POST /api/v1/pos/orders/{id}/payments`, `GET/PATCH /api/v1/store/settings` (staff, RBAC),
 `POST /api/v1/payments/midtrans/webhook`, `GET /ws` (staging/prod `503`).
 
 ## Phase 01 — Database, Orders, Payments
@@ -32,7 +32,7 @@ blocked on the business any more. Order: B → C → D → E → F.
 | 02.01-A Auth design (ADR-003, OpenAPI) | Done — ADR-003 + OpenAPI contract merged with 02.01-B (O1–O4 recorded) | ADR, RBAC matrix, threat model | ADR reflects decision register; PR merged |
 | 02.01-B Staff authentication | Implemented & Tested (PR #11) | `auth_sessions` table (refresh hash, family, idle/absolute expiry), `resolve_store_for_login` SECURITY DEFINER, argon2id PIN, lockout columns on `users`, login/refresh/logout, case-insensitive email uniqueness, seed argon2id dev PINs | Login → 15 min access + rotating refresh cookie; reuse revokes family; 3-session cap; 2 h idle; lockout after 5; generic 401; PG18 tests incl. cross-tenant |
 | 02.01-B2 Email outbox & staff account lifecycle | Implemented & Tested | `email_outbox` + worker, templates, invite/activation, forgot/reset PIN, temporary PIN, PIN 6 digit, owner lock notice | Links single-use + hash-only; no enumeration; bodies scrubbed after send; PG18 tests |
-| 02.01-C Middleware & RBAC | Planned | Trusted actor/tenant from token; remove `store_id`/`actor_user_id` from bodies; permission policy; O1/O4 PIN re-auth + thresholds; audit; drop `?token=` on `/ws` | Every tenant route rejects missing/foreign token; cashier void above threshold needs owner PIN; tests per role |
+| 02.01-C Middleware & RBAC | Implemented & Tested (permission thresholds enforced when void/refund/discount ship) | Trusted actor/tenant from token; remove `store_id`/`actor_user_id` from bodies; permission policy; O1/O4 PIN re-auth + thresholds; audit; drop `?token=` on `/ws` | Every tenant route rejects missing/foreign token; cashier void above threshold needs owner PIN; tests per role |
 | 02.01-D Tables & signed QR | Planned | `tables` (+ `qr_version`, `qr_ordering_enabled`), composite FKs, HMAC QR with key ID, rotate/revoke, per-store emergency pause, audit | Old QR version rejected; paused store rejects all scans; QR key ≠ JWT key |
 | 02.01-E Guest table session | Planned | QR exchange → per-device guest token (3 h), order/session binding, own-order tracking | Guest A cannot read guest B's order on the same table; expired session rejected |
 | 02.01-F Release readiness | Planned | Open `503` guards in staging, OpenAPI sync, RLS + tenant security review, staging verification on the demo stack | Order + payment flow works end-to-end through the tunnel with real auth |
@@ -43,7 +43,7 @@ blocked on the business any more. Order: B → C → D → E → F.
 |-------|--------|--------|-----------|
 | 03 | POS & KDS realtime | Planned | Outbox relay → WebSocket, one-time WS ticket, station routing (barista/kitchen), `preparing/ready/served`, "late payment" flag (Q7), reconnect replay |
 | 03 | TV queue display | Planned | Public read-only queue feed scoped by store, no PII |
-| 04 | Catalog & inventory management | Planned (tables exist) | Product/category/modifier CRUD API, availability toggles, stock adjustment + movement history (no `stock_movements` table yet), stock opname, HPP/cost fields |
+| 04 | Catalog & inventory management (design: `catalog-inventory-design.md`, steps C1–C7) | Planned (tables exist) | Product/category/modifier CRUD API, availability toggles, stock adjustment + movement history (no `stock_movements` table yet), stock opname, HPP/cost fields |
 | 04 | Void / refund / discount | Planned | Refund ledger workflow (webhook currently only stores refund/chargeback events), O1 threshold, O4 discount cap |
 | 05 | Shift & cash management | Planned (no tables) | `shifts`, cash drawer, open/close, discrepancy with PIN + reason |
 | 05 | Expenses & finance | Planned (no tables) | Expense recording, gateway settlement & MDR reconciliation, gross profit (needs HPP), net profit (needs expenses) |

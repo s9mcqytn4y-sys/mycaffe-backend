@@ -186,3 +186,30 @@ type AccountToken struct {
 	CreatedBy *uuid.UUID `db:"created_by"`
 	CreatedAt time.Time  `db:"created_at"`
 }
+
+// Static QRIS fallback modes (owner decision K8).
+const (
+	StaticQRISFallbackOff    = "off"
+	StaticQRISFallbackAuto   = "auto"
+	StaticQRISFallbackForced = "forced"
+)
+
+// StoreSettings are owner-managed operating policies (store_settings). Amounts are integer Rupiah.
+type StoreSettings struct {
+	StoreID                  uuid.UUID `json:"-" db:"store_id"`
+	VoidRefundOwnerThreshold int64     `json:"void_refund_owner_threshold" db:"void_refund_owner_threshold"`
+	CashierMaxDiscountBPS    int64     `json:"cashier_max_discount_bps" db:"cashier_max_discount_bps"`
+	CashVarianceTolerance    int64     `json:"cash_variance_tolerance" db:"cash_variance_tolerance"`
+	CashierHandlesBar        bool      `json:"cashier_handles_bar" db:"cashier_handles_bar"`
+	TableIdleCloseMinutes    int       `json:"table_idle_close_minutes" db:"table_idle_close_minutes"`
+	QROrderingPaused         bool      `json:"qr_ordering_paused" db:"qr_ordering_paused"`
+	StaticQRISFallbackMode   string    `json:"static_qris_fallback_mode" db:"static_qris_fallback_mode"`
+}
+
+// DefaultStoreSettings mirrors the column defaults of migration 000007.
+func DefaultStoreSettings(storeID uuid.UUID) StoreSettings {
+	return StoreSettings{
+		StoreID: storeID, VoidRefundOwnerThreshold: 100000, CashierMaxDiscountBPS: 1000, CashVarianceTolerance: 5000,
+		TableIdleCloseMinutes: 30, StaticQRISFallbackMode: StaticQRISFallbackAuto,
+	}
+}

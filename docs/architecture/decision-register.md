@@ -56,6 +56,24 @@ Setup details: [docs/setup/windows-dev-environment.md](../setup/windows-dev-envi
 
 Full evaluation and ordered backlog: [pos-operations-evaluation.md](pos-operations-evaluation.md).
 
+## Catalog, owner self-service & finance (recorded 2026-10-31, fourth interview)
+
+| ID | Decision | Approved option |
+|----|----------|-----------------|
+| K1 | Menu variants | `product_variants` with own SKU, price and recipe (Regular/Large, Hot/Iced); modifiers stay for add-ons |
+| K2 | Inventory depth | Ready-to-serve items counted in units; prepared items use recipes/BOM of ingredients (g/ml/pcs) deducted on payment, minimum stock alerts, moving-average cost for HPP, stock opname, append-only movements |
+| K3 | Self-service configuration | All business settings editable by the owner in the app; infrastructure secrets (Midtrans keys, SMTP, DB, DNS) stay in the server `.env` and only their status is shown |
+| K4 | Subscriptions | Hostinger auto-renew + in-app expiry dates (domain/VPS/email), automatic TLS expiry check, owner email at 30/7/1 days and on failed backup |
+| K5 | Midtrans settlement | No withdraw button exists; app shows expected daily settlement (gross, MDR, net) and reconciles against an imported Midtrans settlement CSV |
+| K6 | Loyalty | Digital stamp card ("buy N get 1"), customer identified by a verified email, one stamp per paid order, reward = audited 100% item discount |
+| K7 | Promo & bundling | Owner-defined automatic promos (percent/amount, product/category, happy hour, period, quota), fixed-price bundles, cashier discount within O4; one best promo per line, no stacking; vouchers later |
+| K8 | Static QRIS fallback | Automatic after 2 consecutive Midtrans failures or forced by the owner; cashier confirms with a reference; auto-return to dynamic QRIS after 10 minutes |
+| K9 | Media storage | Cloudflare R2 via presigned upload; JPEG/PNG/WebP ≤ 5 MB, magic-byte check, EXIF stripped, WebP 200/600/1200 variants, CDN delivery |
+| C-scope | Phase 02.01-C | Approved and implemented: RBAC matrix, `store_settings`, token-bound POS routes, `/me.permissions`, removal of client-supplied store/actor and of `/ws?token=` |
+
+Designs: [catalog-inventory-design.md](catalog-inventory-design.md), requirements:
+[../product/requirements-owner-staff-customer.md](../product/requirements-owner-staff-customer.md).
+
 ## Resolved from existing sources (not re-asked)
 
 | Topic | Resolution | Source |

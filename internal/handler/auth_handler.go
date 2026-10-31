@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/rbac"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/service"
 )
 
@@ -56,7 +57,7 @@ type StaffSessionResponse struct {
 // StaffMeResponse matches the OpenAPI StaffMeResponse schema.
 type StaffMeResponse struct {
 	Staff service.StaffIdentity `json:"staff"`
-	// Permissions is filled from the RBAC policy in 02.01-C; empty until then.
+	// Permissions: effective RBAC set; a UI hint only, every request is re-checked server-side.
 	Permissions       []string  `json:"permissions"`
 	SessionExpiresAt  time.Time `json:"session_expires_at"`
 	PINChangeRequired bool      `json:"pin_change_required"`
@@ -198,7 +199,7 @@ func (h *AuthHandler) Me(c *gin.Context) {
 		c.Header("Cache-Control", "no-store")
 		c.JSON(http.StatusOK, StaffMeResponse{
 			Staff:             authenticated.Staff,
-			Permissions:       []string{},
+			Permissions:       rbac.Strings(authenticated.Permissions),
 			SessionExpiresAt:  authenticated.SessionExpiresAt,
 			PINChangeRequired: authenticated.PINChangeRequired,
 		})

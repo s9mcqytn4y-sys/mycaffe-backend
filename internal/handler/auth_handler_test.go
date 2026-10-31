@@ -1,6 +1,7 @@
 package handler_test
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -57,5 +58,37 @@ func TestAuthHandlerRejectsBeforeService(t *testing.T) {
 	if w.Code != http.StatusNoContent || !strings.Contains(cookie, "Max-Age=0") || !strings.Contains(cookie, "HttpOnly") ||
 		!strings.Contains(cookie, "Secure") || !strings.Contains(cookie, "SameSite=Strict") || !strings.Contains(cookie, "Path=/api/v1/auth/staff") {
 		t.Fatalf("logout: %d Set-Cookie=%q", w.Code, cookie)
+	}
+}
+
+func TestRequestIDAndBodyLimit(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Use(handler.RequestID(), handler.LimitBody(16))
+	r.POST("/echo", func(c *gin.Context) {
+		if _, err := io.ReadAll(c.Request.Body); err != nil {
+			c.Status(http.StatusRequestEntityTooLarge)
+			return
+		}
+		c.Status(http.StatusOK)
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/echo", strings.NewReader("small"))
+	req.Header.Set(handler.RequestIDHeader, "nginx-req-12345678")
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK || w.Header().Get(handler.RequestIDHeader) != "nginx-req-12345678" {
+		t.Fatalf("well-formed inbound request id must be kept: %d %q", w.Code, w.Header().Get(handler.RequestIDHeader))
+	}
+
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/echo", strings.NewReader(strings.Repeat("x", 64)))
+	req.Header.Set(handler.RequestIDHeader, "bad id\r\nX-Injected: 1")
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("oversized body must be rejected, got %d", w.Code)
+	}
+	if id := w.Header().Get(handler.RequestIDHeader); len(id) != 36 {
+		t.Fatalf("malformed inbound id must be replaced by a UUID, got %q", id)
 	}
 }

@@ -110,6 +110,10 @@ func main() {
 		orderRepo := postgres.NewOrderRepository()
 		orderService := service.NewOrderService(db, orderRepo)
 		orderHandler.SetOrderService(orderService)
+
+		paymentRepo := postgres.NewPaymentRepository()
+		paymentService := service.NewPaymentService(db, paymentRepo, orderRepo, midtransClient)
+		midtransHandler.SetPaymentService(paymentService)
 	}
 
 	// Register Routes

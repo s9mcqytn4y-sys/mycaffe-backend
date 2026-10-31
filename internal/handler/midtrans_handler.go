@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"log"
 	"net/http"
@@ -10,6 +11,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/midtrans"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/realtime"
+	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/repository/postgres"
+	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/service"
 )
 
 const MaxWebhookBodyBytes = 64 * 1024 // 64 KB maximum payload size
@@ -17,6 +20,7 @@ const MaxWebhookBodyBytes = 64 * 1024 // 64 KB maximum payload size
 type MidtransHandler struct {
 	midtransClient *midtrans.Client
 	realtimeHub    *realtime.Hub
+	paymentService *service.PaymentService
 }
 
 func NewMidtransHandler(client *midtrans.Client, hub *realtime.Hub) *MidtransHandler {
@@ -24,6 +28,10 @@ func NewMidtransHandler(client *midtrans.Client, hub *realtime.Hub) *MidtransHan
 		midtransClient: client,
 		realtimeHub:    hub,
 	}
+}
+
+func (h *MidtransHandler) SetPaymentService(paymentService *service.PaymentService) {
+	h.paymentService = paymentService
 }
 
 type MidtransNotificationPayload struct {
@@ -42,7 +50,7 @@ type MidtransNotificationPayload struct {
 
 // HandleWebhook processes incoming Midtrans payment notifications.
 // @Summary Midtrans Webhook Callback
-// @Description Secure webhook endpoint for Midtrans Core API. Verifies SHA-512 signature, parses integer IDR gross_amount, validates status mapping, and fails-closed with 503 until durable DB persistence repository is active.
+// @Description Secure webhook endpoint for Midtrans Core API. Verifies SHA-512 signature, validates IDR amount/status, and durably reconciles the payment ledger and order state.
 // @Tags Payments
 // @Accept json
 // @Produce json
@@ -66,62 +74,96 @@ func (h *MidtransHandler) HandleWebhook(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid json payload"})
 		return
 	}
-
-	// 2. Validate mandatory notification fields
-	if notif.OrderID == "" || notif.StatusCode == "" || notif.GrossAmount == "" || notif.SignatureKey == "" || notif.TransactionStatus == "" {
+	if notif.OrderID == "" || notif.StatusCode == "" || notif.GrossAmount == "" ||
+		notif.SignatureKey == "" || notif.TransactionStatus == "" || notif.Currency == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "missing required notification fields"})
 		return
 	}
-
-	// 3. Validate Order ID format (non-empty, max 100 chars)
-	trimmedOrderID := strings.TrimSpace(notif.OrderID)
-	if len(trimmedOrderID) < 3 || len(trimmedOrderID) > 100 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid order_id length: must be between 3 and 100 characters"})
+	if h.midtransClient == nil || h.paymentService == nil {
+		c.Header("Retry-After", "60")
+		c.JSON(http.StatusServiceUnavailable, gin.H{"status": "deferred", "message": "payment webhook service is not ready"})
 		return
 	}
 
-	// 4. Verify Midtrans signature using raw gross_amount string:
-	// SHA512(order_id + status_code + gross_amount + server_key)
-	isValid := h.midtransClient.VerifySignature(
-		notif.OrderID,
-		notif.StatusCode,
-		notif.GrossAmount,
-		notif.SignatureKey,
-	)
+	trimmedOrderID := strings.TrimSpace(notif.OrderID)
+	if len(trimmedOrderID) < 3 || len(trimmedOrderID) > 100 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid order_id length"})
+		return
+	}
 
-	if !isValid {
-		log.Printf("[SECURITY] Invalid Midtrans signature received for order: %s", notif.OrderID)
+	// 2. Verify SHA-512(order_id + status_code + gross_amount + server_key).
+	if !h.midtransClient.VerifySignature(notif.OrderID, notif.StatusCode, notif.GrossAmount, notif.SignatureKey) {
+		log.Printf("[SECURITY] Invalid Midtrans signature received for provider order ID: %s", trimmedOrderID)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid signature key"})
 		return
 	}
 
-	// 5. Validate currency (if provided, must be IDR) and parse integer Rupiah gross_amount without float64
-	if notif.Currency != "" && !strings.EqualFold(strings.TrimSpace(notif.Currency), "IDR") {
+	if !strings.EqualFold(strings.TrimSpace(notif.Currency), "IDR") {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported currency: only IDR is accepted"})
 		return
 	}
-
 	grossAmountIDR, err := midtrans.ParseGrossAmountIDR(notif.GrossAmount)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid gross_amount format"})
 		return
 	}
-
 	mappedStatus, err := midtrans.MapMidtransStatus(notif.TransactionStatus, notif.FraudStatus)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported transaction_status or fraud_status"})
 		return
 	}
+	if mappedStatus == "paid" && notif.StatusCode != "200" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "paid notification must have status_code 200"})
+		return
+	}
 
-	// 6. P0 Fail-Closed / Durable Storage Enforcement:
-	// The database repository is not yet connected to execute ACID transaction updates on payments & orders.
-	// Returning HTTP 200 would falsely acknowledge receipt and lose state permanently.
-	// We return HTTP 503 Service Unavailable with a Retry-After header so Midtrans gateway safely retries delivery.
-	log.Printf("[WEBHOOK AUDIT] Valid signature for order %s, amount: %d IDR, mapped_status: %s. Durable DB storage uncommitted.", trimmedOrderID, grossAmountIDR, mappedStatus)
+	// Persist only a sanitized payload. signature_key is not needed after verification.
+	var sanitized map[string]json.RawMessage
+	if err := json.Unmarshal(body, &sanitized); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid json payload"})
+		return
+	}
+	delete(sanitized, "signature_key")
+	sanitizedBytes, err := json.Marshal(sanitized)
+	if err != nil {
+		c.Header("Retry-After", "60")
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "failed to prepare notification audit payload"})
+		return
+	}
 
-	c.Header("Retry-After", "60")
-	c.JSON(http.StatusServiceUnavailable, gin.H{
-		"status":  "deferred",
-		"message": "Signature verified, but durable payment storage transaction is uncommitted. Returning 503 to trigger gateway retry.",
+	result, err := h.paymentService.ProcessMidtransWebhook(c.Request.Context(), service.MidtransWebhookInput{
+		OrderID: notif.OrderID,
+		TransactionID: notif.TransactionID,
+		StatusCode: notif.StatusCode,
+		TransactionStatus: notif.TransactionStatus,
+		GrossAmount: notif.GrossAmount,
+		FraudStatus: notif.FraudStatus,
+		PaymentType: notif.PaymentType,
+		Currency: notif.Currency,
+	}, string(sanitizedBytes))
+	if err != nil {
+		if errors.Is(err, service.ErrInvalidMidtransWebhook) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payment notification"})
+			return
+		}
+		if errors.Is(err, postgres.ErrPaymentNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "payment attempt not found"})
+			return
+		}
+		log.Printf("[WEBHOOK ERROR] provider_order_id=%s amount=%d error=%v", trimmedOrderID, grossAmountIDR, err)
+		c.Header("Retry-After", "60")
+		c.JSON(http.StatusServiceUnavailable, gin.H{"status": "deferred", "message": "payment notification could not be committed; provider retry requested"})
+		return
+	}
+
+	if result.Anomaly {
+		log.Printf("[WEBHOOK ANOMALY] provider_order_id=%s amount=%d status=%s; durable event stored for reconciliation", trimmedOrderID, grossAmountIDR, result.Status)
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"status": "ok",
+		"duplicate": result.Duplicate,
+		"ignored": result.Ignored,
+		"anomaly": result.Anomaly,
 	})
+
 }

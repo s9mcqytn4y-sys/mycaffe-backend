@@ -47,7 +47,7 @@ jobs:
             echo "$diffs"
             while IFS= read -r file; do
               echo "gofmt diff for $file:"
-              gofmt -d "$file"
+              gofmt -d "$file" || true
             done <<< "$diffs"
             exit 1
           fi

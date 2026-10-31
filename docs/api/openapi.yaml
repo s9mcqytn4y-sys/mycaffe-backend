@@ -33,6 +33,7 @@ tags:
 paths:
   /health:
     get:
+      security: []
       tags: [Health]
       operationId: getLiveness
       summary: Liveness probe
@@ -46,6 +47,7 @@ paths:
 
   /health/ready:
     get:
+      security: []
       tags: [Health]
       operationId: getReadiness
       summary: Readiness probe (verifies PostgreSQL 18 connection pool)
@@ -65,6 +67,7 @@ paths:
 
   /api/v1/public/stores/{store_slug}/catalog:
     get:
+      security: []
       tags: [Catalog]
       operationId: getPublicStoreCatalog
       summary: Retrieve active store catalog, modifier groups, and 1-level sub-addons
@@ -139,16 +142,62 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
-  /api/v1/orders/{order_id}/payments/initiate:
+  /api/v1/pos/orders:
     post:
-      tags: [Payments]
-      operationId: initiatePayment
-      summary: Initiate a payment attempt for a payment split (Dynamic QRIS, GoPay, ShopeePay, VA, Cash, Static QRIS, EDC)
+      tags: [Orders]
+      operationId: createPosOrder
+      summary: Create a POS order (cashier/owner)
+      x-implementation-status: implemented
       description: |
-        Status in Roadmap - Implemented & Tested in `PaymentService.InitiatePayment` (Phase 01 Sub-task 04); Guarded / Fail-Closed (`503`) at HTTP layer in `staging`/`production` until Phase 02 auth middleware is wired.
+        Permission `order.pos.create`. The store and the acting user come only from the access token;
+        any `store_id` or `actor_user_id` in the body is ignored. Prices, taxes, service charge, stock and
+        modifiers are recomputed server-side. Replaying the same `idempotency_key` with the same payload
+        returns the original order (200); a different payload returns 409.
       security:
         - BearerStaffJWT: []
-        - TableQRToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateOrderRequest"
+      responses:
+        "201":
+          description: Order created
+        "200":
+          description: Idempotent replay of an existing order
+        "400":
+          description: Invalid order or modifier selection (`INVALID_ORDER`, `INVALID_REQUEST`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Missing `order.pos.create` (`FORBIDDEN`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Unavailable item, insufficient stock, or idempotency conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/pos/orders/{order_id}/payments:
+    post:
+      tags: [Payments]
+      operationId: initiatePosPayment
+      summary: Take or initiate a payment for an order split (cashier/owner)
+      x-implementation-status: implemented
+      description: |
+        Direct tender (`cash`, `static_qris`, `edc`) needs `payment.tender.direct` and settles in one audited
+        transaction recorded against the signed-in user. Gateway methods (`qris`, `gopay`, `shopeepay`,
+        `bank_transfer`) need `payment.initiate.gateway` and run a two-phase Midtrans Core API charge.
+        Replaces the removed `POST /api/v1/orders/{order_id}/payments/initiate`.
+      security:
+        - BearerStaffJWT: []
       parameters:
         - name: order_id
           in: path
@@ -164,19 +213,80 @@ paths:
               $ref: "#/components/schemas/InitiatePaymentRequest"
       responses:
         "200":
-          description: Payment attempt recorded and gateway charge initiated (or cashier tender settled)
+          description: Payment attempt recorded (gateway charge details or settled cashier tender)
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/InitiatePaymentResponse"
-        "409":
-          description: Split already paid, order expired, or conflicting idempotency_key payload
+        "400":
+          description: Invalid method, method not enabled, insufficient cash, or missing reconciliation_ref (`INVALID_PAYMENT`)
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
-        "503":
-          description: Fail-closed in staging/production while trusted tenant identity middleware is not yet bound
+        "403":
+          description: Role may not take this payment method (`FORBIDDEN`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Order not found in the caller's store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Split already paid, order not payable, or idempotency conflict (`PAYMENT_CONFLICT`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/store/settings:
+    get:
+      tags: [Staff]
+      operationId: getStoreSettings
+      summary: Read the store's operating policies (any signed-in staff)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: Current settings (defaults when never changed)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StoreSettings"
+    patch:
+      tags: [Staff]
+      operationId: updateStoreSettings
+      summary: Change operating policies (owner)
+      x-implementation-status: implemented
+      description: Partial update; omitted fields keep their value. Permission `store.settings.manage`. Every change is audited (`STORE_SETTINGS_CHANGED`) with before/after values. Permission changes such as `cashier_handles_bar` apply to the next request without re-login.
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StoreSettings"
+      responses:
+        "200":
+          description: Updated settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StoreSettings"
+        "400":
+          description: Out-of-range value (`INVALID_SETTINGS`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Not an owner (`FORBIDDEN`)
           content:
             application/json:
               schema:
@@ -184,6 +294,7 @@ paths:
 
   /api/v1/payments/midtrans/webhook:
     post:
+      security: []
       tags: [Payments]
       operationId: handleMidtransWebhook
       summary: Midtrans HTTP Notification Webhook
@@ -837,7 +948,7 @@ components:
           $ref: "#/components/schemas/StaffProfile"
         permissions:
           type: array
-          description: Effective permission constants from the backend RBAC policy (ADR-003 D7). UI hints only; the backend re-checks every request. Returned as an empty array until the RBAC policy ships in 02.01-C.
+          description: Effective permission constants from the backend RBAC policy (ADR-003 D7). UI hints only; the backend re-checks every request. Includes store-dependent grants such as `cashier_handles_bar`.
           items:
             type: string
           example: [order.pos.create, payment.tender.direct, shift.open]
@@ -1212,7 +1323,7 @@ components:
 
     InitiatePaymentRequest:
       type: object
-      required: [idempotency_key, split_id, payment_method]
+      required: [idempotency_key, method]
       properties:
         idempotency_key:
           type: string
@@ -1221,56 +1332,109 @@ components:
         split_id:
           type: string
           format: uuid
-        payment_method:
+          description: Required only when the order has more than one payment split.
+        method:
           $ref: "#/components/schemas/PaymentMethod"
         bank:
           type: string
-          enum: [bca, bni, bri, permata]
-          description: Required only when `payment_method` is `bank_transfer`
+          enum: [bca, bni, bri, mandiri, permata]
+          description: Required only when `method` is `bank_transfer`
         cash_tendered_amount:
           type: integer
           format: int64
-          description: Required when `payment_method` is `cash`; must be `>= split.total_amount`
-        external_reference:
+          description: Required when `method` is `cash`; must be `>= split.total_amount` (integer Rupiah)
+        reconciliation_ref:
           type: string
-          maxLength: 120
-          description: Optional receipt/approval code for `static_qris` or `edc` cashier settlement
+          maxLength: 100
+          description: Required for `static_qris` and `edc` (bank/terminal reference)
+        callback_url:
+          type: string
+          maxLength: 500
+          description: Optional e-wallet deeplink return URL
+
+    StoreSettings:
+      type: object
+      properties:
+        void_refund_owner_threshold:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Void/refund above this amount (Rupiah) needs the owner PIN (O1). Default 100000.
+        cashier_max_discount_bps:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 10000
+          description: Largest discount a cashier may give without owner PIN, in basis points (O4). Default 1000 (10%).
+        cash_variance_tolerance:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Shift-close cash difference (Rupiah) above which a reason + owner PIN is required (C1). Default 5000.
+        cashier_handles_bar:
+          type: boolean
+          description: Cashier also gets barista KDS and beverage availability permissions (C3). Default false.
+        table_idle_close_minutes:
+          type: integer
+          minimum: 5
+          maximum: 240
+          description: Auto-close a table visit this long after all orders are paid and served (T1). Default 30.
+        qr_ordering_paused:
+          type: boolean
+          description: Emergency pause for QR table ordering. Default false.
+        static_qris_fallback_mode:
+          type: string
+          enum: ["off", auto, forced]
+          description: Static QRIS fallback when Midtrans fails (K8). Default auto.
 
     InitiatePaymentResponse:
       type: object
-      required: [payment_id, provider_order_id, payment_method, status, amount]
+      required: [payment, order, split, is_idempotent_replay]
+      description: Mirrors `service.InitiatePaymentResult`.
       properties:
-        payment_id:
-          type: string
-          format: uuid
-        provider_order_id:
-          type: string
-          example: ORD-20261030-0001-S1-A1
-        payment_method:
-          $ref: "#/components/schemas/PaymentMethod"
-        status:
-          $ref: "#/components/schemas/PaymentStatus"
-        amount:
-          type: integer
-          format: int64
-          example: 83160
-        cash_tendered_amount:
-          type: integer
-          format: int64
-        change_given_amount:
-          type: integer
-          format: int64
-        qr_string:
-          type: string
-        qr_code_url:
-          type: string
-        deeplink_url:
-          type: string
-        va_number:
-          type: string
-        expiry_time:
-          type: ["string", "null"]
-          format: date-time
+        is_idempotent_replay:
+          type: boolean
+        payment:
+          type: object
+          required: [id, provider_order_id, method, status, amount]
+          properties:
+            id:
+              type: string
+              format: uuid
+            provider_order_id:
+              type: string
+            method:
+              $ref: "#/components/schemas/PaymentMethod"
+            status:
+              $ref: "#/components/schemas/PaymentStatus"
+            amount:
+              type: integer
+              format: int64
+            cash_tendered_amount:
+              type: integer
+              format: int64
+            change_given_amount:
+              type: integer
+              format: int64
+            qr_string:
+              type: string
+            deeplink_url:
+              type: string
+            va_number:
+              type: string
+            verified_by_user_id:
+              type: string
+              format: uuid
+              description: Signed-in staff member who settled a direct tender.
+            expires_at:
+              type: ["string", "null"]
+              format: date-time
+        order:
+          type: object
+          description: The order after the payment (status, payment_status, totals).
+        split:
+          type: object
+          description: The payment split that was paid or charged.
 
     MidtransWebhookPayload:
       type: object

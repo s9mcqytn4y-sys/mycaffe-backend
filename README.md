@@ -32,51 +32,54 @@ Status setiap komponen diklasifikasikan ke dalam empat kategori tegas: **Impleme
 
 | Feature / Module | Status | Verification & Scope Details |
 | :--- | :--- | :--- |
-| **Authentication & Token Validator** (`internal/pkg/auth`) | **Implemented & Tested** | JWT HMAC-SHA256 dengan validasi algoritma, masa berlaku (`exp`), issuer (`mycaffe-backend`), audience (`mycaffe-pos`), UUID `store_id` & `user_id`, serta 4 role operasional (`owner`, `cashier`, `barista`, `kitchen`). |
+| **Staff Authentication & Sessions** (Phase 02.01-B, `internal/service/auth_service.go`) | **Implemented & Tested** | Login `store_slug + email + PIN 6 digit` (argon2id), access token 15 menit, refresh berotasi (cookie HttpOnly) dengan deteksi reuse, maks 3 sesi, idle 2 jam, lockout 5×/15 menit, CLI `bootstrap-store` / `reset-owner-pin`. |
+| **Email Outbox & Staff Account Lifecycle** (Phase 02, `internal/pkg/mailer`) | **Implemented & Tested** | Undangan staf, lupa/reset PIN, PIN sementara, notifikasi akun terkunci; antrean `email_outbox` + worker retry; Gmail (dev/demo) / Hostinger SMTP (produksi). |
+| **RBAC, Store Settings & POS Routes** (Phase 02.01-C, `internal/pkg/rbac`) | **Implemented & Tested** | Matriks izin 4 peran, `RequirePermission`, `/me.permissions`, `store_settings` (ambang void/diskon/selisih kas, toggle kasir-barista), `POST /api/v1/pos/orders` & `/pos/orders/{id}/payments` dengan toko dan pelaku dari token. |
 | **Database Migrations, Triple-Role & RLS** (`db/migrations/`, `cmd/migrate`) | **Implemented & Tested** | Skema PostgreSQL 18 (17 tabel) dengan pemisahan `postgres`, `mycaffe_migrator`, dan `mycaffe_app` (`NOSUPERUSER NOBYPASSRLS`), `ON DELETE RESTRICT` pada histori finansial, checksum SHA-256 pada `schema_migrations`, dan migrasi aditif `orders.request_hash`. |
 | **Catalog Pricing Engine & 1-Level Sub-Addons** (`internal/service/pricing.go`) | **Implemented & Tested** | Validasi server-side untuk ketersediaan produk/modifier, aturan grup (`single`/`multiple`, `min_select`/`max_select`, `override_required`), sub-addon 1 level (`OptionModifierGroup`), pembulatan BPS *Round Half Up*, dan proteksi overflow `int64`. |
 | **Transactional Order Repository & Service** (`internal/repository/postgres`, `internal/service/order_service.go`) | **Implemented & Tested** | Eksekusi transaksi penuh di dalam `database.WithTenantTx`: deteksi idempotensi & konflik payload (`ErrIdempotencyConflict`), penguncian & pengurangan stok atomik (`FOR UPDATE`), alokasi nomor pesanan (`ORD-YYYYMMDD-XXXX`) & antrean (`A001`), penyimpanan `orders`, `order_items`, `order_item_options`, `payment_splits`, serta `outbox_events`. Diuji pada PostgreSQL 18 sebagai `mycaffe_app`. |
 | **Docker, Nginx TLS Bootstrap & R2 Backup Scripts** (`deploy/`, `scripts/`) | **Implemented & Tested** | Multi-stage Dockerfile (`api` + `migrate`), `docker-compose.prod.yml`, entrypoint bootstrap TLS mandiri Nginx, serta skrip backup/restore terenkripsi GPG AES256+SHA512 ke Cloudflare R2. |
-| **Public Order HTTP Endpoint** (`POST /api/v1/orders`) | **Guarded / Fail-Closed** | Mengembalikan `503 Service Unavailable` pada `staging` dan `production` hingga middleware identitas tenant (JWT staf atau signed table QR token) diikat pada rute HTTP publik. Mode simulasi hanya aktif pada `development`. |
+| **Guest QR Order Endpoint** (`POST /api/v1/orders`) | **Guarded / Fail-Closed** | `503` di `staging`/`production` sampai signed table QR + guest session (02.01-D/E). Mode simulasi hanya di `development`. |
 | **Realtime WebSocket Hub** (`/ws`) | **Guarded / Fail-Closed** | Memvalidasi token JWT dan kesesuaian `store_id` pada `development`; mengembalikan `503 Service Unavailable` pada `staging` dan `production` hingga tiket sesi WebSocket dan relay `outbox_events` diaktifkan. |
 | **Midtrans Webhook Callback** (`POST /api/v1/payments/midtrans/webhook`) | **Implemented & Tested** | Verifikasi signature SHA-512, batas body `64 KB`, `IDR`, integer `gross_amount`, pemetaan status; inbox durable `payment_notification_logs` (hash SHA-256 per event), proteksi notifikasi out-of-order, deteksi selisih nominal dan pembayaran ganda (`payment.refund_required`). Mengembalikan `503` (`Retry-After: 60`) hanya bila commit database gagal agar Midtrans mengulang. |
-| **Payment Initiation, Ledger & Reconciliation Worker** (Phase 01 Sub-task 04) | **Implemented & Tested** (layanan) / **Guarded** (HTTP) | Tunai/static QRIS/EDC dalam satu transaksi beraudit; Midtrans Core API dua fase tanpa menahan lock saat HTTP; idempotensi `idempotency_key` + `request_hash`; worker kedaluwarsa pesanan & rekonsiliasi `CheckTransaction`. Rute `POST /api/v1/orders/:id/payments/initiate` tetap `503` di `staging`/`production` sampai auth Phase 02. Diuji di PostgreSQL 18. |
-| **Signed Table QR Token & Staff Auth HTTP Middleware** (Phase 02) | **Planned** | Pengikatan konteks `store_id` terautentikasi pada endpoint HTTP publik dan kasir untuk membuka guard `503` pada `POST /api/v1/orders`. |
+| **Payment Ledger & Reconciliation Worker** (Phase 01 Sub-task 04) | **Implemented & Tested** | Tunai/static QRIS/EDC beraudit; Midtrans Core API dua fase; idempotensi; worker kedaluwarsa & `CheckTransaction`; deteksi pembayaran ganda. Diakses lewat rute POS terautentikasi. |
+| **Signed Table QR, Guest Session, KDS Realtime, Shift, Catalog** | **Planned** | Lihat `docs/architecture/roadmap.md` dan `docs/architecture/pos-operations-evaluation.md`. |
 | **Live Midtrans Production & Hostinger VPS Cutover** | **Blocked by Dependency** | Menunggu kredensial produksi Midtrans, domain/DNS aktif, dan provisioning Hostinger KVM 2 VPS oleh pemilik proyek. |
 
 ---
 
-## Local Development Setup
+## Local Development Setup (Windows)
 
-### 1. Prasyarat
-- Go 1.27.3 terpasang di PATH
-- Docker & Docker Compose
+Prasyarat: Go 1.27.3, Docker Desktop. Semua perintah ada di `scripts/dev.ps1`
+(detail: [docs/setup/windows-dev-environment.md](docs/setup/windows-dev-environment.md)).
 
-### 2. Konfigurasi Environment
-Salin template konfigurasi:
 ```powershell
-Copy-Item .env.example .env
-```
-Sesuaikan nilai `DATABASE_URL`, `DATABASE_MIGRATION_URL`, dan `MIDTRANS_SERVER_KEY` untuk environment sandbox lokal.
-
-### 3. Menjalankan Database Lokal & Migrasi via Docker
-```powershell
-docker compose -f deploy/docker/docker-compose.yml up -d postgres
-go run ./cmd/migrate -action=up
-go run ./cmd/migrate -action=seed
+./scripts/dev.ps1 setup      # .env dari template, PostgreSQL 18 lokal, migrasi, seed
+./scripts/dev.ps1 run        # API di http://localhost:8080
+./scripts/dev.ps1 login      # uji login staf dengan PIN dev 482913
+./scripts/dev.ps1 test-int   # tes integrasi PostgreSQL 18 (sama seperti CI)
+./scripts/dev.ps1 check      # gofmt, vet, mod tidy, govulncheck, tes
+./scripts/dev.ps1 demo-up    # demo publik lewat Cloudflare Quick Tunnel
 ```
 
-### 4. Menjalankan Tes & Linting
-```powershell
-gofmt -l .
-go vet ./...
-go test -v -race ./...
-```
+`dev.ps1` selalu memakai PostgreSQL Docker lokal, walaupun `DATABASE_URL` di `.env` menunjuk host lain.
 
-### 5. Menjalankan Aplikasi
-```powershell
-go run ./cmd/api
-```
+## Dokumentasi
+
+| Topik | Dokumen |
+|-------|---------|
+| Keputusan owner (semua sesi wawancara) | [docs/architecture/decision-register.md](docs/architecture/decision-register.md) |
+| Roadmap & status sub-task | [docs/architecture/roadmap.md](docs/architecture/roadmap.md) |
+| Use case, alur & sequence per peran | [docs/architecture/pos-use-cases-and-sequences.md](docs/architecture/pos-use-cases-and-sequences.md) |
+| Evaluasi operasional POS & backlog | [docs/architecture/pos-operations-evaluation.md](docs/architecture/pos-operations-evaluation.md) |
+| Register risiko keamanan | [docs/architecture/security-risk-register.md](docs/architecture/security-risk-register.md) |
+| Katalog, varian, BOM, inventaris, media | [docs/architecture/catalog-inventory-design.md](docs/architecture/catalog-inventory-design.md) |
+| Kebutuhan owner, staf, pelanggan | [docs/product/requirements-owner-staff-customer.md](docs/product/requirements-owner-staff-customer.md) |
+| Auth, sesi & RBAC | [docs/architecture/adr-003-staff-authentication-session-and-rbac.md](docs/architecture/adr-003-staff-authentication-session-and-rbac.md) |
+| Topologi VPS | [docs/architecture/adr-002-single-vps-docker-topology.md](docs/architecture/adr-002-single-vps-docker-topology.md) |
+| Kontrak database & ledger pembayaran | [phase-01-database-contract.md](docs/architecture/phase-01-database-contract.md), [phase-01-subtask-04-payment-ledger-spec.md](docs/architecture/phase-01-subtask-04-payment-ledger-spec.md) |
+| Email, demo, lingkungan Windows | [docs/setup/email.md](docs/setup/email.md), [docs/setup/demo-staging-environment.md](docs/setup/demo-staging-environment.md), [docs/setup/windows-dev-environment.md](docs/setup/windows-dev-environment.md) |
+| Kontrak API | [docs/api/openapi.yaml](docs/api/openapi.yaml) |
 
 ---
 

@@ -45,7 +45,7 @@
 - **Guarded / Fail-Closed**:
   - `POST /api/v1/orders`: Returns `503 Service Unavailable` in `staging` and `production` until authenticated tenant middleware is wired on the HTTP route.
   - `GET /ws`: Returns `503 Service Unavailable` in `staging` and `production` until Phase 03 session ticket lifecycle is active.
-  - `POST /api/v1/orders/:id/payments/initiate`: Returns `503 Service Unavailable` in `staging` and `production` until Phase 02 staff/guest authentication replaces the client-supplied `store_id` and `actor_user_id`.
+  - `POST /api/v1/pos/orders` and `POST /api/v1/pos/orders/{id}/payments` (Phase 02.01-C): open to authenticated staff with the matching RBAC permission; store and actor come from the token.
 - **Implemented & Tested (Phase 01 Sub-task 04)**:
   - Payment initiation (cash/static QRIS/EDC + Midtrans Core API two-phase charge), durable webhook inbox, duplicate-settlement detection, order expiry and reconciliation worker (`internal/service/payment_service.go`).
 - **Planned**:

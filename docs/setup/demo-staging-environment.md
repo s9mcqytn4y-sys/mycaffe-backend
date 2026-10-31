@@ -46,7 +46,8 @@ container restarts**. For a stable hostname, create a Named Tunnel in the Cloudf
 | `GET /health/live`, `/health/ready` | `200` |
 | `POST /api/v1/payments/midtrans/webhook` | Live: rejects unsigned/invalid payloads; signed sandbox notifications are processed |
 | `POST /api/v1/auth/staff/login`, `/refresh`, `/logout`, `GET /api/v1/auth/staff/me` | Live (Phase 02.01-B). Dev PIN `482913` for seeded staff; strict limit on `/login` only |
-| `POST /api/v1/orders`, `POST /api/v1/orders/:id/payments/initiate`, `GET /ws` | `503` (by design, until 02.01-C binds routes to the authenticated staff/guest identity) |
+| `POST /api/v1/pos/orders`, `POST /api/v1/pos/orders/{id}/payments`, `GET/PATCH /api/v1/store/settings` | Live for signed-in staff with the matching permission (02.01-C) |
+| `POST /api/v1/orders` (guest), `GET /ws` | `503` (by design, until guest sessions 02.01-E and the WS ticket in Phase 03) |
 
 To exercise the full order/payment flow locally, use the development stack
 (`deploy/docker/docker-compose.yml`, `APP_ENV=development`) which is **not** exposed publicly.

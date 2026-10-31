@@ -78,6 +78,7 @@ func main() {
 	if err := router.SetTrustedProxies(cfg.TrustedProxies); err != nil {
 		log.Fatalf("[FATAL CONFIG] invalid TRUSTED_PROXIES: %v", err)
 	}
+	router.Use(handler.RequestID(), handler.LimitBody(1<<20))
 
 	// Strict Origin-Validated CORS Middleware (No Wildcard + Credentials violation)
 	router.Use(func(c *gin.Context) {
@@ -193,9 +194,11 @@ func main() {
 	})
 
 	srv := &http.Server{
-		Addr:        ":" + cfg.Port,
-		Handler:     router,
-		ReadTimeout: 15 * time.Second,
+		Addr:              ":" + cfg.Port,
+		Handler:           router,
+		ReadTimeout:       15 * time.Second,
+		ReadHeaderTimeout: 5 * time.Second,
+		MaxHeaderBytes:    64 << 10,
 		// Payment initiation may spend a 12s Midtrans charge plus a 12s CheckTransaction fallback;
 		// keep this above that budget and at or below Nginx proxy_read_timeout (30s) for /api.
 		WriteTimeout: 30 * time.Second,

@@ -21,10 +21,32 @@ const (
 	maxMessageSize = 4096
 )
 
+// Channels a client can subscribe to (iteration 5c). Guests get "guest.<guest_session_id>".
+const (
+	ChannelPOS         = "pos"
+	ChannelKDSBar      = "kds.bar"
+	ChannelKDSKitchen  = "kds.kitchen"
+	ChannelGuestPrefix = "guest."
+)
+
+// EventMessage is one outbox event as sent to WebSocket clients. Seq is the per-store outbox
+// sequence; clients keep the highest seq seen and send it back as last_seq when reconnecting.
 type EventMessage struct {
-	Type    string      `json:"type"`     // e.g. "order.created", "order.status_changed", "payment.paid"
+	Seq     int64       `json:"seq,omitempty"`
+	Type    string      `json:"type"`
 	StoreID string      `json:"store_id"` // Multi-tenant scoping: must NEVER be empty when broadcasting tenant events
 	Payload interface{} `json:"payload"`
+	// Channels routes the message; a client receives it when subscribed to any of them.
+	Channels []string `json:"-"`
+}
+
+// Subscription is what a redeemed WebSocket ticket grants.
+type Subscription struct {
+	StoreID  string
+	Channels []string
+	// Replay returns missed events. It runs after registration so nothing published meanwhile is
+	// lost; a duplicate is possible and harmless because clients deduplicate by seq.
+	Replay func() ([]*EventMessage, error)
 }
 
 type Client struct {
@@ -32,6 +54,7 @@ type Client struct {
 	conn     *websocket.Conn
 	send     chan []byte
 	storeID  string
+	channels map[string]bool
 	isClosed int32 // atomic flag to avoid multiple channel close
 }
 
@@ -92,8 +115,8 @@ func (h *Hub) RunWithContext(ctx context.Context) {
 
 			h.mu.RLock()
 			for client := range h.clients {
-				// Strict tenant isolation: client must strictly match message.StoreID
-				if client.storeID == message.StoreID {
+				// Strict tenant isolation plus channel routing.
+				if client.storeID == message.StoreID && client.subscribed(message.Channels) {
 					select {
 					case client.send <- data:
 					default:
@@ -138,27 +161,37 @@ func (h *Hub) removeClient(client *Client) {
 	h.mu.Unlock()
 }
 
-// BroadcastEvent broadcasts an event strictly to the designated storeID
+func (c *Client) subscribed(channels []string) bool {
+	for _, ch := range channels {
+		if c.channels[ch] {
+			return true
+		}
+	}
+	return false
+}
+
+// BroadcastEvent sends an event to the store's POS channel.
 func (h *Hub) BroadcastEvent(eventType, storeID string, payload interface{}) error {
-	if storeID == "" {
+	return h.Publish(&EventMessage{Type: eventType, StoreID: storeID, Payload: payload, Channels: []string{ChannelPOS}})
+}
+
+// Publish routes a message to the clients of its store that subscribe to one of its channels.
+func (h *Hub) Publish(msg *EventMessage) error {
+	if msg == nil || msg.StoreID == "" {
 		return errors.New("cannot broadcast event without explicit storeID (tenant isolation violation)")
 	}
-
 	select {
-	case h.broadcast <- &EventMessage{
-		Type:    eventType,
-		StoreID: storeID,
-		Payload: payload,
-	}:
+	case h.broadcast <- msg:
 	case <-h.stopCh:
 		return errors.New("realtime hub is shut down")
 	}
 	return nil
 }
 
-// ServeWS upgrades the HTTP connection to WebSocket with strict origin check and tenant verification
-func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request, authenticatedStoreID string) {
-	if authenticatedStoreID == "" {
+// ServeWS upgrades an authenticated subscription (store and channels from a redeemed ticket) with a
+// strict Origin check, then replays missed events.
+func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request, sub Subscription) {
+	if sub.StoreID == "" || len(sub.Channels) == 0 {
 		http.Error(w, "Unauthorized: missing or invalid tenant authentication", http.StatusUnauthorized)
 		return
 	}
@@ -189,8 +222,12 @@ func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request, authenticatedStore
 		hub:      h,
 		conn:     conn,
 		send:     make(chan []byte, 64),
-		storeID:  authenticatedStoreID,
+		storeID:  sub.StoreID,
+		channels: map[string]bool{},
 		isClosed: 0,
+	}
+	for _, ch := range sub.Channels {
+		client.channels[ch] = true
 	}
 	select {
 	case client.hub.register <- client:
@@ -201,6 +238,38 @@ func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request, authenticatedStore
 
 	go client.writePump()
 	go client.readPump()
+	if sub.Replay != nil {
+		go client.replay(sub.Replay)
+	}
+}
+
+// replay queues missed events behind the live stream; a client too slow to take them is dropped.
+func (c *Client) replay(load func() ([]*EventMessage, error)) {
+	msgs, err := load()
+	if err != nil {
+		log.Printf("[REALTIME] replay failed for store %s: %v", c.storeID, err)
+		return
+	}
+	for _, m := range msgs {
+		data, err := json.Marshal(m)
+		if err != nil {
+			continue
+		}
+		c.hub.mu.RLock()
+		_, alive := c.hub.clients[c]
+		if alive {
+			select {
+			case c.send <- data:
+			default:
+				alive = false
+			}
+		}
+		c.hub.mu.RUnlock()
+		if !alive {
+			c.hub.removeClient(c)
+			return
+		}
+	}
 }
 
 func (c *Client) readPump() {
@@ -243,20 +312,8 @@ func (c *Client) writePump() {
 				return
 			}
 
-			w, err := c.conn.NextWriter(websocket.TextMessage)
-			if err != nil {
-				return
-			}
-			_, _ = w.Write(message)
-
-			// Flush queued messages to optimize frames
-			n := len(c.send)
-			for i := 0; i < n; i++ {
-				_, _ = w.Write([]byte{'\n'})
-				_, _ = w.Write(<-c.send)
-			}
-
-			if err := w.Close(); err != nil {
+			// One event per frame so clients can parse each message as JSON.
+			if err := c.conn.WriteMessage(websocket.TextMessage, message); err != nil {
 				return
 			}
 		case <-ticker.C:

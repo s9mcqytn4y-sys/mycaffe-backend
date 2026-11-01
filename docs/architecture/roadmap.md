@@ -52,7 +52,7 @@ Midtrans webhook. Contained (503 in staging/production): guest `POST /api/v1/ord
 | 4 | **ADR-004 catalog cleanup** (done before iteration 5, owner 2026-11-01) | variant-only pricing, `single ⇒ max_select = 1` CHECK, unit stock stays on products | — |
 | 5 | **5a Tables, table sessions, QR resolve** (plan: [iteration-5-table-qr-kds-plan.md](iteration-5-table-qr-kds-plan.md)) | tables CRUD, opaque rotatable QR (QR1), derived occupancy (T1), emergency pause honoured | implemented (migration 000016) |
 | 5 | **5b Guest session + QR pay-first orders + tracker** (T2, Q6, QR5, QR6) | cookie guest session, own-orders isolation, unpaid caps, QRIS, 24 h tracker | implemented (migration 000017); email/consent (E4) deferred |
-| 5 | **Outbox relay → WebSocket + WS ticket** (risk R2) | events delivered with replay by sequence, KDS/POS/TV channels, `/ws` opened | — |
+| 5 | **5c Outbox relay → WebSocket + WS ticket** (risk R2) | per-store `store_seq`, LISTEN/NOTIFY + polling relay, replay by `last_seq`, `resync_required`, POS/KDS/guest channels, single-use 30 s tickets | implemented (migration 000018); TV queue display channel later |
 | 6 | **KDS tickets** (station routing, preparing/ready/served, late-payment flag) | barista/kitchen permissions enforced, SLA timestamps | relay |
 | 6 | **Receipts (R1)**: ESC/POS payload + digital receipt link + email | snapshot-only amounts, 90-day token | void/refund |
 | 6 | **Inventory (C5)**: ingredients, recipes, movements, opname, low-stock email; HPP snapshot (C7) | gross profit only for recipe-backed items | variants ✅ |

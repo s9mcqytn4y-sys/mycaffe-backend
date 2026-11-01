@@ -238,12 +238,13 @@ its replacement is `POST /api/v1/public/guest/orders`.
   channels, expires_at, used_at)`. The browser opens `GET /ws?ticket=…`; the ticket is consumed
   (`used_at`) in the upgrade transaction. No JWT ever goes in the query string. The staff session must
   still be valid at redemption.
-- Guests: the upgrade carries the `__Secure-mc_guest` cookie (same origin) and is checked against an
-  `Origin` allow-list; guests receive only events of their own orders.
+- Guests: `POST /api/v1/public/guest/ws-ticket` (guest cookie + CSRF) issues the same kind of ticket for
+  channel `guest.<guest_session_id>` (the cookie path `/api/v1/public` does not reach `/ws`); the upgrade
+  is checked against the `Origin` allow-list and guests receive only their own orders' public status.
 - Channels: `pos` (cashier/owner), `kds.bar`, `kds.kitchen` (barista/kitchen; cashier when
   `cashier_handles_bar`, C3), `guest.<guest_session_id>`. The queue TV display needs a device credential
   and is out of scope for iteration 5.
-- `/ws` stays 503 in staging/production until 5c ships.
+- `/ws` is open since 5c; the old JWT-header WebSocket path and its staging/production 503 containment are removed.
 
 ## 5. Phase 5d: KDS tickets (migration 000019)
 
@@ -305,7 +306,7 @@ table is needed.
 |-------|-------|-----------|------------|
 | 5a | tables CRUD, QR rotate, table sessions, derived status, lazy auto-close, QR resolve | 000016 | **implemented** (PR for branch `feature/iteration-5a-tables`) |
 | 5b | guest session cookie, guest quote/order/QRIS payment, own-orders list, tracker, delete `POST /api/v1/orders` | 000017 | **implemented** (branch `feature/iteration-5b-guest-orders`); `settled_at` upkeep and "session ends when all orders are completed" wait for KDS serve events (5d) |
-| 5c | `store_seq`, relay worker, replay, WS tickets, channels, `/ws` opened | 000018 | `list_stores_with_pending_outbox` approved |
+| 5c | `store_seq`, relay worker, replay, WS tickets, channels, `/ws` opened | 000018 | **implemented** (branch `feature/iteration-5c-outbox-relay`); guests get a ticket too (`POST /api/v1/public/guest/ws-ticket`) instead of a cookie on the upgrade |
 | 5d | KDS tickets, transitions, derived order/round status, void waste vs restock | 000019 | 5c |
 
 ## 7. Public anti-abuse

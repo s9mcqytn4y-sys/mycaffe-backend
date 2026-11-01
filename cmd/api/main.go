@@ -117,7 +117,6 @@ func main() {
 	// Initialize Handlers
 	healthHandler := handler.NewHealthHandler("MyCaffe POS Backend", cfg.AppEnv, db)
 	midtransHandler := handler.NewMidtransHandler(midtransClient, hub)
-	orderHandler := handler.NewOrderHandler(cfg, midtransClient, hub)
 	var authHandler *handler.AuthHandler
 	var posHandler *handler.POSHandler
 	var catalogHandler *handler.CatalogHandler
@@ -125,6 +124,7 @@ func main() {
 	var tabHandler *handler.TabHandler
 	var tableHandler *handler.TableHandler
 	var guestHandler *handler.GuestHandler
+	var realtimeHandler *handler.RealtimeHandler
 	if db != nil {
 		authService := service.NewAuthService(db, postgres.NewAuthRepository(), cfg.JWTSecret, service.AuthPolicy{
 			AccessTokenTTL:     cfg.StaffAccessTokenTTL,
@@ -151,6 +151,10 @@ func main() {
 		tabHandler = handler.NewTabHandler(service.NewTabService(db, postgres.NewTabRepository(), orderRepo))
 		tableHandler = handler.NewTableHandler(service.NewTableService(db))
 		guestHandler = handler.NewGuestHandler(service.NewGuestService(db, orderService, paymentService))
+		realtimeService := service.NewRealtimeService(db)
+		realtimeHandler = handler.NewRealtimeHandler(hub, realtimeService)
+		// Outbox relay (iteration 5c): LISTEN outbox + 2 s polling, at-least-once, ordered per store.
+		go realtimeService.RunRelay(workerCtx, hub)
 
 		go paymentService.StartReconciliationWorker(workerCtx, 30*time.Second, 2*time.Minute, 50)
 	}
@@ -230,6 +234,8 @@ func main() {
 			guest.GET("/orders", guestHandler.ListOrders)
 			guest.POST("/orders", guestHandler.CreateOrder)
 			guest.POST("/orders/:id/payments", guestHandler.InitiatePayment)
+			guest.POST("/ws-ticket", realtimeHandler.IssueGuestTicket)
+			pos.POST("/ws-ticket", authHandler.RequireStaff(), realtimeHandler.IssueStaffTicket)
 
 			// Guest menu & quote (public, cacheable catalog; dynamic quote for guest carts).
 			v1.GET("/public/stores/:slug/catalog", catalogHandler.PublicCatalog)
@@ -268,8 +274,11 @@ func main() {
 	router.GET("/health/live", healthHandler.Liveness)
 	router.GET("/health/ready", healthHandler.Check)
 
-	// WebSocket endpoint for KDS & TV Queue realtime updates (guarded by token/tenant validation)
-	router.GET("/ws", orderHandler.HandleWebSocket)
+	// WebSocket (iteration 5c): single-use 30 s ticket from POST /api/v1/pos/ws-ticket or
+	// /api/v1/public/guest/ws-ticket; replay with last_seq.
+	if realtimeHandler != nil {
+		router.GET("/ws", realtimeHandler.Connect)
+	}
 
 	// Root greeting
 	router.GET("/", func(c *gin.Context) {

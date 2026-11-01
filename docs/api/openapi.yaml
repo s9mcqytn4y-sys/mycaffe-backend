@@ -33,6 +33,8 @@ tags:
     description: Tables, derived table occupancy, table sessions and public QR resolution (iteration 5a)
   - name: Guest
     description: QR guest sessions, pay-first guest orders and the public order tracker (iteration 5b)
+  - name: Realtime
+    description: Outbox relay over WebSocket with single-use tickets, per-store sequence and replay (iteration 5c)
 
 paths:
   /health:
@@ -1180,6 +1182,79 @@ paths:
                 $ref: "#/components/schemas/TrackedOrder"
         "404":
           $ref: "#/components/responses/NotFound"
+  /api/v1/pos/ws-ticket:
+    post:
+      tags: [Realtime]
+      operationId: issueStaffWSTicket
+      summary: Single-use 30 s WebSocket ticket for staff; channels follow RBAC
+      description: >-
+        pos needs order.read.store; kds.bar needs kds.ticket.read.barista; kds.kitchen needs
+        kds.ticket.read.kitchen (cashier gains bar with cashier_handles_bar). No channel → 403.
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "201":
+          description: Ticket
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WSTicket"
+        "401":
+          description: SESSION_INVALID
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/public/guest/ws-ticket:
+    post:
+      security: []
+      tags: [Realtime]
+      operationId: issueGuestWSTicket
+      summary: Single-use 30 s WebSocket ticket for the guest's own orders (guest cookie + CSRF)
+      x-implementation-status: implemented
+      parameters:
+        - $ref: "#/components/parameters/CsrfProtectionHeader"
+      responses:
+        "201":
+          description: Ticket for channel guest.<guest_session_id>
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WSTicket"
+        "401":
+          description: GUEST_SESSION_EXPIRED
+  /ws:
+    get:
+      security: []
+      tags: [Realtime]
+      operationId: connectWebSocket
+      summary: WebSocket upgrade with a ticket; replays missed events after last_seq
+      description: >-
+        The ticket is consumed on first use and re-checks its subject (staff session live and user active,
+        or guest session valid). Messages are JSON `{seq, type, store_id, payload}`, one per frame, delivered
+        at least once in per-store sequence order; clients keep the highest seq and deduplicate. With
+        last_seq, events after it are replayed (filtered to the ticket's channels); more than 500 missed
+        events yield a single `resync_required` and the client reloads over REST. Staff channels get the
+        full outbox payload; a guest gets only order_id, order_number, queue_number, status and
+        payment_status of its own orders. Origin must be in ALLOWED_ORIGINS.
+      x-implementation-status: implemented
+      parameters:
+        - name: ticket
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: last_seq
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+            minimum: 0
+      responses:
+        "101":
+          description: Switching protocols
+        "401":
+          description: WS_TICKET_REQUIRED or WS_TICKET_INVALID (unknown, used, expired, or subject no longer valid)
   /api/v1/pos/drawers:
     get:
       tags: [POS Shifts]
@@ -2580,6 +2655,21 @@ components:
             $ref: "#/components/schemas/ValidationErrorResponse"
 
   schemas:
+    WSTicket:
+      type: object
+      required: [ticket, expires_at, channels]
+      properties:
+        ticket:
+          type: string
+          description: "<store_id>.<ticket_id>.<secret>; pass as GET /ws?ticket= within 30 seconds"
+        expires_at:
+          type: string
+          format: date-time
+        channels:
+          type: array
+          items:
+            type: string
+            description: pos, kds.bar, kds.kitchen or guest.<guest_session_id>
     GuestSession:
       type: object
       required: [table_number, expires_at]

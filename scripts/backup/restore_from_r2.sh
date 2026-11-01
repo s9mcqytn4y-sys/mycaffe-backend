@@ -58,7 +58,7 @@ if ! is_disposable_drill_db "${DB_NAME}" || [[ "${APP_ENV:-}" == "production" ||
 fi
 
 readonly BASE="s3://${R2_BACKUP_BUCKET}/${R2_BACKUP_PREFIX}"
-s3() { aws --endpoint-url "${R2_ENDPOINT}" --only-show-errors s3 "$@"; }
+s3() { aws --endpoint-url "${R2_ENDPOINT}" s3 "$@"; }
 
 OBJECT="${BACKUP_OBJECT}"
 if [[ "${OBJECT}" == "latest" ]]; then
@@ -81,8 +81,8 @@ cleanup() {
 trap cleanup EXIT
 
 echo "[RESTORE] Downloading ${OBJECT} and checksum from ${BASE}..."
-s3 cp "${BASE}/${OBJECT}" "${ENC_FILE}"
-s3 cp "${BASE}/${OBJECT}.sha256" "${SHA_FILE}"
+s3 cp --only-show-errors "${BASE}/${OBJECT}" "${ENC_FILE}"
+s3 cp --only-show-errors "${BASE}/${OBJECT}.sha256" "${SHA_FILE}"
 
 echo "[RESTORE] Verifying SHA-256 integrity before decryption..."
 (

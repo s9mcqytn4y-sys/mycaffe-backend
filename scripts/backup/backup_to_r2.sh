@@ -69,16 +69,16 @@ echo "[BACKUP] Authenticated GPG encryption completed. File size: ${FILESIZE} by
 # copied to daily/ and monthly/. R2 lifecycle rules expire each prefix (docs/setup/backup-and-restore.md).
 BASE="s3://${R2_BACKUP_BUCKET}/${R2_BACKUP_PREFIX}"
 NAME="$(basename "${BACKUP_FILE}")"
-s3() { aws --endpoint-url "${R2_ENDPOINT}" --only-show-errors s3 "$@"; }
+s3() { aws --endpoint-url "${R2_ENDPOINT}" s3 "$@"; }
 
 echo "[BACKUP] Uploading encrypted archive and SHA-256 manifest to ${BASE}/hourly/..."
-s3 cp "${BACKUP_FILE}" "${BASE}/hourly/${NAME}"
-s3 cp "${CHECKSUM_FILE}" "${BASE}/hourly/${NAME}.sha256"
+s3 cp --only-show-errors "${BACKUP_FILE}" "${BASE}/hourly/${NAME}"
+s3 cp --only-show-errors "${CHECKSUM_FILE}" "${BASE}/hourly/${NAME}.sha256"
 
 promote() { # tier, name prefix that identifies the period
     if ! s3 ls "${BASE}/$1/$2" >/dev/null 2>&1; then
-        s3 cp "${BASE}/hourly/${NAME}" "${BASE}/$1/${NAME}"
-        s3 cp "${BASE}/hourly/${NAME}.sha256" "${BASE}/$1/${NAME}.sha256"
+        s3 cp --only-show-errors "${BASE}/hourly/${NAME}" "${BASE}/$1/${NAME}"
+        s3 cp --only-show-errors "${BASE}/hourly/${NAME}.sha256" "${BASE}/$1/${NAME}.sha256"
         echo "[BACKUP] Promoted to $1/."
     fi
 }

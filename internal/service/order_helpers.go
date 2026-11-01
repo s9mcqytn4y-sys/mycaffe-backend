@@ -124,8 +124,11 @@ func InsertPricedItems(
 	return persistedItems, nil
 }
 
-// RecalculateOrderTotals computes the total subtotal across all items of an order,
-// and computes tax and service charge once over the cumulative subtotal using CalculateRoundHalfUpBPS.
+// RecalculateOrderTotals computes the total subtotal across all active items of an order,
+// and computes tax and service charge once over the cumulative net subtotal using CalculateRoundHalfUpBPS.
+//
+// NOTE (Iteration 4d): When order item void/refund capabilities are introduced in Iteration 4d,
+// items with void status must be explicitly excluded from cumulativeSubtotal (e.g., WHERE round_id IS NOT NULL AND status != 'void').
 func RecalculateOrderTotals(
 	ctx context.Context,
 	tx *sqlx.Tx,
@@ -142,18 +145,23 @@ func RecalculateOrderTotals(
 		return fmt.Errorf("failed to sum order items subtotal: %w", err)
 	}
 
-	serviceCharge, err := CalculateRoundHalfUpBPS(cumulativeSubtotal, store.ServiceBps)
+	netSubtotal := cumulativeSubtotal - order.DiscountAmount
+	if netSubtotal < 0 {
+		netSubtotal = 0
+	}
+
+	serviceCharge, err := CalculateRoundHalfUpBPS(netSubtotal, store.ServiceBps)
 	if err != nil {
 		return fmt.Errorf("failed to calculate service charge: %w", err)
 	}
 
-	taxableBase := cumulativeSubtotal + serviceCharge
+	taxableBase := netSubtotal + serviceCharge
 	taxAmount, err := CalculateRoundHalfUpBPS(taxableBase, store.TaxBps)
 	if err != nil {
 		return fmt.Errorf("failed to calculate tax: %w", err)
 	}
 
-	totalAmount := cumulativeSubtotal + serviceCharge + taxAmount
+	totalAmount := netSubtotal + serviceCharge + taxAmount
 
 	order.SubtotalAmount = cumulativeSubtotal
 	order.ServiceChargeAmount = serviceCharge

@@ -35,7 +35,6 @@ CREATE TABLE IF NOT EXISTS order_rounds (
 );
 
 CREATE INDEX IF NOT EXISTS idx_order_rounds_order ON order_rounds(store_id, order_id, round_number);
-CREATE INDEX IF NOT EXISTS idx_order_rounds_idem ON order_rounds(store_id, order_id, idempotency_key);
 
 -- 3. Link order_items to order_rounds
 ALTER TABLE order_items ADD COLUMN IF NOT EXISTS round_id UUID DEFAULT NULL;

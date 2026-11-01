@@ -124,6 +124,7 @@ func main() {
 	var shiftHandler *handler.ShiftHandler
 	var tabHandler *handler.TabHandler
 	var tableHandler *handler.TableHandler
+	var guestHandler *handler.GuestHandler
 	if db != nil {
 		authService := service.NewAuthService(db, postgres.NewAuthRepository(), cfg.JWTSecret, service.AuthPolicy{
 			AccessTokenTTL:     cfg.StaffAccessTokenTTL,
@@ -138,7 +139,6 @@ func main() {
 
 		orderRepo := postgres.NewOrderRepository()
 		orderService := service.NewOrderService(db, orderRepo)
-		orderHandler.SetOrderService(orderService)
 
 		paymentRepo := postgres.NewPaymentRepository()
 		paymentService := service.NewPaymentService(db, paymentRepo, orderRepo, midtransClient)
@@ -150,6 +150,7 @@ func main() {
 		shiftHandler = handler.NewShiftHandler(service.NewShiftService(db))
 		tabHandler = handler.NewTabHandler(service.NewTabService(db, postgres.NewTabRepository(), orderRepo))
 		tableHandler = handler.NewTableHandler(service.NewTableService(db))
+		guestHandler = handler.NewGuestHandler(service.NewGuestService(db, orderService, paymentService))
 
 		go paymentService.StartReconciliationWorker(workerCtx, 30*time.Second, 2*time.Minute, 50)
 	}
@@ -158,7 +159,6 @@ func main() {
 	v1 := router.Group("/api/v1")
 	{
 		v1.GET("/health", healthHandler.Check)
-		v1.POST("/orders", orderHandler.CreateOrder)
 		v1.POST("/payments/midtrans/webhook", midtransHandler.HandleWebhook)
 		if authHandler != nil {
 			staffAuth := v1.Group("/auth/staff")
@@ -221,6 +221,15 @@ func main() {
 			pos.POST("/tables/:id/sessions", authHandler.RequirePermission(rbac.TabManage), tableHandler.OpenSession)
 			pos.POST("/table-sessions/:id/close", authHandler.RequirePermission(rbac.TabManage), tableHandler.CloseSession)
 			v1.GET("/public/qr/:token", tableHandler.ResolveQR)
+
+			// QR guest ordering (iteration 5b): pay-first per device (T2), own orders only (Q6).
+			v1.POST("/public/qr/:token/session", guestHandler.StartSession)
+			v1.GET("/public/orders/track/:token", guestHandler.Track)
+			guest := v1.Group("/public/guest", handler.LimitBody(64<<10), guestHandler.RequireGuest())
+			guest.GET("/session", guestHandler.Session)
+			guest.GET("/orders", guestHandler.ListOrders)
+			guest.POST("/orders", guestHandler.CreateOrder)
+			guest.POST("/orders/:id/payments", guestHandler.InitiatePayment)
 
 			// Guest menu & quote (public, cacheable catalog; dynamic quote for guest carts).
 			v1.GET("/public/stores/:slug/catalog", catalogHandler.PublicCatalog)

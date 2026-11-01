@@ -288,28 +288,34 @@ func (s *TableService) ResolveQR(ctx context.Context, token string) (*PublicTabl
 		if err := s.repo.CloseSettledSessions(ctx, tx, storeID, settings.TableIdleCloseMinutes, s.nowFunc().UTC()); err != nil {
 			return err
 		}
-		out = &PublicTable{StoreName: store.Name, StoreSlug: store.Slug, TableNumber: t.TableNumber, Label: t.Label}
-		switch {
-		case !active:
-			out.ClosedReason = QRClosedInactive
-		case settings.QROrderingPaused:
-			out.ClosedReason = QRClosedPaused
-		default:
-			open, err := s.repo.HasOpenShift(ctx, tx, storeID)
-			if err != nil {
-				return err
-			}
-			if !open {
-				out.ClosedReason = QRClosedNoShift
-			}
+		reason, err := qrClosedReason(ctx, tx, s.repo, settings, storeID, active)
+		if err != nil {
+			return err
 		}
-		out.OrderingOpen = out.ClosedReason == ""
+		out = &PublicTable{StoreName: store.Name, StoreSlug: store.Slug, TableNumber: t.TableNumber, Label: t.Label,
+			OrderingOpen: reason == "", ClosedReason: reason}
 		return nil
 	})
 	if err != nil {
 		return nil, mapTableError(err)
 	}
 	return out, nil
+}
+
+// qrClosedReason says why QR ordering is refused right now, or "" when it is open: inactive table,
+// emergency pause, or no open shift on any drawer (decision QR4).
+func qrClosedReason(ctx context.Context, tx *sqlx.Tx, repo *postgres.TableRepository, settings domain.StoreSettings, storeID uuid.UUID, tableActive bool) (string, error) {
+	switch {
+	case !tableActive:
+		return QRClosedInactive, nil
+	case settings.QROrderingPaused:
+		return QRClosedPaused, nil
+	}
+	open, err := repo.HasOpenShift(ctx, tx, storeID)
+	if err != nil || open {
+		return "", err
+	}
+	return QRClosedNoShift, nil
 }
 
 func (s *TableService) closeSettled(ctx context.Context, tx *sqlx.Tx, storeID uuid.UUID) error {

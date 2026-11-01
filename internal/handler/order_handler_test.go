@@ -1,7 +1,6 @@
 package handler_test
 
 import (
-	"bytes"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -25,7 +24,6 @@ func setupTestOrderRouter(cfg *config.Config) *gin.Engine {
 	midtransClient := midtrans.NewClient(cfg)
 	orderHandler := handler.NewOrderHandler(cfg, midtransClient, hub)
 
-	r.POST("/api/v1/orders", orderHandler.CreateOrder)
 	r.GET("/ws", orderHandler.HandleWebSocket)
 	return r
 }
@@ -39,24 +37,7 @@ func TestOrderHandlerProductionAndStagingFailClosed(t *testing.T) {
 			}
 			r := setupTestOrderRouter(cfg)
 
-			// 1. Order creation in staging/production must fail-closed with 503
-			reqBody := []byte(`{"store_id":"` + uuid.New().String() + `","customer_name":"Budi","order_type":"dine_in","payment_method":"qris","items":[{"product_id":"` + uuid.New().String() + `","quantity":1}]}`)
-			req, _ := http.NewRequest(http.MethodPost, "/api/v1/orders", bytes.NewBuffer(reqBody))
-			req.Header.Set("Content-Type", "application/json")
-			w := httptest.NewRecorder()
-			r.ServeHTTP(w, req)
-
-			if w.Code != http.StatusServiceUnavailable {
-				t.Errorf("[%s] expected order creation to fail with 503 Service Unavailable, got %d", env, w.Code)
-			}
-			if strings.Contains(w.Body.String(), "[P0 CONTAINMENT]") {
-				t.Errorf("[%s] client response leaked internal diagnostic string: %s", env, w.Body.String())
-			}
-			if !strings.Contains(w.Body.String(), "request_id") {
-				t.Errorf("[%s] expected request_id in 503 response, got: %s", env, w.Body.String())
-			}
-
-			// 2. WebSocket in staging/production must fail-closed with 503
+			// WebSocket in staging/production must fail-closed with 503
 			wsReq, _ := http.NewRequest(http.MethodGet, "/ws?store_id="+uuid.New().String(), nil)
 			wsW := httptest.NewRecorder()
 			r.ServeHTTP(wsW, wsReq)

@@ -118,6 +118,13 @@ func (s *OrderService) executeCreateOrderTx(ctx context.Context, trustedStoreID 
 			}
 		}
 
+		if normalizedInput.Guest != nil {
+			// Session validity, pause, open shift and unpaid caps are re-checked under row locks (QR4, QR5).
+			if err := normalizedInput.Guest.Guard(ctx, tx); err != nil {
+				return err
+			}
+		}
+
 		if normalizedInput.BillingMode == domain.BillingModeOpenTab {
 			if normalizedInput.ActorUserID == nil || *normalizedInput.ActorUserID == uuid.Nil {
 				return fmt.Errorf("%w: open_tab requires an authenticated staff ActorUserID", ErrUnauthorizedBillingMode)
@@ -248,6 +255,11 @@ func (s *OrderService) executeCreateOrderTx(ctx context.Context, trustedStoreID 
 			PaidAmount:          0,
 			RefundedAmount:      0,
 			Notes:               normalizedInput.Notes,
+		}
+
+		if g := normalizedInput.Guest; g != nil {
+			order.TableID, order.TableSessionID, order.GuestSessionID = &g.TableID, &g.TableSessionID, &g.GuestSessionID
+			order.TrackingTokenHash = g.TrackingTokenHash
 		}
 
 		if err := s.repo.InsertOrder(ctx, tx, &order); err != nil {

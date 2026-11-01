@@ -13,7 +13,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/config"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/domain"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/handler"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/database"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/rbac"
@@ -466,10 +465,10 @@ func TestIteration4aIntegration(t *testing.T) {
 			t.Fatalf("create group failed: %d %s", wGrp.Code, wGrp.Body.String())
 		}
 		var grp struct {
-			Group domain.ModifierGroup `json:"group"`
+			ID string `json:"id"`
 		}
 		decode(wGrp, &grp)
-		archivedGroupID := grp.Group.ID.String()
+		archivedGroupID := grp.ID
 
 		wArch := call(http.MethodDelete, "/catalog/modifier-groups/"+archivedGroupID, owner, nil)
 		if wArch.Code != http.StatusNoContent {

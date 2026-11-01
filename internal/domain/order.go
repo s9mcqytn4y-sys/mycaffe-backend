@@ -168,22 +168,24 @@ type ModifierGroup struct {
 	MaxSelect     int              `json:"max_select" db:"max_select"`
 	DisplayOrder  int              `json:"display_order" db:"display_order"`
 	IsActive      bool             `json:"is_active" db:"is_active"`
+	ArchivedAt    *time.Time       `json:"archived_at,omitempty" db:"archived_at"`
 	Options       []ModifierOption `json:"options,omitempty"`
 	CreatedAt     time.Time        `json:"created_at" db:"created_at"`
 	UpdatedAt     time.Time        `json:"updated_at" db:"updated_at"`
 }
 
 type ModifierOption struct {
-	ID            uuid.UUID `json:"id" db:"id"`
-	StoreID       uuid.UUID `json:"store_id" db:"store_id"`
-	GroupID       uuid.UUID `json:"group_id" db:"group_id"`
-	Name          string    `json:"name" db:"name"`
-	PriceDelta    int64     `json:"price_delta" db:"price_delta"`
-	IsAvailable   bool      `json:"is_available" db:"is_available"`
-	TrackStock    bool      `json:"track_stock" db:"track_stock"`
-	StockQuantity int       `json:"stock_quantity" db:"stock_quantity"`
-	MaxQuantity   int       `json:"max_quantity" db:"max_quantity"`
-	DisplayOrder  int       `json:"display_order" db:"display_order"`
-	CreatedAt     time.Time `json:"created_at" db:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at" db:"updated_at"`
+	ID            uuid.UUID  `json:"id" db:"id"`
+	StoreID       uuid.UUID  `json:"store_id" db:"store_id"`
+	GroupID       uuid.UUID  `json:"group_id" db:"group_id"`
+	Name          string     `json:"name" db:"name"`
+	PriceDelta    int64      `json:"price_delta" db:"price_delta"`
+	IsAvailable   bool       `json:"is_available" db:"is_available"`
+	TrackStock    bool       `json:"track_stock" db:"track_stock"`
+	StockQuantity int        `json:"stock_quantity" db:"stock_quantity"`
+	MaxQuantity   int        `json:"max_quantity" db:"max_quantity"`
+	DisplayOrder  int        `json:"display_order" db:"display_order"`
+	ArchivedAt    *time.Time `json:"archived_at,omitempty" db:"archived_at"`
+	CreatedAt     time.Time  `json:"created_at" db:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at" db:"updated_at"`
 }

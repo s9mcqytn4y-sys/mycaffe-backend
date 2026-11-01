@@ -238,7 +238,22 @@ func (r *OrderRepository) VerifyActiveStaffActor(ctx context.Context, tx *sqlx.T
 	return exists, nil
 }
 
+// LockAndLoadCatalogForOrder locks the requested products and options (order creation).
 func (r *OrderRepository) LockAndLoadCatalogForOrder(ctx context.Context, tx *sqlx.Tx, storeID uuid.UUID, productIDs []uuid.UUID) (*CatalogData, error) {
+	return r.loadCatalogForOrder(ctx, tx, storeID, productIDs, true)
+}
+
+// LoadCatalogForQuote reads the same data without row locks: quotes are frequent, public, and
+// must never block a real checkout.
+func (r *OrderRepository) LoadCatalogForQuote(ctx context.Context, tx *sqlx.Tx, storeID uuid.UUID, productIDs []uuid.UUID) (*CatalogData, error) {
+	return r.loadCatalogForOrder(ctx, tx, storeID, productIDs, false)
+}
+
+func (r *OrderRepository) loadCatalogForOrder(ctx context.Context, tx *sqlx.Tx, storeID uuid.UUID, productIDs []uuid.UUID, lock bool) (*CatalogData, error) {
+	lockClause := ""
+	if lock {
+		lockClause = " FOR UPDATE"
+	}
 	store, err := r.GetStoreForOrder(ctx, tx, storeID)
 	if err != nil {
 		return nil, err
@@ -269,8 +284,7 @@ func (r *OrderRepository) LockAndLoadCatalogForOrder(ctx context.Context, tx *sq
 		FROM products
 		WHERE store_id = ? AND id IN (?) AND archived_at IS NULL
 		ORDER BY id ASC
-		FOR UPDATE
-	`, storeID, uniqueProdIDs)
+	`+lockClause, storeID, uniqueProdIDs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build products query: %w", err)
 	}
@@ -337,7 +351,7 @@ func (r *OrderRepository) LockAndLoadCatalogForOrder(ctx context.Context, tx *sq
 	}
 
 	// Load and lock parent modifier options.
-	parentOptionIDs, err := r.lockAndLoadModifierOptionsByGroups(ctx, tx, storeID, parentGroupIDs, data)
+	parentOptionIDs, err := r.lockAndLoadModifierOptionsByGroups(ctx, tx, storeID, parentGroupIDs, data, lockClause)
 	if err != nil {
 		return nil, err
 	}
@@ -377,7 +391,7 @@ func (r *OrderRepository) LockAndLoadCatalogForOrder(ctx context.Context, tx *sq
 		if err := r.loadModifierGroups(ctx, tx, storeID, childGroupIDs, data); err != nil {
 			return nil, err
 		}
-		if _, err := r.lockAndLoadModifierOptionsByGroups(ctx, tx, storeID, childGroupIDs, data); err != nil {
+		if _, err := r.lockAndLoadModifierOptionsByGroups(ctx, tx, storeID, childGroupIDs, data, lockClause); err != nil {
 			return nil, err
 		}
 	}
@@ -391,7 +405,7 @@ func (r *OrderRepository) loadModifierGroups(ctx context.Context, tx *sqlx.Tx, s
 			id, store_id, name, selection_type, is_required, min_select, max_select,
 			display_order, is_active, created_at, updated_at
 		FROM modifier_groups
-		WHERE store_id = ? AND id IN (?)
+		WHERE store_id = ? AND id IN (?) AND archived_at IS NULL
 		ORDER BY display_order ASC, id ASC
 	`, storeID, groupIDs)
 	if err != nil {
@@ -409,17 +423,16 @@ func (r *OrderRepository) loadModifierGroups(ctx context.Context, tx *sqlx.Tx, s
 	return nil
 }
 
-func (r *OrderRepository) lockAndLoadModifierOptionsByGroups(ctx context.Context, tx *sqlx.Tx, storeID uuid.UUID, groupIDs []uuid.UUID, data *CatalogData) ([]uuid.UUID, error) {
+func (r *OrderRepository) lockAndLoadModifierOptionsByGroups(ctx context.Context, tx *sqlx.Tx, storeID uuid.UUID, groupIDs []uuid.UUID, data *CatalogData, lockClause string) ([]uuid.UUID, error) {
 	moQuery, moArgs, err := sqlx.In(`
 		SELECT
 			id, store_id, group_id, name, price_delta, is_available,
 			track_stock, stock_quantity, max_quantity, display_order,
 			created_at, updated_at
 		FROM modifier_options
-		WHERE store_id = ? AND group_id IN (?)
+		WHERE store_id = ? AND group_id IN (?) AND archived_at IS NULL
 		ORDER BY id ASC
-		FOR UPDATE
-	`, storeID, groupIDs)
+	`+lockClause, storeID, groupIDs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build modifier_options query: %w", err)
 	}

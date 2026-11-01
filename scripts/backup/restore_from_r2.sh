@@ -6,10 +6,12 @@
 # and restores into PostgreSQL 18.
 #
 # Usage:
-#   BACKUP_OBJECT="mycaffe_20261028T190000Z.dump.gpg" ./scripts/backup/restore_from_r2.sh
+#   BACKUP_OBJECT="backup_mycaffe_prod_20261028_190000Z.dump.gpg" ./scripts/backup/restore_from_r2.sh
 # ==============================================================================
 set -euo pipefail
 umask 077
+
+readonly R2_BACKUP_PREFIX="${R2_BACKUP_PREFIX:-backups}"
 
 readonly REQUIRED_VARS=(
   "DB_HOST"
@@ -32,6 +34,22 @@ for var in "${REQUIRED_VARS[@]}"; do
   fi
 done
 
+is_disposable_drill_db() {
+  local name="$1"
+  if [[ "${name}" =~ (test|temp|drill|recovery|disposable) ]]; then
+    return 0
+  fi
+  return 1
+}
+
+if ! is_disposable_drill_db "${DB_NAME}" || [[ "${APP_ENV:-}" == "production" || "${APP_ENV:-}" == "staging" ]]; then
+  if [[ "${CONFIRM_DESTRUCTIVE_RESTORE:-}" != "true" ]]; then
+    echo "[RESTORE BLOCKED] Target database '${DB_NAME}' (APP_ENV=${APP_ENV:-unknown}) is protected against destructive restore." >&2
+    echo "To proceed with overwriting this database, you must explicitly set CONFIRM_DESTRUCTIVE_RESTORE=true." >&2
+    exit 1
+  fi
+fi
+
 readonly WORK_DIR="$(mktemp -d -t mycaffe-restore-XXXXXXXXXX)"
 readonly ENC_FILE="${WORK_DIR}/${BACKUP_OBJECT}"
 readonly SHA_FILE="${ENC_FILE}.sha256"
@@ -42,12 +60,12 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "[RESTORE] Downloading ${BACKUP_OBJECT} and checksum from R2 (${R2_BACKUP_BUCKET})..."
-aws s3 cp "s3://${R2_BACKUP_BUCKET}/daily/${BACKUP_OBJECT}" "${ENC_FILE}" \
+echo "[RESTORE] Downloading ${BACKUP_OBJECT} and checksum from R2 (${R2_BACKUP_BUCKET}/${R2_BACKUP_PREFIX})..."
+aws s3 cp "s3://${R2_BACKUP_BUCKET}/${R2_BACKUP_PREFIX}/${BACKUP_OBJECT}" "${ENC_FILE}" \
   --endpoint-url "${R2_ENDPOINT}" \
   --only-show-errors
 
-aws s3 cp "s3://${R2_BACKUP_BUCKET}/daily/${BACKUP_OBJECT}.sha256" "${SHA_FILE}" \
+aws s3 cp "s3://${R2_BACKUP_BUCKET}/${R2_BACKUP_PREFIX}/${BACKUP_OBJECT}.sha256" "${SHA_FILE}" \
   --endpoint-url "${R2_ENDPOINT}" \
   --only-show-errors
 

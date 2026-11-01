@@ -105,6 +105,44 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /api/v1/public/stores/{store_slug}/orders/quote:
+    parameters:
+      - name: store_slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: URL slug identifier of the cafe store
+    post:
+      tags: [Orders]
+      operationId: getPublicOrderQuote
+      summary: Lock-free calculation of subtotal, discounts, PB1 tax, and service charge for guest order
+      x-implementation-status: implemented
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/QuoteOrderRequest"
+      responses:
+        "200":
+          description: Calculated quote summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuoteOrderResponse"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Order quote total changed compared to client expected total
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuoteChangedErrorResponse"
+
   /api/v1/pos/catalog:
     get:
       tags: [Catalog]
@@ -345,6 +383,275 @@ paths:
         "409":
           $ref: "#/components/responses/Conflict"
 
+  /api/v1/catalog/modifier-groups:
+    get:
+      tags: [Catalog]
+      operationId: listModifierGroups
+      summary: List all active modifier groups for the tenant
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: List of modifier groups
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  modifier_groups:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ModifierGroup"
+    post:
+      tags: [Catalog]
+      operationId: createModifierGroup
+      summary: Create a new modifier group
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ModifierGroupInput"
+      responses:
+        "201":
+          description: Created
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+
+  /api/v1/catalog/modifier-groups/{id}:
+    parameters:
+      - $ref: "#/components/parameters/ResourceID"
+    get:
+      tags: [Catalog]
+      operationId: getModifierGroup
+      summary: Get modifier group details with options and child groups
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: Modifier group details
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      tags: [Catalog]
+      operationId: updateModifierGroup
+      summary: Update a modifier group (partial)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ModifierGroupInput"
+      responses:
+        "200":
+          description: Updated
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [Catalog]
+      operationId: archiveModifierGroup
+      summary: Archive a modifier group (soft delete and optional force unlink)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: force
+          in: query
+          required: false
+          schema:
+            type: boolean
+          description: Force archive by unlinking from products and parent options
+      responses:
+        "204":
+          description: Archived
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /api/v1/catalog/modifier-groups/{id}/options:
+    parameters:
+      - $ref: "#/components/parameters/ResourceID"
+    post:
+      tags: [Catalog]
+      operationId: createModifierOption
+      summary: Add an option to a modifier group (supports negative delta P1)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ModifierOptionInput"
+      responses:
+        "201":
+          description: Option created
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/catalog/modifier-groups/{id}/options/{option_id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: option_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    patch:
+      tags: [Catalog]
+      operationId: updateModifierOption
+      summary: Update a modifier option (partial; price changes are audited)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ModifierOptionInput"
+      responses:
+        "200":
+          description: Updated
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [Catalog]
+      operationId: archiveModifierOption
+      summary: Archive a modifier option
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "204":
+          description: Archived
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/catalog/products/{id}/modifier-groups:
+    parameters:
+      - $ref: "#/components/parameters/ResourceID"
+    post:
+      tags: [Catalog]
+      operationId: attachModifierGroupToProduct
+      summary: Link a modifier group to a product
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AttachModifierGroupInput"
+      responses:
+        "204":
+          description: Linked
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /api/v1/catalog/products/{id}/modifier-groups/{group_id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: group_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    delete:
+      tags: [Catalog]
+      operationId: detachModifierGroupFromProduct
+      summary: Unlink a modifier group from a product
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "204":
+          description: Unlinked
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/catalog/modifier-options/{id}/child-groups:
+    parameters:
+      - $ref: "#/components/parameters/ResourceID"
+    post:
+      tags: [Catalog]
+      operationId: attachChildGroupToOption
+      summary: Attach a modifier group as a child sub-addon to an option (max depth 1, cycle protected)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AttachChildGroupInput"
+      responses:
+        "204":
+          description: Attached
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /api/v1/catalog/modifier-options/{id}/child-groups/{group_id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: group_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    delete:
+      tags: [Catalog]
+      operationId: detachChildGroupFromOption
+      summary: Detach a child modifier group from an option
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "204":
+          description: Detached
+        "404":
+          $ref: "#/components/responses/NotFound"
+
   /api/v1/orders:
     post:
       tags: [Orders]
@@ -436,6 +743,42 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/pos/orders/quote:
+    post:
+      tags: [Orders]
+      operationId: getPosOrderQuote
+      summary: Lock-free calculation of subtotal, discounts, PB1 tax, and service charge for POS order
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/QuoteOrderRequest"
+      responses:
+        "200":
+          description: Calculated quote summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuoteOrderResponse"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "403":
+          description: Missing `order.pos.create` (`FORBIDDEN`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Order quote total changed compared to client expected total
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuoteChangedErrorResponse"
 
   /api/v1/pos/orders/{order_id}/payments:
     post:
@@ -1559,6 +1902,13 @@ components:
           $ref: "#/components/schemas/OrderType"
         billing_mode:
           $ref: "#/components/schemas/BillingMode"
+        expected_total:
+          type: integer
+          format: int64
+          description: Optional expected total for optimistic price verification
+        expected_quote_fingerprint:
+          type: string
+          description: Optional deterministic hash fingerprint of quote lines to prevent compensating price change conflicts
         notes:
           type: string
           maxLength: 500
@@ -2024,3 +2374,179 @@ components:
                       type: boolean
                     stock_quantity:
                       type: integer
+
+    ModifierGroupInput:
+      type: object
+      required: [name, selection_type, min_selection, max_selection]
+      properties:
+        name:
+          type: string
+          maxLength: 120
+        description:
+          type: string
+          maxLength: 500
+        selection_type:
+          type: string
+          enum: [single, multiple]
+        min_selection:
+          type: integer
+          minimum: 0
+        max_selection:
+          type: integer
+          minimum: 1
+        display_order:
+          type: integer
+          minimum: 0
+
+    ModifierOptionInput:
+      type: object
+      required: [name, price_delta]
+      properties:
+        name:
+          type: string
+          maxLength: 120
+        price_delta:
+          type: integer
+          format: int64
+          description: Price adjustment in IDR (can be negative, e.g. -2000 per decision P1)
+        is_available:
+          type: boolean
+        max_quantity:
+          type: integer
+          minimum: 1
+        display_order:
+          type: integer
+          minimum: 0
+
+    AttachModifierGroupInput:
+      type: object
+      required: [group_id]
+      properties:
+        group_id:
+          type: string
+          format: uuid
+        display_order:
+          type: integer
+          minimum: 0
+        override_required:
+          type: boolean
+
+    AttachChildGroupInput:
+      type: object
+      required: [child_group_id]
+      properties:
+        child_group_id:
+          type: string
+          format: uuid
+        display_order:
+          type: integer
+          minimum: 0
+
+    QuoteOrderRequest:
+      type: object
+      required: [order_type, items]
+      properties:
+        order_type:
+          type: string
+          enum: [dine_in, takeaway, delivery]
+        billing_mode:
+          type: string
+          enum: [pay_first, open_tab, split_bill]
+        table_number:
+          type: string
+        notes:
+          type: string
+        expected_total:
+          type: integer
+          format: int64
+          description: Optional expected total for optimistic concurrency conflict check
+        expected_quote_fingerprint:
+          type: string
+          description: Optional deterministic hash fingerprint of quote lines to prevent compensating price change conflicts
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/CreateOrderItem"
+
+    QuoteOrderResponse:
+      type: object
+      required: [quote]
+      properties:
+        quote:
+          $ref: "#/components/schemas/QuoteSummary"
+
+    QuoteSummary:
+      type: object
+      required: [subtotal, discount_amount, service_charge_amount, service_charge_rate_bps, tax_amount, tax_rate_bps, total_amount, quote_fingerprint, items]
+      properties:
+        subtotal:
+          type: integer
+          format: int64
+        discount_amount:
+          type: integer
+          format: int64
+        service_charge_amount:
+          type: integer
+          format: int64
+        service_charge_rate_bps:
+          type: integer
+        tax_amount:
+          type: integer
+          format: int64
+        tax_rate_bps:
+          type: integer
+        total_amount:
+          type: integer
+          format: int64
+        quote_fingerprint:
+          type: string
+          description: Deterministic SHA-256 fingerprint hash of lines, snapshot prices, tax, and service fees
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              variant_id:
+                type: string
+                format: uuid
+              product_id:
+                type: string
+                format: uuid
+              product_name:
+                type: string
+              variant_name:
+                type: string
+              unit_price:
+                type: integer
+                format: int64
+              quantity:
+                type: integer
+              subtotal:
+                type: integer
+                format: int64
+
+    QuoteChangedErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, expected_total, actual_total, quote]
+          properties:
+            code:
+              type: string
+              enum: [QUOTE_CHANGED]
+            message:
+              type: string
+            expected_total:
+              type: integer
+              format: int64
+            actual_total:
+              type: integer
+              format: int64
+            expected_fingerprint:
+              type: string
+            actual_fingerprint:
+              type: string
+            quote:
+              $ref: "#/components/schemas/QuoteSummary"

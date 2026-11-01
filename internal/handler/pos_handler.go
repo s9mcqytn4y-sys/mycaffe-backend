@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -27,14 +28,16 @@ func NewPOSHandler(orders *service.OrderService, payments *service.PaymentServic
 }
 
 type POSCreateOrderRequest struct {
-	IdempotencyKey string                   `json:"idempotency_key" binding:"required,max=100"`
-	TableNumber    string                   `json:"table_number" binding:"max=50"`
-	CustomerName   string                   `json:"customer_name" binding:"max=100"`
-	CustomerPhone  string                   `json:"customer_phone" binding:"max=50"`
-	OrderType      domain.OrderType         `json:"order_type" binding:"required"`
-	BillingMode    domain.BillingMode       `json:"billing_mode"`
-	Notes          string                   `json:"notes" binding:"max=500"`
-	Items          []service.OrderItemInput `json:"items" binding:"required,min=1,max=100"`
+	IdempotencyKey           string                   `json:"idempotency_key" binding:"required,max=100"`
+	TableNumber              string                   `json:"table_number" binding:"max=50"`
+	CustomerName             string                   `json:"customer_name" binding:"max=100"`
+	CustomerPhone            string                   `json:"customer_phone" binding:"max=50"`
+	OrderType                domain.OrderType         `json:"order_type" binding:"required"`
+	BillingMode              domain.BillingMode       `json:"billing_mode"`
+	ExpectedTotal            *int64                   `json:"expected_total,omitempty"`
+	ExpectedQuoteFingerprint string                   `json:"expected_quote_fingerprint,omitempty"`
+	Notes                    string                   `json:"notes" binding:"max=500"`
+	Items                    []service.OrderItemInput `json:"items" binding:"required,min=1,max=100"`
 }
 
 // CreateOrder handles POST /api/v1/pos/orders (permission order.pos.create).
@@ -53,7 +56,8 @@ func (h *POSHandler) CreateOrder(c *gin.Context) {
 	res, err := h.orders.CreateOrder(c.Request.Context(), actor.Staff.Store.ID, service.OrderCreationInput{
 		IdempotencyKey: req.IdempotencyKey, TableNumber: req.TableNumber, CustomerName: name,
 		CustomerPhone: req.CustomerPhone, OrderType: req.OrderType, BillingMode: req.BillingMode,
-		ActorUserID: &actorID, Notes: req.Notes, Items: req.Items,
+		ActorUserID: &actorID, ExpectedTotal: req.ExpectedTotal,
+		ExpectedQuoteFingerprint: req.ExpectedQuoteFingerprint, Notes: req.Notes, Items: req.Items,
 	})
 	if err != nil {
 		orderError(c, err)
@@ -66,8 +70,85 @@ func (h *POSHandler) CreateOrder(c *gin.Context) {
 	c.JSON(status, res)
 }
 
+type OrderQuoteRequest struct {
+	OrderType                domain.OrderType         `json:"order_type" binding:"required"`
+	BillingMode              domain.BillingMode       `json:"billing_mode"`
+	ExpectedTotal            *int64                   `json:"expected_total,omitempty"`
+	ExpectedQuoteFingerprint string                   `json:"expected_quote_fingerprint,omitempty"`
+	Items                    []service.OrderItemInput `json:"items" binding:"required,min=1,max=100"`
+}
+
+// QuoteOrder handles POST /api/v1/pos/orders/quote (staff POS quote).
+func (h *POSHandler) QuoteOrder(c *gin.Context) {
+	var req OrderQuoteRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		authError(c, http.StatusBadRequest, "INVALID_REQUEST", "Data quote tidak lengkap atau tidak valid.")
+		return
+	}
+	actor := currentStaff(c)
+	actorID := actor.Staff.UserID
+	res, err := h.orders.QuoteOrder(c.Request.Context(), actor.Staff.Store.ID, service.OrderQuoteInput{
+		OrderType:                req.OrderType,
+		BillingMode:              req.BillingMode,
+		ExpectedTotal:            req.ExpectedTotal,
+		ExpectedQuoteFingerprint: req.ExpectedQuoteFingerprint,
+		ActorUserID:              &actorID,
+		Items:                    req.Items,
+	})
+	if err != nil {
+		orderError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, res)
+}
+
+// PublicQuoteOrder handles POST /api/v1/public/stores/:slug/orders/quote (guest ordering quote).
+func (h *POSHandler) PublicQuoteOrder(c *gin.Context) {
+	slug := strings.ToLower(strings.TrimSpace(c.Param("slug")))
+	if slug == "" {
+		authError(c, http.StatusBadRequest, "INVALID_REQUEST", "Store slug wajib diisi.")
+		return
+	}
+	var req OrderQuoteRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		authError(c, http.StatusBadRequest, "INVALID_REQUEST", "Data quote tidak lengkap atau tidak valid.")
+		return
+	}
+	storeID, active, err := h.orders.ResolveStoreBySlug(c.Request.Context(), slug)
+	if err != nil || !active {
+		authError(c, http.StatusNotFound, "NOT_FOUND", "Toko tidak ditemukan atau tidak aktif.")
+		return
+	}
+	res, err := h.orders.QuoteOrder(c.Request.Context(), storeID, service.OrderQuoteInput{
+		OrderType:                req.OrderType,
+		BillingMode:              req.BillingMode,
+		ExpectedTotal:            req.ExpectedTotal,
+		ExpectedQuoteFingerprint: req.ExpectedQuoteFingerprint,
+		Items:                    req.Items,
+	})
+	if err != nil {
+		orderError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, res)
+}
+
 func orderError(c *gin.Context, err error) {
+	var quoteErr *service.QuoteChangedError
 	switch {
+	case errors.As(err, &quoteErr):
+		resp := gin.H{
+			"code":           "QUOTE_CHANGED",
+			"error":          "Total harga atau rincian pesanan telah berubah dari quote sebelumnya.",
+			"expected_total": quoteErr.ExpectedTotal,
+			"actual_total":   quoteErr.ActualTotal,
+			"quote":          quoteErr.Quote,
+		}
+		if quoteErr.ExpectedFingerprint != "" || quoteErr.ActualFingerprint != "" {
+			resp["expected_fingerprint"] = quoteErr.ExpectedFingerprint
+			resp["actual_fingerprint"] = quoteErr.ActualFingerprint
+		}
+		c.JSON(http.StatusConflict, resp)
 	case errors.Is(err, service.ErrInvalidOrderInput), errors.Is(err, service.ErrInvalidModifierSelection),
 		errors.Is(err, service.ErrInvalidSubAddonSelection), errors.Is(err, service.ErrUnsupportedBillingMode):
 		authError(c, http.StatusBadRequest, "INVALID_ORDER", err.Error())

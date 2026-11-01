@@ -68,7 +68,7 @@ Full evaluation and ordered backlog: [pos-operations-evaluation.md](pos-operatio
 | K6 | Loyalty | Digital stamp card ("buy N get 1"), customer identified by a verified email, one stamp per paid order, reward = audited 100% item discount |
 | K7 | Promo & bundling | Owner-defined automatic promos (percent/amount, product/category, happy hour, period, quota), fixed-price bundles, cashier discount within O4; one best promo per line, no stacking; vouchers later |
 | K8 | Static QRIS fallback | Automatic after 2 consecutive Midtrans failures or forced by the owner; cashier confirms with a reference; auto-return to dynamic QRIS after 10 minutes |
-| K9 | Media storage | Cloudflare R2 via presigned upload; JPEG/PNG/WebP ≤ 5 MB, magic-byte check, EXIF stripped, WebP 200/600/1200 variants, CDN delivery |
+| K9 | Media storage & backups | **Cloudflare R2 Triple-Bucket Architecture**: `mycaffe-media` (public read via CDN / dev-url, presigned PUT), `mycaffe-private-media` (private signed URL TTL 15m for static QRIS & sensitive documents), and `mycaffe-backups` (strictly private, GPG AES256 encrypted pg_dump, relative path sha256 checksums, non-destructive restore guard). |
 | C-scope | Phase 02.01-C | Approved and implemented: RBAC matrix, `store_settings`, token-bound POS routes, `/me.permissions`, removal of client-supplied store/actor and of `/ws?token=` |
 
 Designs: [catalog-inventory-design.md](catalog-inventory-design.md), requirements:
@@ -83,11 +83,17 @@ Designs: [catalog-inventory-design.md](catalog-inventory-design.md), requirement
 | M3 | Single-tenant MVP | Multi-tenant schema kept for future branches; optional `DEFAULT_STORE_SLUG` so staff log in with email + PIN only; demo seed keeps two stores for isolation tests; demo owner email `abdulaziz543333@gmail.com` |
 | M4 | Iteration 3 priority | Catalog C1–C3 with the standard CRUD contract; media upload after the R2 bucket exists |
 
+## Iteration 4: modifiers, cart, tabs, shifts, void/refund (recorded 2026-10-31, sixth interview)
+
+P1–P9 (negative modifier deltas, open tab rounds, split equal/by item, void stock rules, refund time
+window, one shift per drawer, drawer kick + no-sale, local cart + quote, plan approval) are detailed in
+[iteration-4-design.md](iteration-4-design.md#6-decisions-recorded).
+
 ## Resolved from existing sources (not re-asked)
 
 | Topic | Resolution | Source |
 |-------|-----------|--------|
-| Split bill semantics | Deferred until the single-payer path is stable; equal vs item split, rounding and partial refunds to be specified then. Code currently assumes **one split per order** (`commitPaidOrderTx` settles all splits). | `docs/product/module-1-customer-ordering.md` |
+| Split bill semantics | Approved in Iteration 4 (P3): equal N (remainder to split 1) and by item (proportional tax/service, remainder to last split); locked after first split payment. Scheduled for Iteration 4c. Code currently settles single-payer orders. | `docs/architecture/iteration-4-design.md#6-decisions-recorded` (P3) |
 | Roles | Exactly `owner`, `cashier`, `barista`, `kitchen`; no new roles. | `AGENTS.md`, migration `000001` |
 
 ## Still open

@@ -10,7 +10,7 @@ Backend RESTful API dan Realtime Hub untuk platform white-label multi-tenant QR 
 - **Infrastructure**: Docker Compose (`docker-compose.yml` & `docker-compose.prod.yml`) & Nginx Reverse Proxy (Hostinger KVM 2 / Ubuntu 24.04 LTS)
 - **Payment Gateway**: Midtrans Core API Custom UI (`qris`, `bank_transfer`, `gopay`, `shopeepay`, `card`, `cstore`) + Cashier Offline (`cash`, `static_qris`, `edc`)
 - **Realtime Hub**: Gorilla WebSocket (`internal/realtime`)
-- **Cloudflare R2 Storage**: Dual-Bucket (`mycaffe-media` untuk CDN gambar katalog & `mycaffe-backups` untuk backup `pg_dump` terenkripsi GPG AES256+SHA512)
+- **Cloudflare R2 Storage**: Triple-Bucket (`mycaffe-media` untuk CDN gambar katalog publik, `mycaffe-private-media` untuk presigned GET 15m QRIS statis/dokumen, & `mycaffe-backups` untuk backup `pg_dump` terenkripsi GPG AES256+SHA512)
 - **Monitoring & Error Tracking**: Sentry Go SDK
 
 ---
@@ -44,7 +44,9 @@ Status setiap komponen diklasifikasikan ke dalam empat kategori tegas: **Impleme
 | **Midtrans Webhook Callback** (`POST /api/v1/payments/midtrans/webhook`) | **Implemented & Tested** | Verifikasi signature SHA-512, batas body `64 KB`, `IDR`, integer `gross_amount`, pemetaan status; inbox durable `payment_notification_logs` (hash SHA-256 per event), proteksi notifikasi out-of-order, deteksi selisih nominal dan pembayaran ganda (`payment.refund_required`). Mengembalikan `503` (`Retry-After: 60`) hanya bila commit database gagal agar Midtrans mengulang. |
 | **Payment Ledger & Reconciliation Worker** (Phase 01 Sub-task 04) | **Implemented & Tested** | Tunai/static QRIS/EDC beraudit; Midtrans Core API dua fase; idempotensi; worker kedaluwarsa & `CheckTransaction`; deteksi pembayaran ganda. Diakses lewat rute POS terautentikasi. |
 | **Catalog: Menu, Variants & CRUD** (iteration 3, `internal/service/catalog_service.go`) | **Implemented & Tested** | Katalog staf & publik (ETag/304), varian + SKU, tipe menu & stasiun, CRUD kategori/produk/varian dengan error 422/409 per kolom, toggle habis per stasiun, audit perubahan harga, arsip. |
-| **Signed Table QR, Guest Session, KDS Realtime, Shift, Modifier CRUD, Media Upload** | **Planned** | Lihat `docs/architecture/roadmap.md` dan `docs/architecture/pos-operations-evaluation.md`. |
+| **Catalog: Modifiers & Order Quote Engine** (iteration 4a, `internal/service/pricing.go`) | **Implemented & Tested** | CRUD grup & opsi modifier, delta harga negatif (P1), validasi kedalaman sub-addon maks 1 & deteksi siklus graf, audit perubahan harga atomik, otorisasi POS quote terikat RBAC (`order.pos.create`), dan quote fingerprint SHA-256 anti-perubahan harga kompensasi (P8) dengan proteksi konflik optimistik 409 (`QUOTE_CHANGED`). |
+| **Cloudflare R2 Storage Infrastructure** (Keputusan K9, `scripts/cloudflare/`) | **Implemented & Verified** | Provisioning otomatis Triple-Bucket (`mycaffe-media` publik, `mycaffe-private-media` privat presigned GET 15m, `mycaffe-backups` privat terenkripsi), CORS browser aktif, dan skrip restore drill dengan proteksi non-destruktif database operasional. Media upload handler (C4) dijadwalkan pada fase berikutnya. |
+| **Signed Table QR, Guest Session, KDS Realtime, Shift, Cash Drawer, Media Upload** | **Planned** | Lihat `docs/architecture/roadmap.md` dan `docs/architecture/pos-operations-evaluation.md`. |
 | **Live Midtrans Production & Hostinger VPS Cutover** | **Blocked by Dependency** | Menunggu kredensial produksi Midtrans, domain/DNS aktif, dan provisioning Hostinger KVM 2 VPS oleh pemilik proyek. |
 
 ---

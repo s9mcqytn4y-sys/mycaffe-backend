@@ -95,6 +95,13 @@ services:
       EMAIL_FROM_NAME: ${EMAIL_FROM_NAME:-MyCaffe Demo}
       APP_PUBLIC_URL: ${APP_PUBLIC_URL:-http://localhost:8088}
       DEFAULT_STORE_SLUG: ${DEFAULT_STORE_SLUG:-central-cafe}
+      STORAGE_DRIVER: ${STORAGE_DRIVER:-local}
+      R2_ACCOUNT_ID: ${R2_ACCOUNT_ID:-}
+      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:-}
+      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:-}
+      R2_BUCKET_NAME: ${R2_BUCKET_NAME:-mycaffe-media}
+      R2_PRIVATE_BUCKET_NAME: ${R2_PRIVATE_BUCKET_NAME:-mycaffe-private-media}
+      R2_PUBLIC_URL: ${R2_PUBLIC_URL:-}
       SENTRY_ENVIRONMENT: staging
     networks:
       - mycaffe-edge
@@ -129,7 +136,7 @@ services:
       start_period: 5s
 
   tunnel:
-    image: cloudflare/cloudflared:2024.12.2
+    image: cloudflare/cloudflared:2026.10.2
     restart: unless-stopped
     # Quick Tunnel: the public URL is printed in `docker compose logs tunnel` and changes on restart.
     # Switch to a Named Tunnel (stable hostname) with: tunnel run --token ${CLOUDFLARE_TUNNEL_TOKEN}

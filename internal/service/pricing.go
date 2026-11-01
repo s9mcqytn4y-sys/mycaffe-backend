@@ -51,15 +51,17 @@ type OrderItemInput struct {
 }
 
 type OrderCreationInput struct {
-	IdempotencyKey string             `json:"idempotency_key,omitempty"`
-	TableNumber    string             `json:"table_number,omitempty"`
-	CustomerName   string             `json:"customer_name"`
-	CustomerPhone  string             `json:"customer_phone,omitempty"`
-	OrderType      domain.OrderType   `json:"order_type"`
-	BillingMode    domain.BillingMode `json:"billing_mode,omitempty"`
-	ActorUserID    *uuid.UUID         `json:"actor_user_id,omitempty"`
-	Notes          string             `json:"notes,omitempty"`
-	Items          []OrderItemInput   `json:"items"`
+	IdempotencyKey           string             `json:"idempotency_key,omitempty"`
+	TableNumber              string             `json:"table_number,omitempty"`
+	CustomerName             string             `json:"customer_name"`
+	CustomerPhone            string             `json:"customer_phone,omitempty"`
+	OrderType                domain.OrderType   `json:"order_type"`
+	BillingMode              domain.BillingMode `json:"billing_mode,omitempty"`
+	ActorUserID              *uuid.UUID         `json:"actor_user_id,omitempty"`
+	ExpectedTotal            *int64             `json:"expected_total,omitempty"`
+	ExpectedQuoteFingerprint string             `json:"expected_quote_fingerprint,omitempty"`
+	Notes                    string             `json:"notes,omitempty"`
+	Items                    []OrderItemInput   `json:"items"`
 }
 
 type CatalogSnapshot struct {
@@ -401,6 +403,11 @@ func priceSingleOrderItem(
 	unitSnapshotPrice, err := safeAddInt64(unitBase, modifierUnitTotal)
 	if err != nil {
 		return nil, err
+	}
+	if unitSnapshotPrice < 0 {
+		// Negative modifier deltas are allowed (owner decision P1) but never below a free item.
+		return nil, fmt.Errorf("%w: item %q would cost %d after modifiers; the unit price cannot be negative",
+			ErrInvalidModifierSelection, product.Name, unitSnapshotPrice)
 	}
 	lineSubtotal, err := safeMulInt64(unitSnapshotPrice, int64(reqItem.Quantity))
 	if err != nil {

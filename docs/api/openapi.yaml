@@ -29,6 +29,8 @@ tags:
     description: Owner staff management - invitation, PIN reset link, temporary PIN (owner decision E2)
   - name: KDS
     description: Kitchen Display System and Barista preparation queue transitions
+  - name: Tables
+    description: Tables, derived table occupancy, table sessions and public QR resolution (iteration 5a)
 
 paths:
   /health:
@@ -839,6 +841,214 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /api/v1/pos/tables:
+    get:
+      tags: [Tables]
+      operationId: listTables
+      summary: Table board with derived occupancy (any staff; QR token only with table.qr.manage)
+      description: Lazily closes settled sessions past `table_idle_close_minutes` before reading (decision QR7).
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: Non-archived tables of the caller's store
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [tables]
+                properties:
+                  tables:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/TableBoardEntry"
+    post:
+      tags: [Tables]
+      operationId: createTable
+      summary: Create a table with a fresh opaque QR token (owner, table.manage)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TableInput"
+      responses:
+        "201":
+          description: Created table (includes qr_token for printing)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Table"
+        "400":
+          $ref: "#/components/responses/InvalidJSON"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+  /api/v1/pos/tables/{id}:
+    patch:
+      tags: [Tables]
+      operationId: updateTable
+      summary: Update number, label, section, capacity or is_active (owner, table.manage)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - $ref: "#/components/parameters/ResourceID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TableInput"
+      responses:
+        "200":
+          description: Updated table
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Table"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+  /api/v1/pos/tables/{id}/archive:
+    post:
+      tags: [Tables]
+      operationId: archiveTable
+      summary: Retire a table; its QR stops resolving (owner, table.manage)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - $ref: "#/components/parameters/ResourceID"
+      responses:
+        "204":
+          description: Archived
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: TABLE_SESSION_OPEN
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/pos/tables/{id}/rotate-qr:
+    post:
+      tags: [Tables]
+      operationId: rotateTableQR
+      summary: Replace the QR token; the old sticker stops at once (owner, table.qr.manage, audited)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - $ref: "#/components/parameters/ResourceID"
+      responses:
+        "200":
+          description: Table with the new qr_token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Table"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/v1/pos/tables/{id}/sessions:
+    post:
+      tags: [Tables]
+      operationId: openTableSession
+      summary: Seat guests from the POS; returns the already open session if any (tab.manage)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - $ref: "#/components/parameters/ResourceID"
+      responses:
+        "200":
+          description: Open session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TableSession"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: TABLE_INACTIVE
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/pos/table-sessions/{id}/close:
+    post:
+      tags: [Tables]
+      operationId: closeTableSession
+      summary: "Kosongkan meja: close a session once no order is unpaid (tab.manage, audited)"
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - $ref: "#/components/parameters/ResourceID"
+      responses:
+        "200":
+          description: Closed session (idempotent)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TableSession"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: TABLE_HAS_UNPAID_ORDERS
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/public/qr/{token}:
+    get:
+      security: []
+      tags: [Tables]
+      operationId: resolveTableQR
+      summary: Resolve a scanned table QR (public, rate-limited, Cache-Control no-store)
+      description: >-
+        Unknown tokens and archived tables or stores answer 404 alike. A paused store, a store without
+        an open shift (QR4) or an inactive table still resolve with ordering_open false and a reason.
+      x-implementation-status: implemented
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 22
+            maxLength: 64
+      responses:
+        "200":
+          description: Table and ordering availability
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublicTable"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          description: Rate limited by Nginx (30 req/min per IP, decision QR5)
   /api/v1/pos/drawers:
     get:
       tags: [POS Shifts]
@@ -2239,6 +2449,128 @@ components:
             $ref: "#/components/schemas/ValidationErrorResponse"
 
   schemas:
+    TableInput:
+      type: object
+      properties:
+        table_number:
+          type: string
+          minLength: 1
+          maxLength: 50
+          description: Required on create; unique per store among non-archived tables (case-insensitive)
+        label:
+          type: string
+          maxLength: 100
+        section:
+          type: string
+          maxLength: 50
+        capacity:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 4
+        is_active:
+          type: boolean
+    Table:
+      type: object
+      required: [id, table_number, label, section, capacity, qr_rotated_at, is_active, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        table_number:
+          type: string
+        label:
+          type: string
+        section:
+          type: string
+        capacity:
+          type: integer
+        qr_token:
+          type: string
+          description: Opaque 256-bit base64url token printed as QR (decision QR1); omitted for staff without table.qr.manage
+        qr_rotated_at:
+          type: string
+          format: date-time
+        is_active:
+          type: boolean
+        archived_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    TableSession:
+      type: object
+      required: [id, table_id, status, opened_at, opened_via]
+      properties:
+        id:
+          type: string
+          format: uuid
+        table_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [open, closed]
+        opened_at:
+          type: string
+          format: date-time
+        opened_via:
+          type: string
+          enum: [qr, staff]
+        opened_by_user_id:
+          type: string
+          format: uuid
+        settled_at:
+          type: string
+          format: date-time
+          description: All orders paid and served; starts the auto-close countdown
+        closed_at:
+          type: string
+          format: date-time
+        closed_by_user_id:
+          type: string
+          format: uuid
+        close_reason:
+          type: string
+          enum: [cashier, auto]
+    TableBoardEntry:
+      allOf:
+        - $ref: "#/components/schemas/Table"
+        - type: object
+          required: [status, unpaid_orders, unpaid_amount]
+          properties:
+            status:
+              type: string
+              enum: [available, occupied, settled]
+              description: Derived from the open table session (decision T1), never stored
+            session:
+              $ref: "#/components/schemas/TableSession"
+            unpaid_orders:
+              type: integer
+            unpaid_amount:
+              type: integer
+              format: int64
+    PublicTable:
+      type: object
+      required: [store_name, store_slug, table_number, label, ordering_open]
+      properties:
+        store_name:
+          type: string
+        store_slug:
+          type: string
+        table_number:
+          type: string
+        label:
+          type: string
+        ordering_open:
+          type: boolean
+        closed_reason:
+          type: string
+          enum: [paused, store_closed, table_inactive]
     CashDrawer:
       type: object
       properties:

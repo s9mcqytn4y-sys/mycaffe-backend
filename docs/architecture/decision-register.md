@@ -128,7 +128,7 @@ Plan: [iteration-5-table-qr-kds-plan.md](iteration-5-table-qr-kds-plan.md).
 | QR4 | Store closed for QR ordering | No shift open on any drawer → 409 `STORE_CLOSED` (no opening-hours setting) |
 | QR5 | Public anti-abuse | 2 unpaid orders per guest session, 6 per table session; 10 order attempts per guest session / 10 min; 10 new sessions per IP / 10 min; Nginx 30 req/min per IP (burst 20); ≤ 30 items per order, quantity ≤ 20 per line; constants, not store settings |
 | QR6 | Public order tracker | Link valid until 24 h after the order completes; the R1 digital receipt keeps its own 90-day token |
-| QR7 | Table session auto-close | Lazy: status derived at read time, session closed on the next read/scan after `settled_at + table_auto_close_minutes`; no worker |
+| QR7 | Table session auto-close | Lazy: status derived at read time, session closed on the next read/scan after `settled_at + table_idle_close_minutes`; no worker |
 
 ## Awaiting owner approval
 

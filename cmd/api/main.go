@@ -123,6 +123,7 @@ func main() {
 	var catalogHandler *handler.CatalogHandler
 	var shiftHandler *handler.ShiftHandler
 	var tabHandler *handler.TabHandler
+	var tableHandler *handler.TableHandler
 	if db != nil {
 		authService := service.NewAuthService(db, postgres.NewAuthRepository(), cfg.JWTSecret, service.AuthPolicy{
 			AccessTokenTTL:     cfg.StaffAccessTokenTTL,
@@ -148,6 +149,7 @@ func main() {
 		catalogHandler = handler.NewCatalogHandler(service.NewCatalogService(db))
 		shiftHandler = handler.NewShiftHandler(service.NewShiftService(db))
 		tabHandler = handler.NewTabHandler(service.NewTabService(db, postgres.NewTabRepository(), orderRepo))
+		tableHandler = handler.NewTableHandler(service.NewTableService(db))
 
 		go paymentService.StartReconciliationWorker(workerCtx, 30*time.Second, 2*time.Minute, 50)
 	}
@@ -209,6 +211,16 @@ func main() {
 			pos.POST("/orders/:id/void", authHandler.RequirePermission(rbac.OrderVoid), posHandler.VoidOrder)
 			pos.POST("/orders/:id/payments/:payment_id/refund", authHandler.RequirePermission(rbac.PaymentRefund), posHandler.RefundPayment)
 			pos.POST("/products/:id/stock-override", authHandler.RequirePermission(rbac.StockOverride), posHandler.OverrideStock)
+
+			// Tables & table sessions (iteration 5a): table board for staff, CRUD for the owner (QR3).
+			pos.GET("/tables", authHandler.RequireStaff(), tableHandler.ListTables)
+			pos.POST("/tables", authHandler.RequirePermission(rbac.TableManage), tableHandler.CreateTable)
+			pos.PATCH("/tables/:id", authHandler.RequirePermission(rbac.TableManage), tableHandler.UpdateTable)
+			pos.POST("/tables/:id/archive", authHandler.RequirePermission(rbac.TableManage), tableHandler.ArchiveTable)
+			pos.POST("/tables/:id/rotate-qr", authHandler.RequirePermission(rbac.TableQRManage), tableHandler.RotateQR)
+			pos.POST("/tables/:id/sessions", authHandler.RequirePermission(rbac.TabManage), tableHandler.OpenSession)
+			pos.POST("/table-sessions/:id/close", authHandler.RequirePermission(rbac.TabManage), tableHandler.CloseSession)
+			v1.GET("/public/qr/:token", tableHandler.ResolveQR)
 
 			// Guest menu & quote (public, cacheable catalog; dynamic quote for guest carts).
 			v1.GET("/public/stores/:slug/catalog", catalogHandler.PublicCatalog)

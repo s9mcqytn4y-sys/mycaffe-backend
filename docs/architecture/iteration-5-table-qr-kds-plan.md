@@ -90,9 +90,7 @@ ALTER TABLE orders ADD CONSTRAINT fk_orders_table_session
     FOREIGN KEY (store_id, table_session_id) REFERENCES table_sessions(store_id, id) ON DELETE RESTRICT;
 CREATE INDEX IF NOT EXISTS idx_orders_table_session ON orders(store_id, table_session_id);
 
-ALTER TABLE store_settings ADD COLUMN IF NOT EXISTS table_auto_close_minutes INT NOT NULL DEFAULT 30;
-ALTER TABLE store_settings ADD CONSTRAINT chk_store_settings_table_auto_close
-    CHECK (table_auto_close_minutes BETWEEN 5 AND 240);
+-- The auto-close delay reuses store_settings.table_idle_close_minutes (000007, default 30, 5..240).
 
 -- RLS: same pattern as every tenant table (current_store_id(), never inline current_setting).
 ALTER TABLE tables ENABLE ROW LEVEL SECURITY;
@@ -112,7 +110,7 @@ Computed in the read query (no stored `status` column):
 
 | Status | Rule |
 |--------|------|
-| `available` | no open session, or the open session is past `settled_at + table_auto_close_minutes` (closed lazily, below) |
+| `available` | no open session, or the open session is past `settled_at + table_idle_close_minutes` (closed lazily, below) |
 | `occupied` | open session with at least one order not yet paid or not yet served |
 | `settled` | open session with `settled_at` set, auto-close countdown running |
 
@@ -145,6 +143,7 @@ serves the last order of the session.
 | `POST /api/v1/pos/tables/:id/archive` | owner | refused with 409 while a session is open |
 | `POST /api/v1/pos/tables/:id/rotate-qr` | owner | returns the new token once for printing |
 | `POST /api/v1/pos/table-sessions/:id/close` | cashier/owner | "Kosongkan meja"; refused while an order is unpaid (409), audited |
+| `POST /api/v1/pos/tables/:id/sessions` | cashier/owner | seat guests from the POS (`opened_via=staff`); returns the open session if one exists |
 | `GET /api/v1/public/qr/:token` | public | resolves the table: store name/slug, table number, `ordering_open`; no ids beyond what the guest flow needs |
 
 Resolve uses `resolve_table_qr(p_token)` (SECURITY DEFINER, §8) returning only
@@ -304,7 +303,7 @@ table is needed.
 
 | Phase | Scope | Migration | Depends on |
 |-------|-------|-----------|------------|
-| 5a | tables CRUD, QR rotate, table sessions, derived status, lazy auto-close, QR resolve | 000016 | QR1 + `resolve_table_qr` approved |
+| 5a | tables CRUD, QR rotate, table sessions, derived status, lazy auto-close, QR resolve | 000016 | **implemented** (PR for branch `feature/iteration-5a-tables`) |
 | 5b | guest session cookie, guest quote/order/QRIS payment, own-orders list, tracker, delete `POST /api/v1/orders` | 000017 | 5a, `track_order_by_token` approved |
 | 5c | `store_seq`, relay worker, replay, WS tickets, channels, `/ws` opened | 000018 | `list_stores_with_pending_outbox` approved |
 | 5d | KDS tickets, transitions, derived order/round status, void waste vs restock | 000019 | 5c |

@@ -27,6 +27,7 @@ var (
 	ErrInsufficientCashTendered      = errors.New("cash_tendered_amount cannot be less than total payable amount")
 	ErrReconciliationRefRequired     = errors.New("reconciliation_ref is required for static_qris and edc payments")
 	ErrNoOpenShift                   = errors.New("tidak ada sesi shift aktif untuk kasir ini; buka shift kasir terlebih dahulu")
+	ErrTabNotClosed                  = errors.New("tab belum ditutup; selesaikan atau tutup tab sebelum memproses pembayaran")
 )
 
 // GatewayClient abstracts Midtrans Core API operations for deterministic unit and integration testing.

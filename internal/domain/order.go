@@ -10,6 +10,7 @@ type OrderStatus string
 
 const (
 	OrderStatusPendingPayment OrderStatus = "pending_payment"
+	OrderStatusOpen           OrderStatus = "open"
 	OrderStatusQueued         OrderStatus = "queued"
 	OrderStatusPreparing      OrderStatus = "preparing"
 	OrderStatusReady          OrderStatus = "ready"
@@ -21,6 +22,7 @@ const (
 func ValidOrderStatuses() []OrderStatus {
 	return []OrderStatus{
 		OrderStatusPendingPayment,
+		OrderStatusOpen,
 		OrderStatusQueued,
 		OrderStatusPreparing,
 		OrderStatusReady,
@@ -37,6 +39,8 @@ func CanTransitionOrderStatus(from, to OrderStatus) bool {
 	switch from {
 	case OrderStatusPendingPayment:
 		return to == OrderStatusQueued || to == OrderStatusCancelled
+	case OrderStatusOpen:
+		return to == OrderStatusQueued || to == OrderStatusPreparing || to == OrderStatusReady || to == OrderStatusServed || to == OrderStatusCompleted || to == OrderStatusCancelled
 	case OrderStatusQueued:
 		return to == OrderStatusPreparing || to == OrderStatusCancelled
 	case OrderStatusPreparing:
@@ -108,6 +112,7 @@ type Order struct {
 	ExpiresAt       *time.Time         `json:"expires_at,omitempty" db:"expires_at"`
 	CreatedByUserID *uuid.UUID         `json:"created_by_user_id,omitempty" db:"created_by_user_id"`
 	ShiftID         *uuid.UUID         `json:"shift_id,omitempty" db:"shift_id"`
+	TableID         *uuid.UUID         `json:"table_id,omitempty" db:"table_id"`
 
 	SubtotalAmount      int64 `json:"subtotal_amount" db:"subtotal_amount"`
 	DiscountAmount      int64 `json:"discount_amount" db:"discount_amount"`
@@ -138,6 +143,7 @@ type OrderItem struct {
 	SnapshotPrice      int64             `json:"snapshot_price" db:"snapshot_price"`
 	Quantity           int               `json:"quantity" db:"quantity"`
 	SubtotalAmount     int64             `json:"subtotal_amount" db:"subtotal_amount"`
+	RoundID            *uuid.UUID        `json:"round_id,omitempty" db:"round_id"`
 	SelectedOptions    string            `json:"selected_options" db:"selected_options"`
 	Options            []OrderItemOption `json:"options,omitempty"`
 	Notes              string            `json:"notes,omitempty" db:"notes"`

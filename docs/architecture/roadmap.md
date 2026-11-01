@@ -47,7 +47,7 @@ Midtrans webhook. Contained (503 in staging/production): guest `POST /api/v1/ord
 |------|------|---------------------|----------------------|
 | 4a | **C3b Modifier groups & options CRUD** + product↔group links + Quote APIs | 422/409 contract, negative delta P1, nested sub-addon depth 1, cycle protection, POS quote RBAC (order.pos.create), quote fingerprint anti-compensating check (P8) | Implemented & Tested ✅ |
 | 4b | **Shift & cash drawer (P6, P7, C1, H1)** | open with float, cash payments require an open shift, paid-out, blind close, variance > tolerance needs owner PIN, X/Z report, audit | store_settings ✅ |
-| 4c | **Open tab, rounds, split bill (P2, P3, T2)** | split by equal N or items; server recomputes shares; deterministic rupiah rounding remainder to split 1/last split; locked after first payment | 4a, 4b |
+| 4c | **Open tab, rounds, split bill (P2, P3, T2)** | split by equal N or items; server recomputes shares; deterministic rupiah rounding remainder to split 1 (equal N) or last split (by item); locked after first payment | 4a, 4b |
 | 4d | **Void / refund (P4, P5, O1, C2)** + split rework (R4) | void before paid, refund after paid (cash from open drawer), owner PIN above threshold, `commitPaidOrderTx` settles one split | shift |
 | 5 | **02.01-D Tables & signed QR** | tables CRUD, HMAC QR with key id, rotate/revoke, emergency pause honoured | — |
 | 5 | **02.01-E Guest session + table session (T1, T2)** + optional email/consent (E4) | per-device guest token, pay-first QR orders, table occupancy states, auto-close | 02.01-D |

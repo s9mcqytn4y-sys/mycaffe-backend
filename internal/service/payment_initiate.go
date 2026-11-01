@@ -141,6 +141,9 @@ func (s *PaymentService) initiateDirectCashierPayment(
 		if err != nil {
 			return err
 		}
+		if order.BillingMode == domain.BillingModeOpenTab && order.Status == domain.OrderStatusOpen {
+			return ErrTabNotClosed
+		}
 		targetSplit, err := resolveOrderSplit(input.SplitID, splits)
 		if err != nil {
 			return err
@@ -351,6 +354,9 @@ func (s *PaymentService) initiateMidtransGatewayPayment(
 		order, splits, err := s.orderRepo.GetOrderByIDForUpdate(ctx, tx, trustedStoreID, input.OrderID)
 		if err != nil {
 			return err
+		}
+		if order.BillingMode == domain.BillingModeOpenTab && order.Status == domain.OrderStatusOpen {
+			return ErrTabNotClosed
 		}
 		targetSplit, err := resolveOrderSplit(input.SplitID, splits)
 		if err != nil {

@@ -160,8 +160,8 @@ func TestPOSCashTenderIntegration(t *testing.T) {
 
 	// 4. Open shift on drawer with float 150,000
 	wOpenShift := call(http.MethodPost, "/pos/shifts", cashierToken, map[string]any{
-		"drawer_id":      drawer.ID.String(),
-		"starting_float": 150000,
+		"drawer_id":     drawer.ID.String(),
+		"opening_float": 150000,
 	})
 	if wOpenShift.Code != http.StatusCreated {
 		t.Fatalf("open shift failed: %d %s", wOpenShift.Code, wOpenShift.Body.String())

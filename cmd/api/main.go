@@ -125,6 +125,7 @@ func main() {
 	var tableHandler *handler.TableHandler
 	var guestHandler *handler.GuestHandler
 	var realtimeHandler *handler.RealtimeHandler
+	var kdsHandler *handler.KDSHandler
 	if db != nil {
 		authService := service.NewAuthService(db, postgres.NewAuthRepository(), cfg.JWTSecret, service.AuthPolicy{
 			AccessTokenTTL:     cfg.StaffAccessTokenTTL,
@@ -151,6 +152,7 @@ func main() {
 		tabHandler = handler.NewTabHandler(service.NewTabService(db, postgres.NewTabRepository(), orderRepo))
 		tableHandler = handler.NewTableHandler(service.NewTableService(db))
 		guestHandler = handler.NewGuestHandler(service.NewGuestService(db, orderService, paymentService))
+		kdsHandler = handler.NewKDSHandler(service.NewKDSService(db))
 		realtimeService := service.NewRealtimeService(db)
 		realtimeHandler = handler.NewRealtimeHandler(hub, realtimeService)
 		// Outbox relay (iteration 5c): LISTEN outbox + 2 s polling, at-least-once, ordered per store.
@@ -236,6 +238,11 @@ func main() {
 			guest.POST("/orders/:id/payments", guestHandler.InitiatePayment)
 			guest.POST("/ws-ticket", realtimeHandler.IssueGuestTicket)
 			pos.POST("/ws-ticket", authHandler.RequireStaff(), realtimeHandler.IssueStaffTicket)
+
+			// KDS (iteration 5d): station permissions are checked per ticket in the service.
+			kds := v1.Group("/kds", authHandler.RequireStaff())
+			kds.GET("/tickets", kdsHandler.ListTickets)
+			kds.POST("/tickets/:id/transition", kdsHandler.Transition)
 
 			// Guest menu & quote (public, cacheable catalog; dynamic quote for guest carts).
 			v1.GET("/public/stores/:slug/catalog", catalogHandler.PublicCatalog)

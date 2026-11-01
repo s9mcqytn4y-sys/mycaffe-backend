@@ -176,8 +176,15 @@ func (s *OperationalService) VoidOrder(
 
 		now := s.nowFunc().UTC()
 		previousStock := order.StockStatus
-		if err := releaseOrderStockTx(ctx, tx, s.orderRepo, order); err != nil {
+		wasted, err := releaseUnstartedStockTx(ctx, tx, s.orderRepo, order)
+		if err != nil {
 			return err
+		}
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE kds_tickets SET status = 'cancelled', cancelled_at = $3, updated_at = $3
+			WHERE store_id = $1 AND order_id = $2 AND status IN ('queued', 'preparing', 'ready')
+		`, storeID, order.ID, now); err != nil {
+			return fmt.Errorf("failed to cancel kds tickets: %w", err)
 		}
 		order.Status = domain.OrderStatusCancelled
 		order.ExpiresAt = nil
@@ -225,6 +232,7 @@ func (s *OperationalService) VoidOrder(
 			"owner_override_by": ownerOverrideID,
 			"stock_before":      previousStock,
 			"stock_after":       order.StockStatus,
+			"wasted_lines":      wasted,
 		})
 		if err := postgres.InsertAuditLog(ctx, tx, &domain.AuditLog{
 			StoreID:     storeID,

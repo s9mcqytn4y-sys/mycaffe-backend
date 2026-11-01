@@ -348,6 +348,13 @@ BEGIN
     ) THEN
         RAISE EXCEPTION 'SECURITY FAILURE: list_stores_with_pending_outbox is executable by PUBLIC!';
     END IF;
+    -- 10F-5. KDS tickets (migration 000019).
+    IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.kds_tickets'::regclass) THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: kds_tickets does not have row-level security enabled!';
+    END IF;
+    IF has_table_privilege('mycaffe_app', 'public.kds_tickets', 'DELETE') THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may DELETE kds_tickets!';
+    END IF;
     IF EXISTS (SELECT 1 FROM outbox_events WHERE store_seq IS NULL) THEN
         RAISE EXCEPTION 'outbox_events rows without store_seq';
     END IF;

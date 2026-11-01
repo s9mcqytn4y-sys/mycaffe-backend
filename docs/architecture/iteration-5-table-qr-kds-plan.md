@@ -307,7 +307,7 @@ table is needed.
 | 5a | tables CRUD, QR rotate, table sessions, derived status, lazy auto-close, QR resolve | 000016 | **implemented** (PR for branch `feature/iteration-5a-tables`) |
 | 5b | guest session cookie, guest quote/order/QRIS payment, own-orders list, tracker, delete `POST /api/v1/orders` | 000017 | **implemented** (branch `feature/iteration-5b-guest-orders`); `settled_at` upkeep and "session ends when all orders are completed" wait for KDS serve events (5d) |
 | 5c | `store_seq`, relay worker, replay, WS tickets, channels, `/ws` opened | 000018 | **implemented** (branch `feature/iteration-5c-outbox-relay`); guests get a ticket too (`POST /api/v1/public/guest/ws-ticket`) instead of a cookie on the upgrade |
-| 5d | KDS tickets, transitions, derived order/round status, void waste vs restock | 000019 | 5c |
+| 5d | KDS tickets, transitions, derived order/round status, void waste vs restock | 000019 | **implemented** (branch `feature/iteration-5d-kds-tickets`); late-payment flag set on tickets of orders revived by a late settlement |
 
 ## 7. Public anti-abuse
 

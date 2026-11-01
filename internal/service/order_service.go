@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -190,11 +192,21 @@ func (s *OrderService) executeCreateOrderTx(ctx context.Context, trustedStoreID 
 			return err
 		}
 
-		if normalizedInput.ExpectedTotal != nil && *normalizedInput.ExpectedTotal != priced.TotalAmount {
+		actualFingerprint := ComputeQuoteFingerprint(catalogData.Store, priced)
+		totalMismatch := normalizedInput.ExpectedTotal != nil && *normalizedInput.ExpectedTotal != priced.TotalAmount
+		fingerprintMismatch := normalizedInput.ExpectedQuoteFingerprint != "" && normalizedInput.ExpectedQuoteFingerprint != actualFingerprint
+
+		if totalMismatch || fingerprintMismatch {
+			var expTotal int64
+			if normalizedInput.ExpectedTotal != nil {
+				expTotal = *normalizedInput.ExpectedTotal
+			}
 			return &QuoteChangedError{
-				ExpectedTotal: *normalizedInput.ExpectedTotal,
-				ActualTotal:   priced.TotalAmount,
-				Quote:         buildQuoteResult(catalogData.Store, priced),
+				ExpectedTotal:       expTotal,
+				ActualTotal:         priced.TotalAmount,
+				ExpectedFingerprint: normalizedInput.ExpectedQuoteFingerprint,
+				ActualFingerprint:   actualFingerprint,
+				Quote:               buildQuoteResult(catalogData.Store, priced),
 			}
 		}
 
@@ -660,9 +672,12 @@ func sortedUUIDKeysFromIntMap(m map[uuid.UUID]int) []uuid.UUID {
 // ---------- Order Quotes & Expected Total (Iteration 4a, decision P8) ----------
 
 type OrderQuoteInput struct {
-	OrderType   domain.OrderType   `json:"order_type"`
-	BillingMode domain.BillingMode `json:"billing_mode,omitempty"`
-	Items       []OrderItemInput   `json:"items"`
+	OrderType                domain.OrderType   `json:"order_type"`
+	BillingMode              domain.BillingMode `json:"billing_mode,omitempty"`
+	ExpectedTotal            *int64             `json:"expected_total,omitempty"`
+	ExpectedQuoteFingerprint string             `json:"expected_quote_fingerprint,omitempty"`
+	ActorUserID              *uuid.UUID         `json:"actor_user_id,omitempty"`
+	Items                    []OrderItemInput   `json:"items"`
 }
 
 type PricedQuoteLine struct {
@@ -686,17 +701,46 @@ type OrderQuoteResult struct {
 	TaxAmount           int64             `json:"tax_amount"`
 	TotalAmount         int64             `json:"total_amount"`
 	Currency            string            `json:"currency"`
+	QuoteFingerprint    string            `json:"quote_fingerprint"`
 	Lines               []PricedQuoteLine `json:"lines"`
 }
 
 type QuoteChangedError struct {
-	ExpectedTotal int64             `json:"expected_total"`
-	ActualTotal   int64             `json:"actual_total"`
-	Quote         *OrderQuoteResult `json:"quote"`
+	ExpectedTotal       int64             `json:"expected_total"`
+	ActualTotal         int64             `json:"actual_total"`
+	ExpectedFingerprint string            `json:"expected_fingerprint,omitempty"`
+	ActualFingerprint   string            `json:"actual_fingerprint,omitempty"`
+	Quote               *OrderQuoteResult `json:"quote"`
 }
 
 func (e *QuoteChangedError) Error() string {
+	if e.ExpectedFingerprint != "" && e.ExpectedFingerprint != e.ActualFingerprint {
+		return fmt.Sprintf("rincian/total harga quote telah berubah: fingerprint %s -> %s (Rp%d -> Rp%d)",
+			e.ExpectedFingerprint, e.ActualFingerprint, e.ExpectedTotal, e.ActualTotal)
+	}
 	return fmt.Sprintf("total harga telah berubah: expected Rp%d, aktual Rp%d", e.ExpectedTotal, e.ActualTotal)
+}
+
+// ComputeQuoteFingerprint generates a deterministic SHA-256 fingerprint hex of the priced order lines and totals.
+// This prevents silent price acceptance when compensating price changes occur (e.g. item A +Rp2.000, item B -Rp2.000).
+func ComputeQuoteFingerprint(store domain.Store, priced *PricedOrderResult) string {
+	h := sha256.New()
+	fmt.Fprintf(h, "store=%s|curr=%s|sub=%d|disc=%d|sc=%d|tax=%d|tot=%d|lines=%d\n",
+		store.ID.String(), store.Currency, priced.SubtotalAmount, priced.DiscountAmount,
+		priced.ServiceChargeAmount, priced.TaxAmount, priced.TotalAmount, len(priced.Items))
+	for _, item := range priced.Items {
+		var prodIDStr, varIDStr string
+		if item.Item.ProductID != nil {
+			prodIDStr = item.Item.ProductID.String()
+		}
+		if item.Item.VariantID != nil {
+			varIDStr = item.Item.VariantID.String()
+		}
+		fmt.Fprintf(h, "prod=%s|var=%s|base=%d|mod=%d|snap=%d|qty=%d|sub=%d|opt=%s\n",
+			prodIDStr, varIDStr, item.Item.UnitBasePrice, item.Item.ModifierTotalPrice,
+			item.Item.SnapshotPrice, item.Item.Quantity, item.Item.SubtotalAmount, item.Item.SelectedOptions)
+	}
+	return "qf_" + hex.EncodeToString(h.Sum(nil))[:32]
 }
 
 func buildQuoteResult(store domain.Store, priced *PricedOrderResult) *OrderQuoteResult {
@@ -727,6 +771,7 @@ func buildQuoteResult(store domain.Store, priced *PricedOrderResult) *OrderQuote
 		TaxAmount:           priced.TaxAmount,
 		TotalAmount:         priced.TotalAmount,
 		Currency:            store.Currency,
+		QuoteFingerprint:    ComputeQuoteFingerprint(store, priced),
 		Lines:               lines,
 	}
 }
@@ -776,6 +821,7 @@ func (s *OrderService) QuoteOrder(ctx context.Context, trustedStoreID uuid.UUID,
 			CustomerName:   "Quote",
 			OrderType:      input.OrderType,
 			BillingMode:    billingMode,
+			ActorUserID:    input.ActorUserID,
 			Items:          input.Items,
 		}
 
@@ -785,6 +831,23 @@ func (s *OrderService) QuoteOrder(ctx context.Context, trustedStoreID uuid.UUID,
 		}
 
 		result = buildQuoteResult(catalogData.Store, priced)
+
+		totalMismatch := input.ExpectedTotal != nil && *input.ExpectedTotal != priced.TotalAmount
+		fingerprintMismatch := input.ExpectedQuoteFingerprint != "" && input.ExpectedQuoteFingerprint != result.QuoteFingerprint
+
+		if totalMismatch || fingerprintMismatch {
+			var expTotal int64
+			if input.ExpectedTotal != nil {
+				expTotal = *input.ExpectedTotal
+			}
+			return &QuoteChangedError{
+				ExpectedTotal:       expTotal,
+				ActualTotal:         priced.TotalAmount,
+				ExpectedFingerprint: input.ExpectedQuoteFingerprint,
+				ActualFingerprint:   result.QuoteFingerprint,
+				Quote:               result,
+			}
+		}
 		return nil
 	})
 	if err != nil {

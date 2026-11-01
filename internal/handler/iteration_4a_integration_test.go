@@ -13,6 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/config"
+	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/domain"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/handler"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/database"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/rbac"
@@ -70,7 +71,7 @@ func TestIteration4aIntegration(t *testing.T) {
 	r.POST("/catalog/modifier-options/:id/child-groups", manage, ch.AttachChildGroupToOption)
 	r.DELETE("/catalog/modifier-options/:id/child-groups/:group_id", manage, ch.DetachChildGroupFromOption)
 
-	r.POST("/pos/orders/quote", ah.RequireStaff(), pos.QuoteOrder)
+	r.POST("/pos/orders/quote", ah.RequirePermission(rbac.OrderPOSCreate), pos.QuoteOrder)
 	r.POST("/pos/orders", ah.RequirePermission(rbac.OrderPOSCreate), pos.CreateOrder)
 
 	call := func(method, path, token string, body any) *httptest.ResponseRecorder {
@@ -108,12 +109,31 @@ func TestIteration4aIntegration(t *testing.T) {
 
 	owner := login("abdulaziz543333@gmail.com")
 	cashier := login("cashier.central@mycaffe.local")
+	barista := login("barista.central@mycaffe.local")
+	kitchen := login("kitchen.central@mycaffe.local")
 
-	// 1. RBAC: Cashier cannot create modifier groups (403 FORBIDDEN)
+	// 1. RBAC: Cashier cannot create modifier groups (403 FORBIDDEN); Barista/Kitchen cannot access POS Quote
 	t.Run("RBAC_CashierDeniedModifierManage", func(t *testing.T) {
 		w := call(http.MethodPost, "/catalog/modifier-groups", cashier, map[string]any{"name": "Level Pedas"})
 		if w.Code != http.StatusForbidden {
 			t.Fatalf("expected 403 FORBIDDEN for cashier, got %d", w.Code)
+		}
+	})
+
+	t.Run("RBAC_BaristaAndKitchenDeniedPOSQuote", func(t *testing.T) {
+		quotePayload := map[string]any{
+			"order_type": "dine_in",
+			"items": []map[string]any{
+				{"product_id": uuid.NewString(), "quantity": 1},
+			},
+		}
+		wBarista := call(http.MethodPost, "/pos/orders/quote", barista, quotePayload)
+		if wBarista.Code != http.StatusForbidden {
+			t.Fatalf("expected 403 FORBIDDEN for barista on POS quote, got %d", wBarista.Code)
+		}
+		wKitchen := call(http.MethodPost, "/pos/orders/quote", kitchen, quotePayload)
+		if wKitchen.Code != http.StatusForbidden {
+			t.Fatalf("expected 403 FORBIDDEN for kitchen on POS quote, got %d", wKitchen.Code)
 		}
 	})
 
@@ -366,6 +386,111 @@ func TestIteration4aIntegration(t *testing.T) {
 		})
 		if wSuccess.Code != http.StatusCreated {
 			t.Fatalf("expected 201 with correct expected_total, got %d %s", wSuccess.Code, wSuccess.Body.String())
+		}
+	})
+
+	// 8. Quote Fingerprint & Compensating Price Change Protection (Decision P8)
+	t.Run("QuoteFingerprint_CompensatingPriceChangeConflict", func(t *testing.T) {
+		quotePayload := map[string]any{
+			"order_type": "dine_in",
+			"items": []map[string]any{
+				{
+					"product_id": productID,
+					"variant_id": variantID,
+					"quantity":   1,
+					"modifiers": []map[string]any{
+						{"option_id": optNoneID, "quantity": 1},
+					},
+				},
+			},
+		}
+
+		wQuote := call(http.MethodPost, "/pos/orders/quote", cashier, quotePayload)
+		if wQuote.Code != http.StatusOK {
+			t.Fatalf("POS quote failed: %d %s", wQuote.Code, wQuote.Body.String())
+		}
+		var initialQuote service.OrderQuoteResult
+		decode(wQuote, &initialQuote)
+		if initialQuote.QuoteFingerprint == "" || !strings.HasPrefix(initialQuote.QuoteFingerprint, "qf_") {
+			t.Fatalf("expected valid quote_fingerprint starting with qf_, got %q", initialQuote.QuoteFingerprint)
+		}
+
+		// Valid fingerprint succeeds
+		wOrder := call(http.MethodPost, "/pos/orders", cashier, map[string]any{
+			"idempotency_key":            "test-fingerprint-" + uuid.NewString(),
+			"order_type":                 "dine_in",
+			"table_number":               "T4A-FP",
+			"customer_name":              "Budi Fingerprint",
+			"expected_quote_fingerprint": initialQuote.QuoteFingerprint,
+			"items":                      quotePayload["items"],
+		})
+		if wOrder.Code != http.StatusCreated {
+			t.Fatalf("expected 201 created with matching quote fingerprint, got %d %s", wOrder.Code, wOrder.Body.String())
+		}
+
+		// Altered/stale fingerprint (e.g. compensating price change) returns 409 QUOTE_CHANGED
+		wStale := call(http.MethodPost, "/pos/orders", cashier, map[string]any{
+			"idempotency_key":            "test-fingerprint-mismatch-" + uuid.NewString(),
+			"order_type":                 "dine_in",
+			"table_number":               "T4A-FP",
+			"customer_name":              "Budi Mismatch",
+			"expected_total":             initialQuote.TotalAmount, // total may match...
+			"expected_quote_fingerprint": "qf_stale_fingerprint_0000000000000000",
+			"items":                      quotePayload["items"],
+		})
+		if wStale.Code != http.StatusConflict {
+			t.Fatalf("expected 409 QUOTE_CHANGED for mismatched fingerprint, got %d %s", wStale.Code, wStale.Body.String())
+		}
+		var conflictResp struct {
+			Code                string `json:"code"`
+			ExpectedFingerprint string `json:"expected_fingerprint"`
+			ActualFingerprint   string `json:"actual_fingerprint"`
+		}
+		decode(wStale, &conflictResp)
+		if conflictResp.Code != "QUOTE_CHANGED" || conflictResp.ActualFingerprint != initialQuote.QuoteFingerprint {
+			t.Fatalf("unexpected conflict response payload: %+v", conflictResp)
+		}
+	})
+
+	// 9. Graph Integrity & Archived Entity Protection
+	t.Run("ModifierGraph_ArchivedProtection", func(t *testing.T) {
+		// Create temporary group and archive it
+		wGrp := call(http.MethodPost, "/catalog/modifier-groups", owner, map[string]any{
+			"name":           "Archived Group Test",
+			"selection_type": "single",
+			"is_required":    false,
+			"min_select":     0,
+			"max_select":     1,
+		})
+		if wGrp.Code != http.StatusCreated {
+			t.Fatalf("create group failed: %d %s", wGrp.Code, wGrp.Body.String())
+		}
+		var grp struct {
+			Group domain.ModifierGroup `json:"group"`
+		}
+		decode(wGrp, &grp)
+		archivedGroupID := grp.Group.ID.String()
+
+		wArch := call(http.MethodDelete, "/catalog/modifier-groups/"+archivedGroupID, owner, nil)
+		if wArch.Code != http.StatusNoContent {
+			t.Fatalf("archive group failed: %d %s", wArch.Code, wArch.Body.String())
+		}
+
+		// Attaching archived group to product must fail (400 validation error)
+		wAttach := call(http.MethodPost, "/catalog/products/"+productID+"/modifier-groups", owner, map[string]any{
+			"group_id": archivedGroupID,
+		})
+		if wAttach.Code != http.StatusBadRequest {
+			t.Fatalf("attaching archived group must return 400, got %d %s", wAttach.Code, wAttach.Body.String())
+		}
+
+		// Adding option to archived group must fail (400 validation error)
+		wOpt := call(http.MethodPost, "/catalog/modifier-groups/"+archivedGroupID+"/options", owner, map[string]any{
+			"name":        "Invalid Option",
+			"price_delta": 0,
+		})
+		if wOpt.Code != http.StatusBadRequest {
+			t.Fatalf("adding option to archived group must return 400, got %d %s", wOpt.Code, wOpt.Body.String())
 		}
 	})
 }

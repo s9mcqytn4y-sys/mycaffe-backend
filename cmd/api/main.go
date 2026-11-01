@@ -175,7 +175,7 @@ func main() {
 			// POS (ADR-003 D8 "staff" class): store and actor come from the access token only.
 			pos := v1.Group("/pos")
 			pos.POST("/orders", authHandler.RequirePermission(rbac.OrderPOSCreate), posHandler.CreateOrder)
-			pos.POST("/orders/quote", authHandler.RequireStaff(), posHandler.QuoteOrder)
+			pos.POST("/orders/quote", authHandler.RequirePermission(rbac.OrderPOSCreate), posHandler.QuoteOrder)
 			pos.POST("/orders/:id/payments", authHandler.RequireStaff(), posHandler.InitiatePayment)
 			pos.GET("/catalog", authHandler.RequireStaff(), catalogHandler.StaffCatalog)
 

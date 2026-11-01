@@ -51,16 +51,17 @@ type OrderItemInput struct {
 }
 
 type OrderCreationInput struct {
-	IdempotencyKey string             `json:"idempotency_key,omitempty"`
-	TableNumber    string             `json:"table_number,omitempty"`
-	CustomerName   string             `json:"customer_name"`
-	CustomerPhone  string             `json:"customer_phone,omitempty"`
-	OrderType      domain.OrderType   `json:"order_type"`
-	BillingMode    domain.BillingMode `json:"billing_mode,omitempty"`
-	ActorUserID    *uuid.UUID         `json:"actor_user_id,omitempty"`
-	ExpectedTotal  *int64             `json:"expected_total,omitempty"`
-	Notes          string             `json:"notes,omitempty"`
-	Items          []OrderItemInput   `json:"items"`
+	IdempotencyKey           string             `json:"idempotency_key,omitempty"`
+	TableNumber              string             `json:"table_number,omitempty"`
+	CustomerName             string             `json:"customer_name"`
+	CustomerPhone            string             `json:"customer_phone,omitempty"`
+	OrderType                domain.OrderType   `json:"order_type"`
+	BillingMode              domain.BillingMode `json:"billing_mode,omitempty"`
+	ActorUserID              *uuid.UUID         `json:"actor_user_id,omitempty"`
+	ExpectedTotal            *int64             `json:"expected_total,omitempty"`
+	ExpectedQuoteFingerprint string             `json:"expected_quote_fingerprint,omitempty"`
+	Notes                    string             `json:"notes,omitempty"`
+	Items                    []OrderItemInput   `json:"items"`
 }
 
 type CatalogSnapshot struct {

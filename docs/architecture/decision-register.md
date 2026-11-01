@@ -93,7 +93,7 @@ window, one shift per drawer, drawer kick + no-sale, local cart + quote, plan ap
 
 | Topic | Resolution | Source |
 |-------|-----------|--------|
-| Split bill semantics | Deferred until the single-payer path is stable; equal vs item split, rounding and partial refunds to be specified then. Code currently assumes **one split per order** (`commitPaidOrderTx` settles all splits). | `docs/product/module-1-customer-ordering.md` |
+| Split bill semantics | Approved in Iteration 4 (P3): equal N (remainder to split 1) and by item (proportional tax/service, remainder to last split); locked after first split payment. Scheduled for Iteration 4c. Code currently settles single-payer orders. | `docs/architecture/iteration-4-design.md#6-decisions-recorded` (P3) |
 | Roles | Exactly `owner`, `cashier`, `barista`, `kitchen`; no new roles. | `AGENTS.md`, migration `000001` |
 
 ## Still open

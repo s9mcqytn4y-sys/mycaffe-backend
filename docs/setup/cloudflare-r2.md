@@ -134,13 +134,35 @@ bash scripts/backup/backup_to_r2.sh
 
 ### Menjalankan Restore (Drill Recovery)
 > [!CAUTION]
-> Skrip `restore_from_r2.sh` memiliki **destructive safety guard**: secara default memblokir restore ke database produksi (`mycaffe_prod`) atau database development (`mycaffe_dev`) kecuali `CONFIRM_DESTRUCTIVE_RESTORE=true` diberikan.
-> Selalu uji pemulihan pada database sementara (misal: `mycaffe_recovery_test`).
+> Skrip `restore_from_r2.sh` memiliki **destructive safety guard**: secara default memblokir restore ke database non-disposable kecuali nama database mengandung `test`, `temp`, `drill`, atau `recovery`, atau jika `CONFIRM_DESTRUCTIVE_RESTORE=true` diberikan.
+> Selalu uji pemulihan pada database sementara (misal: `mycaffe_recovery_drill`).
+
+Contoh eksekusi restore drill ke database sekali pakai:
 
 ```bash
-# Menentukan database tujuan drill
-export TARGET_DATABASE_URL="postgres://mycaffe_migrator:secret@127.0.0.1:5432/mycaffe_recovery_test?sslmode=disable"
-export R2_BACKUP_FILE="backup_20261101_000000.sql.gz.gpg"
+export DB_HOST="127.0.0.1"
+export DB_PORT="5432"
+export DB_NAME="mycaffe_recovery_drill"
+export DB_MIGRATOR_USER="mycaffe_migrator"
+export DB_MIGRATOR_PASSWORD="<migrator_password>"
+export BACKUP_ENCRYPTION_PASSPHRASE="<backup_gpg_passphrase>"
+export R2_ENDPOINT="https://3261ead881772371ef739b742a36c1e9.r2.cloudflarestorage.com"
+export R2_BACKUP_BUCKET="mycaffe-backups"
+export AWS_ACCESS_KEY_ID="<r2_backup_access_key>"
+export AWS_SECRET_ACCESS_KEY="<r2_backup_secret_key>"
+export BACKUP_OBJECT="backup_mycaffe_prod_20261101_000000Z.dump.gpg"
 
 bash scripts/backup/restore_from_r2.sh
 ```
+
+---
+
+## 6. Matriks Status Implementasi Storage
+
+| Komponen Storage | Status | Keterangan |
+| :--- | :--- | :--- |
+| **Triple-Bucket Provisioning** | **Implemented & Verified** | 3 bucket (`mycaffe-media`, `mycaffe-private-media`, `mycaffe-backups`) aktif di Cloudflare R2. |
+| **Browser CORS Policy** | **Implemented & Verified** | Rules diterapkan pada `mycaffe-media` via `config/cloudflare/r2-media-cors.json`. |
+| **GPG Encrypted DB Backup** | **Implemented & Tested** | `scripts/backup/backup_to_r2.sh` menghasilkan dump biner terenkripsi AES-256 + manifest sha256 relatif. |
+| **Non-Destructive DB Restore** | **Implemented & Tested** | `scripts/backup/restore_from_r2.sh` memverifikasi checksum sha256 dan memproteksi DB operasional. |
+| **Presigned URL & Media Upload (C4)** | **Planned (Iteration 5)** | Endpoint upload presigned PUT, validasi magic bytes, stripping EXIF/GPS, dan resize WebP. |

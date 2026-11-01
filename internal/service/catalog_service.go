@@ -836,7 +836,17 @@ func (s *CatalogService) ArchiveModifierGroup(ctx context.Context, actor *Authen
 		if count > 0 && !forceUnlink {
 			return &ConflictError{
 				Field:   "group_id",
-				Message: fmt.Sprintf("grup modifier masih terhubung ke %d menu; gunakan force_unlink=true untuk memutus relasi", count),
+				Message: fmt.Sprintf("grup modifier masih terhubung ke %d menu; gunakan force=true untuk memutus relasi", count),
+			}
+		}
+		optCount, err := s.repo.CountParentOptionsLinkedToGroup(ctx, tx, actor.Staff.Store.ID, id)
+		if err != nil {
+			return err
+		}
+		if optCount > 0 && !forceUnlink {
+			return &ConflictError{
+				Field:   "group_id",
+				Message: fmt.Sprintf("grup modifier masih menjadi sub-grup dari %d opsi modifier; gunakan force=true untuk memutus relasi", optCount),
 			}
 		}
 		return s.repo.ArchiveModifierGroup(ctx, tx, actor.Staff.Store.ID, id, s.nowFunc().UTC(), forceUnlink)
@@ -854,8 +864,12 @@ func (s *CatalogService) AttachModifierGroupToProduct(ctx context.Context, actor
 		if _, err := s.repo.GetProductForUpdate(ctx, tx, actor.Staff.Store.ID, productID); err != nil {
 			return err
 		}
-		if _, err := s.repo.GetModifierGroup(ctx, tx, actor.Staff.Store.ID, in.GroupID); err != nil {
+		group, err := s.repo.GetModifierGroup(ctx, tx, actor.Staff.Store.ID, in.GroupID)
+		if err != nil {
 			return err
+		}
+		if group.ArchivedAt != nil {
+			return &ValidationError{Fields: map[string]string{"group_id": "grup modifier telah diarsipkan"}}
 		}
 		return s.repo.AttachModifierGroupToProduct(ctx, tx, &domain.ProductModifierGroup{
 			StoreID:          actor.Staff.Store.ID,
@@ -903,8 +917,12 @@ func (s *CatalogService) CreateModifierOption(ctx context.Context, actor *Authen
 		return nil, err
 	}
 	err := s.tx(ctx, actor, func(tx *sqlx.Tx) error {
-		if _, err := s.repo.GetModifierGroup(ctx, tx, actor.Staff.Store.ID, groupID); err != nil {
+		group, err := s.repo.GetModifierGroup(ctx, tx, actor.Staff.Store.ID, groupID)
+		if err != nil {
 			return err
+		}
+		if group.ArchivedAt != nil {
+			return &ValidationError{Fields: map[string]string{"group_id": "grup modifier telah diarsipkan"}}
 		}
 		return s.repo.InsertModifierOption(ctx, tx, opt)
 	})
@@ -935,7 +953,7 @@ func (s *CatalogService) UpdateModifierOption(ctx context.Context, actor *Authen
 		if in.PriceDelta != nil && *in.PriceDelta != oldDelta {
 			meta, _ := json.Marshal(map[string]any{"option_id": opt.ID, "group_id": opt.GroupID, "old_delta": oldDelta, "new_delta": opt.PriceDelta})
 			actorID := actor.Staff.UserID
-			_ = postgres.InsertAuditLog(ctx, tx, &domain.AuditLog{
+			if err := postgres.InsertAuditLog(ctx, tx, &domain.AuditLog{
 				StoreID:     actor.Staff.Store.ID,
 				ActorID:     &actorID,
 				ActorName:   actor.Staff.FullName,
@@ -943,7 +961,9 @@ func (s *CatalogService) UpdateModifierOption(ctx context.Context, actor *Authen
 				Reason:      fmt.Sprintf("Harga delta opsi modifier %q diubah dari Rp%d ke Rp%d", opt.Name, oldDelta, opt.PriceDelta),
 				ReferenceID: opt.ID.String(),
 				Metadata:    string(meta),
-			})
+			}); err != nil {
+				return fmt.Errorf("failed to audit modifier price change: %w", err)
+			}
 		}
 		return nil
 	})
@@ -978,9 +998,15 @@ func (s *CatalogService) AttachChildGroupToOption(ctx context.Context, actor *Au
 		if err != nil {
 			return err
 		}
-		childGroup, err := s.repo.GetModifierGroup(ctx, tx, actor.Staff.Store.ID, in.ChildGroupID)
+		if opt.ArchivedAt != nil {
+			return &ValidationError{Fields: map[string]string{"parent_option_id": "opsi modifier telah diarsipkan"}}
+		}
+		childGroup, err := s.repo.GetModifierGroupForUpdate(ctx, tx, actor.Staff.Store.ID, in.ChildGroupID)
 		if err != nil {
 			return err
+		}
+		if childGroup.ArchivedAt != nil {
+			return &ValidationError{Fields: map[string]string{"child_group_id": "grup modifier telah diarsipkan"}}
 		}
 		// Cycle prevention: option cannot have its own parent group as child
 		if opt.GroupID == childGroup.ID {

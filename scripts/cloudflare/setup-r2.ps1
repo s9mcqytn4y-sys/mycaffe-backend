@@ -34,6 +34,9 @@ function Ensure-Bucket([string]$bucketName, [bool]$isPublic) {
     } else {
         Write-Host "Creating bucket '$bucketName'..." -ForegroundColor Cyan
         npx --yes wrangler r2 bucket create $bucketName
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to create bucket '$bucketName'"
+        }
         Write-Host "Bucket '$bucketName' created successfully." -ForegroundColor Green
     }
 }
@@ -45,6 +48,9 @@ Ensure-Bucket $BackupBucket $false
 Write-Host "==> Configuring CORS for $MediaBucket..." -ForegroundColor Cyan
 if (Test-Path $CorsFile) {
     npx --yes wrangler r2 bucket cors set $MediaBucket --file $CorsFile
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to set CORS for $MediaBucket"
+    }
     Write-Host "CORS configured for $MediaBucket using $CorsFile." -ForegroundColor Green
 } else {
     Write-Warning "CORS configuration file not found at $CorsFile"

@@ -34,9 +34,18 @@ for var in "${REQUIRED_VARS[@]}"; do
   fi
 done
 
-if [[ "${DB_NAME}" == "mycaffe_prod" || "${DB_NAME}" == "mycaffe_dev" ]]; then
+is_disposable_drill_db() {
+  local name="$1"
+  if [[ "${name}" =~ (test|temp|drill|recovery|disposable) ]]; then
+    return 0
+  fi
+  return 1
+}
+
+if ! is_disposable_drill_db "${DB_NAME}" || [[ "${APP_ENV:-}" == "production" || "${APP_ENV:-}" == "staging" ]]; then
   if [[ "${CONFIRM_DESTRUCTIVE_RESTORE:-}" != "true" ]]; then
-    echo "[RESTORE BLOCKED] Refusing to restore over primary/production database '${DB_NAME}' without CONFIRM_DESTRUCTIVE_RESTORE=true." >&2
+    echo "[RESTORE BLOCKED] Target database '${DB_NAME}' (APP_ENV=${APP_ENV:-unknown}) is protected against destructive restore." >&2
+    echo "To proceed with overwriting this database, you must explicitly set CONFIRM_DESTRUCTIVE_RESTORE=true." >&2
     exit 1
   fi
 fi

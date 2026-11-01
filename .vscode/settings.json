@@ -78,6 +78,10 @@
     },
     "terminal.integrated.fontFamily": "Cascadia Code, Consolas",
     "terminal.integrated.fontSize": 13,
+    "powershell.startAutomatically": false,
+    "powershell.integratedConsole.showOnStartup": false,
+    "powershell.developer.editorServicesLogLevel": "Normal",
+    "powershell.codeFormatting.preset": "OTBS",
     "files.associations": {
         ".env*": "dotenv",
         "*.sql": "sql",
@@ -94,7 +98,10 @@
         "**/.git/subtree-cache/**": true,
         "**/node_modules/**": true,
         "**/bin/**": true,
-        "**/.gemini/**": true
+        "**/.gemini/**": true,
+        "**/.wrangler/**": true,
+        "**/.agents/**": true,
+        "**/.claude/**": true
     },
     "files.trimTrailingWhitespace": true,
     "files.insertFinalNewline": true,

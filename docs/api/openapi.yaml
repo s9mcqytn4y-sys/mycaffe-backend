@@ -437,10 +437,10 @@ paths:
           description: Modifier group details
         "404":
           $ref: "#/components/responses/NotFound"
-    put:
+    patch:
       tags: [Catalog]
       operationId: updateModifierGroup
-      summary: Update a modifier group
+      summary: Update a modifier group (partial)
       x-implementation-status: implemented
       security:
         - BearerStaffJWT: []
@@ -515,10 +515,10 @@ paths:
         schema:
           type: string
           format: uuid
-    put:
+    patch:
       tags: [Catalog]
       operationId: updateModifierOption
-      summary: Update a modifier option (price changes are audited)
+      summary: Update a modifier option (partial; price changes are audited)
       x-implementation-status: implemented
       security:
         - BearerStaffJWT: []
@@ -546,20 +546,9 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
-  /api/v1/catalog/modifier-groups/{id}/products/{product_id}:
+  /api/v1/catalog/products/{id}/modifier-groups:
     parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-      - name: product_id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
+      - $ref: "#/components/parameters/ResourceID"
     post:
       tags: [Catalog]
       operationId: attachModifierGroupToProduct
@@ -567,13 +556,36 @@ paths:
       x-implementation-status: implemented
       security:
         - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AttachModifierGroupInput"
       responses:
         "204":
           description: Linked
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
+
+  /api/v1/catalog/products/{id}/modifier-groups/{group_id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: group_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
     delete:
       tags: [Catalog]
       operationId: detachModifierGroupFromProduct
@@ -587,9 +599,35 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
-  /api/v1/catalog/modifier-options/{option_id}/child-groups/{group_id}:
+  /api/v1/catalog/modifier-options/{id}/child-groups:
     parameters:
-      - name: option_id
+      - $ref: "#/components/parameters/ResourceID"
+    post:
+      tags: [Catalog]
+      operationId: attachChildGroupToOption
+      summary: Attach a modifier group as a child sub-addon to an option (max depth 1, cycle protected)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AttachChildGroupInput"
+      responses:
+        "204":
+          description: Attached
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /api/v1/catalog/modifier-options/{id}/child-groups/{group_id}:
+    parameters:
+      - name: id
         in: path
         required: true
         schema:
@@ -601,20 +639,6 @@ paths:
         schema:
           type: string
           format: uuid
-    post:
-      tags: [Catalog]
-      operationId: attachChildGroupToOption
-      summary: Attach a modifier group as a child sub-addon to an option (max depth 1, cycle protected)
-      x-implementation-status: implemented
-      security:
-        - BearerStaffJWT: []
-      responses:
-        "204":
-          description: Attached
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "409":
-          $ref: "#/components/responses/Conflict"
     delete:
       tags: [Catalog]
       operationId: detachChildGroupFromOption
@@ -1878,6 +1902,13 @@ components:
           $ref: "#/components/schemas/OrderType"
         billing_mode:
           $ref: "#/components/schemas/BillingMode"
+        expected_total:
+          type: integer
+          format: int64
+          description: Optional expected total for optimistic price verification
+        expected_quote_fingerprint:
+          type: string
+          description: Optional deterministic hash fingerprint of quote lines to prevent compensating price change conflicts
         notes:
           type: string
           maxLength: 500
@@ -2387,6 +2418,30 @@ components:
           type: integer
           minimum: 0
 
+    AttachModifierGroupInput:
+      type: object
+      required: [group_id]
+      properties:
+        group_id:
+          type: string
+          format: uuid
+        display_order:
+          type: integer
+          minimum: 0
+        override_required:
+          type: boolean
+
+    AttachChildGroupInput:
+      type: object
+      required: [child_group_id]
+      properties:
+        child_group_id:
+          type: string
+          format: uuid
+        display_order:
+          type: integer
+          minimum: 0
+
     QuoteOrderRequest:
       type: object
       required: [order_type, items]
@@ -2394,6 +2449,9 @@ components:
         order_type:
           type: string
           enum: [dine_in, takeaway, delivery]
+        billing_mode:
+          type: string
+          enum: [pay_first, open_tab, split_bill]
         table_number:
           type: string
         notes:
@@ -2402,6 +2460,9 @@ components:
           type: integer
           format: int64
           description: Optional expected total for optimistic concurrency conflict check
+        expected_quote_fingerprint:
+          type: string
+          description: Optional deterministic hash fingerprint of quote lines to prevent compensating price change conflicts
         items:
           type: array
           items:
@@ -2416,7 +2477,7 @@ components:
 
     QuoteSummary:
       type: object
-      required: [subtotal, discount_amount, service_charge_amount, service_charge_rate_bps, tax_amount, tax_rate_bps, total_amount, items]
+      required: [subtotal, discount_amount, service_charge_amount, service_charge_rate_bps, tax_amount, tax_rate_bps, total_amount, quote_fingerprint, items]
       properties:
         subtotal:
           type: integer
@@ -2437,6 +2498,9 @@ components:
         total_amount:
           type: integer
           format: int64
+        quote_fingerprint:
+          type: string
+          description: Deterministic SHA-256 fingerprint hash of lines, snapshot prices, tax, and service fees
         items:
           type: array
           items:
@@ -2480,5 +2544,9 @@ components:
             actual_total:
               type: integer
               format: int64
+            expected_fingerprint:
+              type: string
+            actual_fingerprint:
+              type: string
             quote:
               $ref: "#/components/schemas/QuoteSummary"

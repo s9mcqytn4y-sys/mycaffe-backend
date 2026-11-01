@@ -38,7 +38,8 @@ $cors = npx --yes wrangler r2 bucket cors list $MediaBucket 2>&1 | Out-String
 if ($cors -match "allowed_origins" -and $cors -match "localhost:3000") {
     Write-Host "  [PASS] CORS rules active for $MediaBucket." -ForegroundColor Green
 } else {
-    Write-Warning "CORS configuration missing or unexpected for $MediaBucket."
+    Write-Host "  [FAIL] CORS configuration missing or unexpected for $MediaBucket." -ForegroundColor Red
+    exit 1
 }
 
 Write-Host "==> Verification completed successfully." -ForegroundColor Green

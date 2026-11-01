@@ -296,6 +296,12 @@ func (r *CatalogRepository) CountProductsLinkedToGroup(ctx context.Context, tx *
 	return count, err
 }
 
+func (r *CatalogRepository) CountParentOptionsLinkedToGroup(ctx context.Context, tx *sqlx.Tx, storeID, groupID uuid.UUID) (int, error) {
+	var count int
+	err := tx.GetContext(ctx, &count, `SELECT COUNT(*) FROM option_modifier_groups WHERE store_id = $1 AND child_group_id = $2`, storeID, groupID)
+	return count, err
+}
+
 func (r *CatalogRepository) ArchiveModifierGroup(ctx context.Context, tx *sqlx.Tx, storeID, id uuid.UUID, now time.Time, forceUnlink bool) error {
 	if forceUnlink {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM product_modifier_groups WHERE store_id = $1 AND group_id = $2`, storeID, id); err != nil {

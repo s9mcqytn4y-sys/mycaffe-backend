@@ -70,12 +70,15 @@ func resolveOrderSplit(requestedSplitID *uuid.UUID, splits []domain.PaymentSplit
 }
 
 func computePaymentInitiationHash(storeID uuid.UUID, input InitiatePaymentInput) string {
-	var splitIDStr, actorIDStr string
+	var splitIDStr, actorIDStr, drawerIDStr string
 	if input.SplitID != nil && *input.SplitID != uuid.Nil {
 		splitIDStr = input.SplitID.String()
 	}
 	if input.ActorUserID != nil && *input.ActorUserID != uuid.Nil {
 		actorIDStr = input.ActorUserID.String()
+	}
+	if input.DrawerID != nil && *input.DrawerID != uuid.Nil {
+		drawerIDStr = input.DrawerID.String()
 	}
 	canonical, _ := json.Marshal(struct {
 		StoreID            string               `json:"store_id"`
@@ -86,6 +89,7 @@ func computePaymentInitiationHash(storeID uuid.UUID, input InitiatePaymentInput)
 		CashTenderedAmount int64                `json:"cash_tendered_amount"`
 		ReconciliationRef  string               `json:"reconciliation_ref"`
 		ActorUserID        string               `json:"actor_user_id"`
+		DrawerID           string               `json:"drawer_id"`
 	}{
 		StoreID:            storeID.String(),
 		OrderID:            input.OrderID.String(),
@@ -95,6 +99,7 @@ func computePaymentInitiationHash(storeID uuid.UUID, input InitiatePaymentInput)
 		CashTenderedAmount: input.CashTenderedAmount,
 		ReconciliationRef:  input.ReconciliationRef,
 		ActorUserID:        actorIDStr,
+		DrawerID:           drawerIDStr,
 	})
 	sum := sha256.Sum256(canonical)
 	return hex.EncodeToString(sum[:])

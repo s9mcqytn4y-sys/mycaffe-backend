@@ -26,6 +26,7 @@ var (
 	ErrUnauthorizedCashierTender     = errors.New("direct cashier tender requires an active owner or cashier actor")
 	ErrInsufficientCashTendered      = errors.New("cash_tendered_amount cannot be less than total payable amount")
 	ErrReconciliationRefRequired     = errors.New("reconciliation_ref is required for static_qris and edc payments")
+	ErrNoOpenShift                   = errors.New("tidak ada sesi shift aktif untuk kasir ini; buka shift kasir terlebih dahulu")
 )
 
 // GatewayClient abstracts Midtrans Core API operations for deterministic unit and integration testing.
@@ -50,6 +51,14 @@ func WithGatewayClient(client GatewayClient) PaymentServiceOption {
 	}
 }
 
+func WithShiftRepository(repo *postgres.ShiftRepository) PaymentServiceOption {
+	return func(s *PaymentService) {
+		if repo != nil {
+			s.shiftRepo = repo
+		}
+	}
+}
+
 func normalizeGatewayClient(client GatewayClient) GatewayClient {
 	if client == nil {
 		return nil
@@ -71,6 +80,7 @@ type InitiatePaymentInput struct {
 	ReconciliationRef  string
 	CallbackURL        string
 	ActorUserID        *uuid.UUID
+	DrawerID           *uuid.UUID
 }
 
 type InitiatePaymentResult struct {
@@ -78,6 +88,7 @@ type InitiatePaymentResult struct {
 	Order              *domain.Order        `json:"order"`
 	Split              *domain.PaymentSplit `json:"split"`
 	IsIdempotentReplay bool                 `json:"is_idempotent_replay"`
+	OpenDrawer         bool                 `json:"open_drawer"`
 }
 
 type MidtransWebhookInput struct {
@@ -102,6 +113,7 @@ type PaymentService struct {
 	db             *sqlx.DB
 	paymentRepo    *postgres.PaymentRepository
 	orderRepo      *postgres.OrderRepository
+	shiftRepo      *postgres.ShiftRepository
 	midtransClient GatewayClient
 	nowFunc        func() time.Time
 }
@@ -123,6 +135,7 @@ func NewPaymentService(
 		db:             db,
 		paymentRepo:    paymentRepo,
 		orderRepo:      orderRepo,
+		shiftRepo:      postgres.NewShiftRepository(),
 		midtransClient: normalizeGatewayClient(midtransClient),
 		nowFunc:        time.Now,
 	}

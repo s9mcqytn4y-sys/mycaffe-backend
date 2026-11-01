@@ -184,7 +184,36 @@ func TestPaymentServiceIntegration_EndToEnd(t *testing.T) {
 	paymentRepo := postgres.NewPaymentRepository()
 	orderSvc := service.NewOrderService(db, orderRepo, service.WithClock(clock))
 	gw := &fakeGatewayClient{}
-	paymentSvc := service.NewPaymentService(db, paymentRepo, orderRepo, gw, service.WithPaymentClock(clock))
+	shiftRepo := postgres.NewShiftRepository()
+	paymentSvc := service.NewPaymentService(db, paymentRepo, orderRepo, gw, service.WithPaymentClock(clock), service.WithShiftRepository(shiftRepo))
+
+	// Ensure an active shift exists for the test cashier in storeAID
+	drawerID := uuid.New()
+	shiftID := uuid.New()
+	err := database.WithTenantTx(ctx, db, storeAID, func(tx *sqlx.Tx) error {
+		_ = shiftRepo.InsertCashDrawer(ctx, tx, &domain.CashDrawer{
+			ID:        drawerID,
+			StoreID:   storeAID,
+			Name:      "Integration Test Cash Drawer",
+			IsActive:  true,
+			CreatedAt: currentNow,
+			UpdatedAt: currentNow,
+		})
+		return shiftRepo.InsertShift(ctx, tx, &domain.Shift{
+			ID:           shiftID,
+			StoreID:      storeAID,
+			DrawerID:     drawerID,
+			OpenedBy:     cashierID,
+			OpeningFloat: 100000,
+			OpenedAt:     currentNow,
+			Status:       domain.ShiftStatusOpen,
+			CreatedAt:    currentNow,
+			UpdatedAt:    currentNow,
+		})
+	})
+	if err != nil {
+		t.Fatalf("failed to setup test shift: %v", err)
+	}
 
 	createStandardOrder := func(t *testing.T, suffix string) *service.CreateOrderResult {
 		t.Helper()
@@ -254,6 +283,7 @@ func TestPaymentServiceIntegration_EndToEnd(t *testing.T) {
 			Method:             domain.PaymentMethodCash,
 			CashTenderedAmount: 50000,
 			ActorUserID:        &cashierID,
+			DrawerID:           &drawerID,
 		})
 		if err != nil {
 			t.Fatalf("InitiatePayment (cash) failed: %v", err)
@@ -268,6 +298,24 @@ func TestPaymentServiceIntegration_EndToEnd(t *testing.T) {
 		if payRes.Order.PaymentStatus != domain.OrderPaymentStatusPaid || payRes.Order.Status != domain.OrderStatusQueued {
 			t.Fatalf("expected order paid+queued, got payment=%s status=%s", payRes.Order.PaymentStatus, payRes.Order.Status)
 		}
+		if !payRes.OpenDrawer {
+			t.Error("expected OpenDrawer=true on successful cash tender")
+		}
+		if payRes.Order.ShiftID == nil || *payRes.Order.ShiftID != shiftID {
+			t.Errorf("expected order to be bound to active shift %s, got %v", shiftID, payRes.Order.ShiftID)
+		}
+
+		// Verify cash movement in cash_movements ledger
+		var mvCount int
+		_ = database.WithTenantTx(ctx, db, storeAID, func(tx *sqlx.Tx) error {
+			return tx.GetContext(ctx, &mvCount, `
+				SELECT COUNT(*) FROM cash_movements
+				WHERE store_id = $1 AND shift_id = $2 AND movement_type = 'sale' AND payment_id = $3
+			`, storeAID, shiftID, payRes.Payment.ID)
+		})
+		if mvCount != 1 {
+			t.Fatalf("expected 1 cash_movements 'sale' record, got %d", mvCount)
+		}
 
 		// 1D. Idempotent replay with identical payload returns the same payment
 		replayRes, err := paymentSvc.InitiatePayment(ctx, storeAID, service.InitiatePaymentInput{
@@ -276,6 +324,7 @@ func TestPaymentServiceIntegration_EndToEnd(t *testing.T) {
 			Method:             domain.PaymentMethodCash,
 			CashTenderedAmount: 50000,
 			ActorUserID:        &cashierID,
+			DrawerID:           &drawerID,
 		})
 		if err != nil {
 			t.Fatalf("InitiatePayment replay failed: %v", err)
@@ -283,6 +332,9 @@ func TestPaymentServiceIntegration_EndToEnd(t *testing.T) {
 		if !replayRes.IsIdempotentReplay || replayRes.Payment.ID != payRes.Payment.ID {
 			t.Fatalf("expected idempotent replay of payment %s, got replay=%v id=%s",
 				payRes.Payment.ID, replayRes.IsIdempotentReplay, replayRes.Payment.ID)
+		}
+		if !replayRes.OpenDrawer {
+			t.Error("expected OpenDrawer=true on idempotent cash replay")
 		}
 
 		// 1E. Conflicting payload with same idempotency_key returns ErrPaymentIdempotencyConflict
@@ -309,7 +361,32 @@ func TestPaymentServiceIntegration_EndToEnd(t *testing.T) {
 			t.Fatalf("expected 1 CASH_PAYMENT_RECORDED audit log row, got %d", auditCount)
 		}
 
-		// 1G. Static QRIS reconciliation with cashier actor and reconciliation_ref
+		// 1G. Cash tender without open shift fails with ErrNoOpenShift
+		closedDrawerID := uuid.New()
+		_ = database.WithTenantTx(ctx, db, storeAID, func(tx *sqlx.Tx) error {
+			return shiftRepo.InsertCashDrawer(ctx, tx, &domain.CashDrawer{
+				ID:        closedDrawerID,
+				StoreID:   storeAID,
+				Name:      "Laci Tertutup Tanpa Shift",
+				IsActive:  true,
+				CreatedAt: currentNow,
+				UpdatedAt: currentNow,
+			})
+		})
+		ordNoShift := createStandardOrder(t, "no-shift")
+		_, err = paymentSvc.InitiatePayment(ctx, storeAID, service.InitiatePaymentInput{
+			OrderID:            ordNoShift.Order.ID,
+			IdempotencyKey:     "idem-no-shift-" + uuid.NewString()[:8],
+			Method:             domain.PaymentMethodCash,
+			CashTenderedAmount: 50000,
+			ActorUserID:        &cashierID,
+			DrawerID:           &closedDrawerID,
+		})
+		if !errors.Is(err, service.ErrNoOpenShift) {
+			t.Fatalf("expected ErrNoOpenShift for drawer without open shift, got: %v", err)
+		}
+
+		// 1H. Static QRIS reconciliation with cashier actor and reconciliation_ref
 		ordStatic := createStandardOrder(t, "static-qris")
 		staticRes, err := paymentSvc.InitiatePayment(ctx, storeAID, service.InitiatePaymentInput{
 			OrderID:           ordStatic.Order.ID,

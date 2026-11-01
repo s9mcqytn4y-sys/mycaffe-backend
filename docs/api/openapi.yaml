@@ -2721,6 +2721,10 @@ components:
           type: string
           maxLength: 500
           description: Optional e-wallet deeplink return URL
+        drawer_id:
+          type: string
+          format: uuid
+          description: Optional target cash drawer; defaults to active cashier shift or store default drawer.
 
     StoreSettings:
       type: object
@@ -2764,6 +2768,9 @@ components:
       properties:
         is_idempotent_replay:
           type: boolean
+        open_drawer:
+          type: boolean
+          description: True when cash drawer kick-pin solenoid signal should be triggered (for cash payment).
         payment:
           type: object
           required: [id, provider_order_id, method, status, amount]

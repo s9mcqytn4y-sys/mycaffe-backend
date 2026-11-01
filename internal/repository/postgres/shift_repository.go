@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
@@ -321,4 +322,51 @@ func (r *ShiftRepository) GetUserFullName(ctx context.Context, tx *sqlx.Tx, stor
 		return fmt.Sprintf("User %s", userID.String()[:8]), nil
 	}
 	return name, err
+}
+
+// GetUnsettledOpenTabs returns all tabs currently open or pending payment for the store.
+func (r *ShiftRepository) GetUnsettledOpenTabs(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	storeID uuid.UUID,
+	currentBusinessDate time.Time,
+) ([]domain.UnsettledTabSummary, error) {
+	query := `
+		SELECT order_number,
+		       COALESCE(NULLIF(table_number, ''), NULLIF(customer_name, ''), 'Tab') AS label,
+		       status,
+		       total_amount,
+		       created_at
+		FROM orders
+		WHERE store_id = $1
+		  AND billing_mode = 'open_tab'
+		  AND status IN ('open', 'pending_payment')
+		ORDER BY created_at ASC
+	`
+	type row struct {
+		OrderNumber string    `db:"order_number"`
+		Label       string    `db:"label"`
+		Status      string    `db:"status"`
+		TotalAmount int64     `db:"total_amount"`
+		CreatedAt   time.Time `db:"created_at"`
+	}
+	var rows []row
+	if err := tx.SelectContext(ctx, &rows, query, storeID); err != nil {
+		return nil, err
+	}
+
+	result := make([]domain.UnsettledTabSummary, len(rows))
+	cutoffDate := time.Date(currentBusinessDate.Year(), currentBusinessDate.Month(), currentBusinessDate.Day(), 0, 0, 0, 0, currentBusinessDate.Location())
+
+	for i, ro := range rows {
+		result[i] = domain.UnsettledTabSummary{
+			OrderNumber:           ro.OrderNumber,
+			Label:                 ro.Label,
+			Status:                ro.Status,
+			TotalAmount:           ro.TotalAmount,
+			CreatedAt:             ro.CreatedAt,
+			IsOverdueBusinessDate: ro.CreatedAt.Before(cutoffDate),
+		}
+	}
+	return result, nil
 }

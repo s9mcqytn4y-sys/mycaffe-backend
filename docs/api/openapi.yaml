@@ -1305,6 +1305,110 @@ paths:
                     items:
                       $ref: "#/components/schemas/OrderRound"
 
+  /api/v1/pos/tabs/{id}/close:
+    post:
+      tags: [POS Tabs]
+      operationId: closeTab
+      summary: Lock open tab for payment and generate payment splits (P10, P11)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        description: Split strategy configuration (optional, empty means single-payer full split)
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                strategy:
+                  type: string
+                  enum: [full, equal, by_item]
+                  default: full
+                split_count:
+                  type: integer
+                  minimum: 2
+                  maximum: 20
+                  description: Number of equal splits (required if strategy is equal)
+                splits:
+                  type: array
+                  description: Item allocation per split (required if strategy is by_item)
+                  items:
+                    type: object
+                    properties:
+                      label:
+                        type: string
+                        example: "Budi"
+                      items:
+                        type: array
+                        items:
+                          type: object
+                          required: [order_item_id, quantity]
+                          properties:
+                            order_item_id:
+                              type: string
+                              format: uuid
+                            quantity:
+                              type: integer
+                              minimum: 1
+      responses:
+        "200":
+          description: Tab locked in pending_payment status with generated splits
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  order:
+                    $ref: "#/components/schemas/Order"
+                  splits:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/PaymentSplit"
+        "400":
+          description: Invalid split configuration
+        "409":
+          description: Tab already closed or conflict
+        "422":
+          description: Item allocation mismatch or invalid count
+
+  /api/v1/pos/tabs/{id}/reopen:
+    post:
+      tags: [POS Tabs]
+      operationId: reopenTab
+      summary: Unlock closed tab back to open status and cancel unpaid splits (P10)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Tab unlocked and restored to open status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  order:
+                    $ref: "#/components/schemas/Order"
+                  message:
+                    type: string
+        "409":
+          description: Tab has already settled payments or pending payment attempts
+
   /api/v1/store/settings:
     get:
       tags: [Staff]

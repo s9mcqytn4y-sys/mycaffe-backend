@@ -53,7 +53,7 @@ func (r *PaymentRepository) ResolveWebhookContext(ctx context.Context, db *sqlx.
 }
 
 const paymentSelectColumns = `
-	id, store_id, order_id, split_id, attempt_no, idempotency_key, request_hash,
+	id, store_id, order_id, split_id, shift_id, attempt_no, idempotency_key, request_hash,
 	provider, provider_order_id, amount, refunded_amount, method, status,
 	raw_provider_status, fraud_status, COALESCE(transaction_id, '') AS transaction_id,
 	COALESCE(payment_type, '') AS payment_type, COALESCE(acquirer, '') AS acquirer,
@@ -288,7 +288,7 @@ func (r *PaymentRepository) InsertPayment(
 
 	query := `
 		INSERT INTO payments (
-			id, store_id, order_id, split_id, attempt_no, idempotency_key, request_hash,
+			id, store_id, order_id, split_id, shift_id, attempt_no, idempotency_key, request_hash,
 			provider, provider_order_id, amount, refunded_amount, method, status,
 			raw_provider_status, fraud_status, transaction_id, payment_type, acquirer,
 			qr_string, deeplink_url, va_number, bank, biller_code, bill_key,
@@ -296,19 +296,19 @@ func (r *PaymentRepository) InsertPayment(
 			cash_tendered_amount, change_given_amount, failure_code, failure_reason,
 			paid_at, expires_at
 		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7,
-			$8, $9, $10, $11, $12, $13,
-			$14, $15, $16, $17, $18,
-			$19, $20, $21, $22, $23, $24,
-			$25, $26, $27,
-			$28, $29, $30, $31,
-			$32, $33
+			$1, $2, $3, $4, $5, $6, $7, $8,
+			$9, $10, $11, $12, $13, $14,
+			$15, $16, $17, $18, $19,
+			$20, $21, $22, $23, $24, $25,
+			$26, $27, $28,
+			$29, $30, $31, $32,
+			$33, $34
 		)
 		RETURNING created_at, updated_at
 	`
 	return tx.QueryRowxContext(
 		ctx, query,
-		payment.ID, payment.StoreID, payment.OrderID, payment.SplitID, payment.AttemptNo,
+		payment.ID, payment.StoreID, payment.OrderID, payment.SplitID, payment.ShiftID, payment.AttemptNo,
 		payment.IdempotencyKey, payment.RequestHash, payment.Provider, payment.ProviderOrderID,
 		payment.Amount, payment.RefundedAmount, payment.Method, payment.Status,
 		payment.RawProviderStatus, payment.FraudStatus, payment.TransactionID,

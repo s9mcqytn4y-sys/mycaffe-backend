@@ -107,6 +107,7 @@ type Order struct {
 	StockStatus     OrderStockStatus   `json:"stock_status" db:"stock_status"`
 	ExpiresAt       *time.Time         `json:"expires_at,omitempty" db:"expires_at"`
 	CreatedByUserID *uuid.UUID         `json:"created_by_user_id,omitempty" db:"created_by_user_id"`
+	ShiftID         *uuid.UUID         `json:"shift_id,omitempty" db:"shift_id"`
 
 	SubtotalAmount      int64 `json:"subtotal_amount" db:"subtotal_amount"`
 	DiscountAmount      int64 `json:"discount_amount" db:"discount_amount"`

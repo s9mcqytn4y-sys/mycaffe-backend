@@ -1168,6 +1168,143 @@ paths:
               schema:
                 $ref: "#/components/schemas/ZReport"
 
+  /api/v1/pos/tabs:
+    post:
+      tags: [POS Tabs]
+      operationId: openTab
+      summary: Open a new dining tab for a table or customer
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [idempotency_key]
+              properties:
+                idempotency_key:
+                  type: string
+                table_number:
+                  type: string
+                  example: "Meja 12"
+                customer_name:
+                  type: string
+                  example: "Budi"
+                customer_phone:
+                  type: string
+                allow_duplicate_label:
+                  type: boolean
+                  default: false
+                notes:
+                  type: string
+                initial_items:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/OrderItemInput"
+      responses:
+        "201":
+          description: Tab opened successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  order:
+                    $ref: "#/components/schemas/Order"
+                  first_round:
+                    $ref: "#/components/schemas/OrderRound"
+        "409":
+          description: Table label conflict
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+                    example: "TAB_LABEL_IN_USE"
+                  error:
+                    type: string
+                  existing_order_id:
+                    type: string
+                    format: uuid
+
+  /api/v1/pos/tabs/{id}/rounds:
+    post:
+      tags: [POS Tabs]
+      operationId: submitRound
+      summary: Submit a new order round to an open tab
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [idempotency_key, items]
+              properties:
+                idempotency_key:
+                  type: string
+                notes:
+                  type: string
+                items:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/OrderItemInput"
+      responses:
+        "201":
+          description: Round submitted and queued to KDS
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  round:
+                    $ref: "#/components/schemas/OrderRound"
+                  order:
+                    $ref: "#/components/schemas/Order"
+
+  /api/v1/pos/tabs/{id}:
+    get:
+      tags: [POS Tabs]
+      operationId: getTab
+      summary: Get open tab details and submitted rounds
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Tab detail with rounds
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  order:
+                    $ref: "#/components/schemas/Order"
+                  rounds:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/OrderRound"
+
   /api/v1/store/settings:
     get:
       tags: [Staff]
@@ -2681,6 +2818,53 @@ components:
       properties:
         order:
           $ref: "#/components/schemas/Order"
+        splits:
+          type: array
+          items:
+            $ref: "#/components/schemas/PaymentSplit"
+        outbox_event_id:
+          type: string
+          format: uuid
+        is_idempotent_replay:
+          type: boolean
+
+    OrderRound:
+      type: object
+      required: [id, store_id, order_id, round_number, status, submitted_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        store_id:
+          type: string
+          format: uuid
+        order_id:
+          type: string
+          format: uuid
+        round_number:
+          type: integer
+          example: 1
+        status:
+          type: string
+          enum: [queued, preparing, ready, served, cancelled]
+        submitted_by_user_id:
+          type: string
+          format: uuid
+        submitted_at:
+          type: string
+          format: date-time
+        notes:
+          type: string
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/OrderItemSnapshot"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
         splits:
           type: array
           items:

@@ -122,6 +122,7 @@ func main() {
 	var posHandler *handler.POSHandler
 	var catalogHandler *handler.CatalogHandler
 	var shiftHandler *handler.ShiftHandler
+	var tabHandler *handler.TabHandler
 	if db != nil {
 		authService := service.NewAuthService(db, postgres.NewAuthRepository(), cfg.JWTSecret, service.AuthPolicy{
 			AccessTokenTTL:     cfg.StaffAccessTokenTTL,
@@ -144,6 +145,7 @@ func main() {
 		posHandler = handler.NewPOSHandler(orderService, paymentService, service.NewSettingsService(db))
 		catalogHandler = handler.NewCatalogHandler(service.NewCatalogService(db))
 		shiftHandler = handler.NewShiftHandler(service.NewShiftService(db))
+		tabHandler = handler.NewTabHandler(service.NewTabService(db, postgres.NewTabRepository(), orderRepo))
 
 		go paymentService.StartReconciliationWorker(workerCtx, 30*time.Second, 2*time.Minute, 50)
 	}
@@ -193,6 +195,11 @@ func main() {
 			pos.POST("/shifts/:id/force-close", authHandler.RequirePermission(rbac.ShiftForceClose), shiftHandler.ForceCloseShift)
 			pos.GET("/shifts/:id/x-report", authHandler.RequireStaff(), shiftHandler.GetXReport)
 			pos.GET("/shifts/:id/z-report", authHandler.RequireStaff(), shiftHandler.GetZReport)
+
+			// Open Tabs & Order Rounds (Iteration 4c, PR 4c-1)
+			pos.POST("/tabs", authHandler.RequirePermission(rbac.TabManage), tabHandler.OpenTab)
+			pos.POST("/tabs/:id/rounds", authHandler.RequirePermission(rbac.TabManage), tabHandler.SubmitRound)
+			pos.GET("/tabs/:id", authHandler.RequireStaff(), tabHandler.GetTab)
 
 			// Guest menu & quote (public, cacheable catalog; dynamic quote for guest carts).
 			v1.GET("/public/stores/:slug/catalog", catalogHandler.PublicCatalog)

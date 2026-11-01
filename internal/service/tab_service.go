@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -75,25 +76,72 @@ type OpenTabResult struct {
 	IsIdempotentReplay bool               `json:"is_idempotent_replay"`
 }
 
-func computeOpenTabRequestHash(storeID uuid.UUID, actorUserID uuid.UUID, in OpenTabInput) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "store=%s|actor=%s|table=%s|name=%s|phone=%s|notes=%s|allow_dup=%t",
-		storeID.String(),
-		actorUserID.String(),
-		strings.TrimSpace(in.TableNumber),
-		strings.TrimSpace(in.CustomerName),
-		strings.TrimSpace(in.CustomerPhone),
-		strings.TrimSpace(in.Notes),
-		in.AllowDuplicateLabel,
-	)
-	for _, it := range in.InitialItems {
-		cfgHash := computeItemConfigHashFromModifiers(it.ProductID, it.Modifiers)
-		if it.VariantID != nil && *it.VariantID != uuid.Nil {
-			cfgHash += ":v=" + it.VariantID.String()
-		}
-		fmt.Fprintf(&b, "|item=%s:%d:%s:%s", it.ProductID.String(), it.Quantity, cfgHash, strings.TrimSpace(it.Notes))
+type canonicalItemPayload struct {
+	ProductID string   `json:"product_id"`
+	VariantID string   `json:"variant_id,omitempty"`
+	Quantity  int      `json:"quantity"`
+	Notes     string   `json:"notes,omitempty"`
+	Modifiers []string `json:"modifiers,omitempty"`
+}
+
+type canonicalOpenTabPayload struct {
+	StoreID             string                 `json:"store_id"`
+	ActorUserID         string                 `json:"actor_user_id"`
+	TableNumber         string                 `json:"table_number"`
+	CustomerName        string                 `json:"customer_name"`
+	CustomerPhone       string                 `json:"customer_phone"`
+	Notes               string                 `json:"notes"`
+	AllowDuplicateLabel bool                   `json:"allow_duplicate_label"`
+	InitialItems        []canonicalItemPayload `json:"initial_items,omitempty"`
+}
+
+type canonicalRoundPayload struct {
+	StoreID string                 `json:"store_id"`
+	OrderID string                 `json:"order_id"`
+	Notes   string                 `json:"notes"`
+	Items   []canonicalItemPayload `json:"items"`
+}
+
+func buildCanonicalItems(items []OrderItemInput) []canonicalItemPayload {
+	if len(items) == 0 {
+		return nil
 	}
-	sum := sha256.Sum256([]byte(b.String()))
+	out := make([]canonicalItemPayload, len(items))
+	for i, it := range items {
+		var varIDStr string
+		if it.VariantID != nil && *it.VariantID != uuid.Nil {
+			varIDStr = it.VariantID.String()
+		}
+		mods := make([]string, len(it.Modifiers))
+		for mIdx, m := range it.Modifiers {
+			mods[mIdx] = fmt.Sprintf("%s:%d", m.OptionID.String(), m.Quantity)
+		}
+		sort.Strings(mods)
+
+		out[i] = canonicalItemPayload{
+			ProductID: it.ProductID.String(),
+			VariantID: varIDStr,
+			Quantity:  it.Quantity,
+			Notes:     strings.TrimSpace(it.Notes),
+			Modifiers: mods,
+		}
+	}
+	return out
+}
+
+func computeOpenTabRequestHash(storeID uuid.UUID, actorUserID uuid.UUID, in OpenTabInput) string {
+	payload := canonicalOpenTabPayload{
+		StoreID:             storeID.String(),
+		ActorUserID:         actorUserID.String(),
+		TableNumber:         strings.TrimSpace(in.TableNumber),
+		CustomerName:        strings.TrimSpace(in.CustomerName),
+		CustomerPhone:       strings.TrimSpace(in.CustomerPhone),
+		Notes:               strings.TrimSpace(in.Notes),
+		AllowDuplicateLabel: in.AllowDuplicateLabel,
+		InitialItems:        buildCanonicalItems(in.InitialItems),
+	}
+	raw, _ := json.Marshal(payload)
+	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:])
 }
 
@@ -141,7 +189,12 @@ func (s *TabService) OpenTab(ctx context.Context, actor *AuthenticatedStaff, in 
 		actorUserID := actor.Staff.UserID
 		computedHash := computeOpenTabRequestHash(storeID, actorUserID, in)
 
-		// 1. Idempotency Check (A2)
+		// 1. Transaction-scoped advisory lock on (store_id, idempotency_key) to prevent concurrent OpenTab race
+		if err := s.repo.AcquireTabIdempotencyLock(ctx, tx, storeID, in.IdempotencyKey); err != nil {
+			return fmt.Errorf("failed to acquire tab idempotency advisory lock: %w", err)
+		}
+
+		// 2. Idempotency Check (A2)
 		existingOrder, _, err := s.orderRep.GetOrderByIdempotencyKey(ctx, tx, storeID, in.IdempotencyKey)
 		if err == nil && existingOrder != nil {
 			if existingOrder.RequestHash == "" || existingOrder.RequestHash != computedHash {
@@ -165,12 +218,12 @@ func (s *TabService) OpenTab(ctx context.Context, actor *AuthenticatedStaff, in 
 			return err
 		}
 
-		// 2. Race condition guard on table label via PostgreSQL advisory lock (A3)
+		// 3. Race condition guard on table label via PostgreSQL advisory lock (A3)
 		if err := s.repo.AcquireTabLabelLock(ctx, tx, storeID, label); err != nil {
 			return fmt.Errorf("failed to acquire tab label advisory lock: %w", err)
 		}
 
-		// 3. Label duplicate check (unless allow_duplicate_label = true)
+		// 4. Label duplicate check (unless allow_duplicate_label = true)
 		if !in.AllowDuplicateLabel {
 			existingTab, err := s.repo.FindActiveTabByLabel(ctx, tx, storeID, label)
 			if err != nil {
@@ -184,7 +237,7 @@ func (s *TabService) OpenTab(ctx context.Context, actor *AuthenticatedStaff, in 
 			}
 		}
 
-		// 4. Fetch store configuration
+		// 5. Fetch store configuration
 		store, err := s.orderRep.GetStoreForOrder(ctx, tx, storeID)
 		if err != nil {
 			return err
@@ -232,10 +285,12 @@ func (s *TabService) OpenTab(ctx context.Context, actor *AuthenticatedStaff, in 
 		}
 
 		var firstRound *domain.OrderRound
-		// 5. If initial items exist, submit round 1 in the same transaction
+		// 6. If initial items exist, submit round 1 in the same transaction
+		// Note: Use in.IdempotencyKey directly (without "-r1") to strictly avoid exceeding VARCHAR(100).
+		// (uq_order_rounds_idempotency is scoped to store_id + order_id + idempotency_key).
 		if len(in.InitialItems) > 0 {
 			round, err := s.submitRoundInternal(ctx, tx, store, order, actor, SubmitRoundInput{
-				IdempotencyKey: in.IdempotencyKey + "-r1",
+				IdempotencyKey: in.IdempotencyKey,
 				Notes:          "Ronde 1 (Initial)",
 				Items:          in.InitialItems,
 			}, 1)
@@ -245,7 +300,7 @@ func (s *TabService) OpenTab(ctx context.Context, actor *AuthenticatedStaff, in 
 			firstRound = round
 		}
 
-		// 6. Audit Log
+		// 7. Audit Log
 		auditPayload, _ := json.Marshal(map[string]any{
 			"order_id":     order.ID,
 			"order_number": order.OrderNumber,
@@ -292,16 +347,14 @@ type SubmitRoundResult struct {
 }
 
 func computeRoundRequestHash(storeID, orderID uuid.UUID, in SubmitRoundInput) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "store=%s|order=%s|notes=%s", storeID.String(), orderID.String(), strings.TrimSpace(in.Notes))
-	for _, it := range in.Items {
-		cfgHash := computeItemConfigHashFromModifiers(it.ProductID, it.Modifiers)
-		if it.VariantID != nil && *it.VariantID != uuid.Nil {
-			cfgHash += ":v=" + it.VariantID.String()
-		}
-		fmt.Fprintf(&b, "|item=%s:%d:%s:%s", it.ProductID.String(), it.Quantity, cfgHash, strings.TrimSpace(it.Notes))
+	payload := canonicalRoundPayload{
+		StoreID: storeID.String(),
+		OrderID: orderID.String(),
+		Notes:   strings.TrimSpace(in.Notes),
+		Items:   buildCanonicalItems(in.Items),
 	}
-	sum := sha256.Sum256([]byte(b.String()))
+	raw, _ := json.Marshal(payload)
+	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:])
 }
 
@@ -333,13 +386,15 @@ func (s *TabService) SubmitRound(ctx context.Context, actor *AuthenticatedStaff,
 		if err != nil {
 			return err
 		}
-		if order.Status != domain.OrderStatusOpen {
-			return ErrTabNotOpen
+
+		// 1. Transaction-scoped advisory lock on round idempotency (store_id, order_id, idempotency_key)
+		if err := s.repo.AcquireRoundIdempotencyLock(ctx, tx, storeID, orderID, in.IdempotencyKey); err != nil {
+			return fmt.Errorf("failed to acquire round idempotency advisory lock: %w", err)
 		}
 
 		computedHash := computeRoundRequestHash(storeID, orderID, in)
 
-		// 1. Idempotency Check for Round (A1)
+		// 2. Idempotency Check for Round (A1) BEFORE status check to guarantee replay after tab is closed
 		existingRound, err := s.repo.GetRoundByIdempotencyKey(ctx, tx, storeID, orderID, in.IdempotencyKey)
 		if err != nil {
 			return err
@@ -366,6 +421,11 @@ func (s *TabService) SubmitRound(ctx context.Context, actor *AuthenticatedStaff,
 				IsIdempotentReplay: true,
 			}
 			return nil
+		}
+
+		// 3. Tab Open Guard: New round submissions require the order to still be open
+		if order.Status != domain.OrderStatusOpen {
+			return ErrTabNotOpen
 		}
 
 		store, err := s.orderRep.GetStoreForOrder(ctx, tx, storeID)

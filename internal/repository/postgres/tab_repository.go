@@ -21,6 +21,28 @@ func NewTabRepository() *TabRepository {
 	return &TabRepository{}
 }
 
+// AcquireTabIdempotencyLock takes a transaction-scoped PostgreSQL advisory lock on (store_id, idempotency_key).
+func (r *TabRepository) AcquireTabIdempotencyLock(ctx context.Context, tx *sqlx.Tx, storeID uuid.UUID, idempotencyKey string) error {
+	if tx == nil {
+		return ErrNilTransaction
+	}
+	cleanKey := strings.TrimSpace(idempotencyKey)
+	query := `SELECT pg_advisory_xact_lock(hashtextextended($1 || ':tab_idem:' || $2, 0))`
+	_, err := tx.ExecContext(ctx, query, storeID.String(), cleanKey)
+	return err
+}
+
+// AcquireRoundIdempotencyLock takes a transaction-scoped PostgreSQL advisory lock on (store_id, order_id, idempotency_key).
+func (r *TabRepository) AcquireRoundIdempotencyLock(ctx context.Context, tx *sqlx.Tx, storeID, orderID uuid.UUID, idempotencyKey string) error {
+	if tx == nil {
+		return ErrNilTransaction
+	}
+	cleanKey := strings.TrimSpace(idempotencyKey)
+	query := `SELECT pg_advisory_xact_lock(hashtextextended($1 || ':rnd_idem:' || $2 || ':' || $3, 0))`
+	_, err := tx.ExecContext(ctx, query, storeID.String(), orderID.String(), cleanKey)
+	return err
+}
+
 // AcquireTabLabelLock takes a transaction-scoped PostgreSQL advisory lock on the normalized label.
 func (r *TabRepository) AcquireTabLabelLock(ctx context.Context, tx *sqlx.Tx, storeID uuid.UUID, normalizedLabel string) error {
 	if tx == nil {

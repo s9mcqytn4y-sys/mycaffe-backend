@@ -228,6 +228,8 @@ func paymentError(c *gin.Context, err error) {
 		authError(c, http.StatusNotFound, "NOT_FOUND", err.Error())
 	case errors.Is(err, service.ErrNoOpenShift):
 		authError(c, http.StatusConflict, "NO_OPEN_SHIFT", err.Error())
+	case errors.Is(err, service.ErrTabNotClosed):
+		authError(c, http.StatusConflict, "TAB_NOT_CLOSED", "Tab belum ditutup. Selesaikan dan tutup tab terlebih dahulu sebelum memproses pembayaran.")
 	case errors.Is(err, service.ErrPaymentIdempotencyConflict), errors.Is(err, service.ErrSplitAlreadyPaid),
 		errors.Is(err, service.ErrOrderNotPayable):
 		authError(c, http.StatusConflict, "PAYMENT_CONFLICT", err.Error())

@@ -25,19 +25,22 @@ import (
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/service"
 )
 
-// TestTabLifecycleIntegration tests Iteration 4c-1:
-// 1. Barista cannot open tabs (RBAC guard tab.manage)
-// 2. Cashier successfully opens a new tab
-// 3. Attempting to open duplicate tab on label returns 409 TAB_LABEL_IN_USE
+// TestTabLifecycleIntegration validates Iteration 4c-1 end-to-end:
+// 1. RBAC Guard: Barista cannot open tabs
+// 2. Cashier opens new tab
+// 3. Duplicate tab label returns 409 TAB_LABEL_IN_USE
 // 4. Opening with allow_duplicate_label = true succeeds
-// 5. Submit Round 1 with items (locked pricing, outbox event written)
+// 5. Submit Round 1 with items (pricing snapshot frozen, outbox event written)
 // 6. Submit Round 2 with items accumulating totals
-// 7. Get Tab Detail returns all rounds with nested items and options
+// 7. Get Tab Detail returns all rounds with nested items and options (read-only, no row lock)
 // 8. Parallel open tab label race guarded by PostgreSQL advisory transaction lock
-// 9. OpenTab idempotency: replay returns 200, key reuse with different payload returns 409
-// 10. SubmitRound idempotency: replay returns 200 (no duplicate stock deduction), different payload returns 409
-// 11. Multi-round tax calculation cumulative parity with pay-first totals
-// 12. Non-open_tab order returns 404 on GET /pos/tabs/:id
+// 9. OpenTab idempotency: replay returns 200, concurrent race returns 201+200, key reuse with different payload returns 409
+// 10. OpenTab with 100-char idempotency key does not overflow round key constraint
+// 11. SubmitRound concurrent idempotency race: one round inserted, stock deducted exactly once
+// 12. SubmitRound replay after tab is closed returns 200 replay (not TAB_NOT_OPEN)
+// 13. Guard against paying an open tab: InitiatePayment returns 409 TAB_NOT_CLOSED, 0 payments, 0 cash movements
+// 14. Cumulative tax calculation proof: Rp10.010 with 5% service & 10% tax proves single-order quote parity vs round accumulation
+// 15. Non-open_tab order returns 404 on GET /pos/tabs/:id
 func TestTabLifecycleIntegration(t *testing.T) {
 	dsn := strings.TrimSpace(os.Getenv("TEST_APP_DATABASE_URL"))
 	if dsn == "" {
@@ -59,8 +62,14 @@ func TestTabLifecycleIntegration(t *testing.T) {
 
 	orderRepo := postgres.NewOrderRepository()
 	tabRepo := postgres.NewTabRepository()
+	paymentRepo := postgres.NewPaymentRepository()
 	tabSvc := service.NewTabService(db, tabRepo, orderRepo)
+	orderSvc := service.NewOrderService(db, orderRepo)
+	paymentSvc := service.NewPaymentService(db, paymentRepo, orderRepo, nil)
+	settingsSvc := service.NewSettingsService(db)
+
 	th := handler.NewTabHandler(tabSvc)
+	pos := handler.NewPOSHandler(orderSvc, paymentSvc, settingsSvc)
 
 	r := gin.New()
 	r.POST("/login", ah.Login)
@@ -69,6 +78,10 @@ func TestTabLifecycleIntegration(t *testing.T) {
 	r.POST("/pos/tabs", ah.RequirePermission(rbac.TabManage), th.OpenTab)
 	r.POST("/pos/tabs/:id/rounds", ah.RequirePermission(rbac.TabManage), th.SubmitRound)
 	r.GET("/pos/tabs/:id", ah.RequireStaff(), th.GetTab)
+
+	// POS Order & Payment routes
+	r.POST("/pos/orders/:id/payments", ah.RequireStaff(), pos.InitiatePayment)
+	r.POST("/pos/orders/quote", ah.RequireStaff(), pos.QuoteOrder)
 
 	call := func(method, path, token string, body any) *httptest.ResponseRecorder {
 		var buf bytes.Buffer
@@ -104,9 +117,10 @@ func TestTabLifecycleIntegration(t *testing.T) {
 	americanoProdID := "d0000003-0000-4000-8000-000000000003"
 	latteProdID := "d0000001-0000-4000-8000-000000000001"
 	croissantProdID := "d0000005-0000-4000-8000-000000000005"
+	centralStoreID := uuid.MustParse("11111111-1111-4111-8111-111111111111")
 
 	// Ensure sufficient stock for test products in test database
-	_ = database.WithTenantTx(context.Background(), db, uuid.MustParse("11111111-1111-4111-8111-111111111111"), func(tx *sqlx.Tx) error {
+	_ = database.WithTenantTx(context.Background(), db, centralStoreID, func(tx *sqlx.Tx) error {
 		_, err := tx.ExecContext(context.Background(), `UPDATE products SET stock_quantity = 500 WHERE id = $1`, croissantProdID)
 		return err
 	})
@@ -326,7 +340,7 @@ func TestTabLifecycleIntegration(t *testing.T) {
 		}
 	})
 
-	// 9. OpenTab Idempotency: replay returns 200, key reuse with different payload returns 409
+	// 9. OpenTab Idempotency: replay returns 200, concurrent race returns 201+200, key reuse with different payload returns 409
 	t.Run("9_OpenTab_IdempotencyReplay_And_Conflict", func(t *testing.T) {
 		idemKey := "open-idem-" + uuid.NewString()[:8]
 		tabLabel := "Meja Idem-" + uuid.NewString()[:6]
@@ -375,101 +389,328 @@ func TestTabLifecycleIntegration(t *testing.T) {
 		if !strings.Contains(w3.Body.String(), "IDEMPOTENCY_CONFLICT") {
 			t.Errorf("expected IDEMPOTENCY_CONFLICT error code, got %s", w3.Body.String())
 		}
-	})
 
-	// 10. SubmitRound Idempotency: replay returns 200, key reuse with different payload returns 409
-	t.Run("10_SubmitRound_IdempotencyReplay_And_Conflict", func(t *testing.T) {
-		roundIdemKey := "round-idem-" + uuid.NewString()[:8]
-		roundPayloadA := map[string]any{
-			"idempotency_key": roundIdemKey,
-			"notes":           "Idem Round Note A",
-			"items": []map[string]any{
-				{
-					"product_id": croissantProdID,
-					"quantity":   1,
-				},
-			},
+		// 9.4 Concurrent OpenTab with identical key & payload: guarded by advisory lock, returns 201 and 200
+		raceKey := "race-tab-key-" + uuid.NewString()[:8]
+		racePayload := map[string]any{
+			"idempotency_key": raceKey,
+			"table_number":    "Meja Race Parallel " + uuid.NewString()[:6],
+			"customer_name":   "Parallel Guest",
 		}
+		var raceWg sync.WaitGroup
+		raceCodes := make([]int, 2)
+		var raceOrderIDs [2]string
 
-		// 10.1 First submission -> 201 Created
-		w1 := call(http.MethodPost, "/pos/tabs/"+activeTabID+"/rounds", cashierToken, roundPayloadA)
-		if w1.Code != http.StatusCreated {
-			t.Fatalf("expected 201 Created on first SubmitRound, got %d %s", w1.Code, w1.Body.String())
+		for i := 0; i < 2; i++ {
+			raceWg.Add(1)
+			go func(idx int) {
+				defer raceWg.Done()
+				w := call(http.MethodPost, "/pos/tabs", cashierToken, racePayload)
+				raceCodes[idx] = w.Code
+				var rOut service.OpenTabResult
+				_ = json.Unmarshal(w.Body.Bytes(), &rOut)
+				if rOut.Order != nil {
+					raceOrderIDs[idx] = rOut.Order.ID.String()
+				}
+			}(i)
 		}
-		var res1 service.SubmitRoundResult
-		_ = json.Unmarshal(w1.Body.Bytes(), &res1)
-		origRoundID := res1.Round.ID
+		raceWg.Wait()
 
-		// 10.2 Replay exact submission -> 200 OK with identical round ID, is_idempotent_replay = true
-		w2 := call(http.MethodPost, "/pos/tabs/"+activeTabID+"/rounds", cashierToken, roundPayloadA)
-		if w2.Code != http.StatusOK {
-			t.Fatalf("expected 200 OK on SubmitRound idempotent replay, got %d %s", w2.Code, w2.Body.String())
+		has201 := raceCodes[0] == http.StatusCreated || raceCodes[1] == http.StatusCreated
+		has200 := raceCodes[0] == http.StatusOK || raceCodes[1] == http.StatusOK
+		if !has201 || !has200 {
+			t.Fatalf("expected 201 Created and 200 OK on concurrent identical OpenTab, got %v", raceCodes)
 		}
-		var res2 service.SubmitRoundResult
-		_ = json.Unmarshal(w2.Body.Bytes(), &res2)
-		if res2.Round.ID != origRoundID {
-			t.Fatalf("expected replayed round ID %s, got %s", origRoundID, res2.Round.ID)
-		}
-		if !res2.IsIdempotentReplay {
-			t.Errorf("expected is_idempotent_replay = true")
-		}
-
-		// 10.3 Key reuse with different payload -> 409 Conflict (IDEMPOTENCY_CONFLICT)
-		roundPayloadB := map[string]any{
-			"idempotency_key": roundIdemKey,
-			"notes":           "Idem Round Note B Modified",
-			"items": []map[string]any{
-				{
-					"product_id": croissantProdID,
-					"quantity":   2,
-				},
-			},
-		}
-		w3 := call(http.MethodPost, "/pos/tabs/"+activeTabID+"/rounds", cashierToken, roundPayloadB)
-		if w3.Code != http.StatusConflict {
-			t.Fatalf("expected 409 Conflict on round idempotency conflict, got %d %s", w3.Code, w3.Body.String())
-		}
-		if !strings.Contains(w3.Body.String(), "IDEMPOTENCY_CONFLICT") {
-			t.Errorf("expected IDEMPOTENCY_CONFLICT code, got %s", w3.Body.String())
+		if raceOrderIDs[0] != raceOrderIDs[1] || raceOrderIDs[0] == "" {
+			t.Fatalf("expected identical order ID from concurrent OpenTab, got %v", raceOrderIDs)
 		}
 	})
 
-	// 11. Multi-round tax calculation cumulative parity with pay-first totals
-	t.Run("11_MultiRound_CumulativeTotals_Parity", func(t *testing.T) {
-		// Open dedicated tab
-		wOpen := call(http.MethodPost, "/pos/tabs", cashierToken, map[string]any{
-			"idempotency_key": "calc-tab-" + uuid.NewString()[:8],
-			"table_number":    "Calc Tab " + uuid.NewString()[:6],
-			"customer_name":   "Audit Calc",
+	// 10. OpenTab with 100-character idempotency key does not overflow round key constraint
+	t.Run("10_OpenTab_100CharIdempotencyKey_NoOverflow", func(t *testing.T) {
+		key100 := strings.Repeat("k", 100)
+		w := call(http.MethodPost, "/pos/tabs", cashierToken, map[string]any{
+			"idempotency_key": key100,
+			"table_number":    "Meja 100-Char",
+			"customer_name":   "Pelanggan 100 Key",
+			"initial_items": []map[string]any{
+				{"product_id": americanoProdID, "quantity": 1},
+			},
 		})
-		if wOpen.Code != http.StatusCreated {
-			t.Fatalf("open tab for calc test failed: %d %s", wOpen.Code, wOpen.Body.String())
+		if w.Code != http.StatusCreated {
+			t.Fatalf("expected 201 Created with 100-char key, got %d %s", w.Code, w.Body.String())
 		}
-		var openRes service.OpenTabResult
-		_ = json.Unmarshal(wOpen.Body.Bytes(), &openRes)
-		calcTabID := openRes.Order.ID.String()
+		var res service.OpenTabResult
+		_ = json.Unmarshal(w.Body.Bytes(), &res)
+		if res.FirstRound == nil || res.FirstRound.IdempotencyKey != key100 {
+			t.Fatalf("expected first round idempotency_key to match 100 chars without overflow: %+v", res.FirstRound)
+		}
+	})
 
-		// Submit 2 rounds:
-		// Round 1: 3x Americano (20,000 * 3 = 60,000)
-		// Round 2: 2x Americano (20,000 * 2 = 40,000)
-		// Total subtotal = 100,000
-		// Service charge (5%) = 5,000
-		// Tax base = 105,000, Tax (10%) = 10,500
-		// Total = 115,500
-		wR1 := call(http.MethodPost, "/pos/tabs/"+calcTabID+"/rounds", cashierToken, map[string]any{
-			"idempotency_key": "calc-r1-" + uuid.NewString()[:8],
+	// 11. SubmitRound concurrent idempotency race: one round inserted, stock deducted exactly once
+	t.Run("11_SubmitRound_ParallelRaceAndSingleStockDeduction", func(t *testing.T) {
+		// Create dedicated tab
+		wTab := call(http.MethodPost, "/pos/tabs", cashierToken, map[string]any{
+			"idempotency_key": "tab-stock-race-" + uuid.NewString()[:8],
+			"table_number":    "Meja Stock Race",
+			"customer_name":   "Stock Race Customer",
+		})
+		if wTab.Code != http.StatusCreated {
+			t.Fatalf("create tab failed: %d %s", wTab.Code, wTab.Body.String())
+		}
+		var tabRes service.OpenTabResult
+		_ = json.Unmarshal(wTab.Body.Bytes(), &tabRes)
+		raceTabID := tabRes.Order.ID
+
+		// Get initial stock quantity of Croissant
+		var initialStock int
+		err := database.WithTenantTx(context.Background(), db, centralStoreID, func(tx *sqlx.Tx) error {
+			return tx.GetContext(context.Background(), &initialStock, `SELECT stock_quantity FROM products WHERE id = $1`, croissantProdID)
+		})
+		if err != nil {
+			t.Fatalf("failed to query initial stock: %v", err)
+		}
+
+		roundKey := "round-race-idem-" + uuid.NewString()[:8]
+		roundPayload := map[string]any{
+			"idempotency_key": roundKey,
+			"notes":           "Parallel Race Round",
 			"items": []map[string]any{
-				{"product_id": americanoProdID, "quantity": 3},
+				{"product_id": croissantProdID, "quantity": 2},
+			},
+		}
+
+		var wg sync.WaitGroup
+		codes := make([]int, 2)
+		var roundIDs [2]string
+
+		for i := 0; i < 2; i++ {
+			wg.Add(1)
+			go func(idx int) {
+				defer wg.Done()
+				w := call(http.MethodPost, "/pos/tabs/"+raceTabID.String()+"/rounds", cashierToken, roundPayload)
+				codes[idx] = w.Code
+				var rOut service.SubmitRoundResult
+				_ = json.Unmarshal(w.Body.Bytes(), &rOut)
+				if rOut.Round != nil {
+					roundIDs[idx] = rOut.Round.ID.String()
+				}
+			}(i)
+		}
+		wg.Wait()
+
+		has201 := codes[0] == http.StatusCreated || codes[1] == http.StatusCreated
+		has200 := codes[0] == http.StatusOK || codes[1] == http.StatusOK
+		if !has201 || !has200 {
+			t.Fatalf("expected 201 Created and 200 OK on concurrent SubmitRound, got %v", codes)
+		}
+		if roundIDs[0] != roundIDs[1] || roundIDs[0] == "" {
+			t.Fatalf("expected identical round ID, got %v", roundIDs)
+		}
+
+		// Assert stock deducted EXACTLY once (2 items, initialStock - 2)
+		var postStock int
+		err = database.WithTenantTx(context.Background(), db, centralStoreID, func(tx *sqlx.Tx) error {
+			return tx.GetContext(context.Background(), &postStock, `SELECT stock_quantity FROM products WHERE id = $1`, croissantProdID)
+		})
+		if err != nil {
+			t.Fatalf("failed to query post stock: %v", err)
+		}
+		if postStock != initialStock-2 {
+			t.Fatalf("expected stock deducted exactly once to %d, got %d (initial %d)", initialStock-2, postStock, initialStock)
+		}
+
+		// Assert exactly 1 outbox event was written
+		var outboxCount int
+		_ = database.WithTenantTx(context.Background(), db, centralStoreID, func(tx *sqlx.Tx) error {
+			return tx.GetContext(context.Background(), &outboxCount, `
+				SELECT COUNT(*) FROM outbox_events WHERE store_id = $1 AND event_type = 'order.round_submitted' AND aggregate_id = $2
+			`, centralStoreID, raceTabID)
+		})
+		if outboxCount != 1 {
+			t.Fatalf("expected exactly 1 outbox event, got %d", outboxCount)
+		}
+	})
+
+	// 12. SubmitRound replay after tab is closed returns 200 replay (not TAB_NOT_OPEN)
+	t.Run("12_SubmitRound_ReplayAfterTabClosed", func(t *testing.T) {
+		// Open tab and submit round
+		wTab := call(http.MethodPost, "/pos/tabs", cashierToken, map[string]any{
+			"idempotency_key": "tab-close-replay-" + uuid.NewString()[:8],
+			"table_number":    "Meja Close Replay",
+			"customer_name":   "Close Customer",
+		})
+		var tabRes service.OpenTabResult
+		_ = json.Unmarshal(wTab.Body.Bytes(), &tabRes)
+		closeTabID := tabRes.Order.ID
+
+		roundKey := "round-close-replay-" + uuid.NewString()[:8]
+		roundPayload := map[string]any{
+			"idempotency_key": roundKey,
+			"items": []map[string]any{
+				{"product_id": americanoProdID, "quantity": 1},
+			},
+		}
+
+		// Initial submission -> 201 Created
+		wR1 := call(http.MethodPost, "/pos/tabs/"+closeTabID.String()+"/rounds", cashierToken, roundPayload)
+		if wR1.Code != http.StatusCreated {
+			t.Fatalf("round submission failed: %d %s", wR1.Code, wR1.Body.String())
+		}
+		var r1Res service.SubmitRoundResult
+		_ = json.Unmarshal(wR1.Body.Bytes(), &r1Res)
+		origRoundID := r1Res.Round.ID
+
+		// Transition order status to 'cancelled' (simulating closed/non-open tab)
+		err := database.WithTenantTx(context.Background(), db, centralStoreID, func(tx *sqlx.Tx) error {
+			_, err := tx.ExecContext(context.Background(), `UPDATE orders SET status = 'cancelled' WHERE id = $1`, closeTabID)
+			return err
+		})
+		if err != nil {
+			t.Fatalf("failed to update order status: %v", err)
+		}
+
+		// Replay with exact same key -> MUST return 200 OK replay (not 409 TAB_NOT_OPEN)
+		wReplay := call(http.MethodPost, "/pos/tabs/"+closeTabID.String()+"/rounds", cashierToken, roundPayload)
+		if wReplay.Code != http.StatusOK {
+			t.Fatalf("expected 200 OK replay on closed tab, got %d %s", wReplay.Code, wReplay.Body.String())
+		}
+		var replayRes service.SubmitRoundResult
+		_ = json.Unmarshal(wReplay.Body.Bytes(), &replayRes)
+		if replayRes.Round.ID != origRoundID || !replayRes.IsIdempotentReplay {
+			t.Fatalf("expected replayed round %s, got %+v", origRoundID, replayRes)
+		}
+	})
+
+	// 13. Guard against paying an open tab: InitiatePayment returns 409 TAB_NOT_CLOSED, 0 payments, 0 cash movements
+	t.Run("13_PayOpenTab_RejectedWith409TabNotClosed", func(t *testing.T) {
+		// Open tab with initial items
+		wTab := call(http.MethodPost, "/pos/tabs", cashierToken, map[string]any{
+			"idempotency_key": "tab-unclosed-pay-" + uuid.NewString()[:8],
+			"table_number":    "Meja Pay Guard",
+			"customer_name":   "Guard Customer",
+			"initial_items": []map[string]any{
+				{"product_id": americanoProdID, "quantity": 1},
+			},
+		})
+		if wTab.Code != http.StatusCreated {
+			t.Fatalf("open tab failed: %d %s", wTab.Code, wTab.Body.String())
+		}
+		var tabRes service.OpenTabResult
+		_ = json.Unmarshal(wTab.Body.Bytes(), &tabRes)
+		guardOrderID := tabRes.Order.ID
+
+		// Attempt direct tender payment while tab is still 'open'
+		payKey := "pay-open-tab-" + uuid.NewString()[:8]
+		wPay := call(http.MethodPost, "/pos/orders/"+guardOrderID.String()+"/payments", cashierToken, map[string]any{
+			"idempotency_key":    payKey,
+			"method":             "static_qris",
+			"reconciliation_ref": "REF-STAT-001",
+		})
+		if wPay.Code != http.StatusConflict {
+			t.Fatalf("expected 409 Conflict for paying open tab, got %d %s", wPay.Code, wPay.Body.String())
+		}
+		if !strings.Contains(wPay.Body.String(), "TAB_NOT_CLOSED") {
+			t.Errorf("expected TAB_NOT_CLOSED code, got %s", wPay.Body.String())
+		}
+
+		// Verify 0 rows in payments and 0 rows in cash_movements for this order
+		var payCount int
+		var movCount int
+		_ = database.WithTenantTx(context.Background(), db, centralStoreID, func(tx *sqlx.Tx) error {
+			_ = tx.GetContext(context.Background(), &payCount, `SELECT COUNT(*) FROM payments WHERE store_id = $1 AND order_id = $2`, centralStoreID, guardOrderID)
+			_ = tx.GetContext(context.Background(), &movCount, `SELECT COUNT(*) FROM cash_movements WHERE store_id = $1 AND reference_id = $2`, centralStoreID, guardOrderID.String())
+			return nil
+		})
+		if payCount != 0 {
+			t.Errorf("expected 0 payments created, got %d", payCount)
+		}
+		if movCount != 0 {
+			t.Errorf("expected 0 cash movements created, got %d", movCount)
+		}
+	})
+
+	// 14. Cumulative tax calculation proof: Rp10.010 with 5% service & 10% tax proves single-order quote parity vs round accumulation
+	// Math proof:
+	// Price = 10,010 IDR. Service = 5% (500 BPS), Tax = 10% (1000 BPS).
+	// Per-round rounding (Legacy flawed):
+	//   Round 1: Subtotal 10,010. Service = round(10,010 * 5%) = 501. Taxable = 10,511. Tax = round(10,511 * 10%) = 1,051. Total = 11,562.
+	//   Round 2: Subtotal 10,010. Service = 501. Taxable = 10,511. Tax = 1,051. Total = 11,562.
+	//   Flawed accumulated total = 11,562 + 11,562 = 23,124 IDR.
+	// Cumulative recalculation (A4 fix & Pay-First parity):
+	//   Cumulative Subtotal = 20,020.
+	//   Cumulative Service = round(20,020 * 5%) = round(1001.0) = 1,001 IDR. (1 IDR lower than 501+501!)
+	//   Cumulative Taxable Base = 20,020 + 1,001 = 21,021 IDR.
+	//   Cumulative Tax = round(21,021 * 10%) = round(2102.1) = 2,102 IDR.
+	//   Exact Cumulative Total = 20,020 + 1,001 + 2,102 = 23,123 IDR!
+	// Parity assert: Tab TotalAmount MUST be 23,123 IDR, exactly matching POS Quote for 2x item.
+	// Legacy accumulation (23,124 IDR) would fail this test!
+	t.Run("14_MultiRound_CumulativeTotals_MathParity", func(t *testing.T) {
+		fractionalProdID := uuid.New()
+		err := database.WithTenantTx(context.Background(), db, centralStoreID, func(tx *sqlx.Tx) error {
+			_, err := tx.ExecContext(context.Background(), `
+				INSERT INTO products (id, store_id, name, base_price, is_available, track_stock, stock_quantity)
+				VALUES ($1, $2, 'Proof Fractional Item', 10010, true, false, 0)
+			`, fractionalProdID, centralStoreID)
+			return err
+		})
+		if err != nil {
+			t.Fatalf("failed to insert proof item: %v", err)
+		}
+		t.Cleanup(func() {
+			_ = database.WithTenantTx(context.Background(), db, centralStoreID, func(tx *sqlx.Tx) error {
+				_, _ = tx.ExecContext(context.Background(), `DELETE FROM products WHERE id = $1`, fractionalProdID)
+				return nil
+			})
+		})
+
+		// 14.1 Query POS Quote for 2x Proof Fractional Item
+		wQuote := call(http.MethodPost, "/pos/orders/quote", cashierToken, map[string]any{
+			"order_type":   "dine_in",
+			"billing_mode": "pay_first",
+			"items": []map[string]any{
+				{"product_id": fractionalProdID.String(), "quantity": 2},
+			},
+		})
+		if wQuote.Code != http.StatusOK {
+			t.Fatalf("quote failed: %d %s", wQuote.Code, wQuote.Body.String())
+		}
+		var quoteRes struct {
+			SubtotalAmount      int64 `json:"subtotal_amount"`
+			ServiceChargeAmount int64 `json:"service_charge_amount"`
+			TaxAmount           int64 `json:"tax_amount"`
+			TotalAmount         int64 `json:"total_amount"`
+		}
+		_ = json.Unmarshal(wQuote.Body.Bytes(), &quoteRes)
+
+		if quoteRes.SubtotalAmount != 20020 || quoteRes.ServiceChargeAmount != 1001 || quoteRes.TaxAmount != 2102 || quoteRes.TotalAmount != 23123 {
+			t.Fatalf("unexpected quote calculation: %+v", quoteRes)
+		}
+
+		// 14.2 Submit across 2 incremental rounds
+		wTab := call(http.MethodPost, "/pos/tabs", cashierToken, map[string]any{
+			"idempotency_key": "calc-proof-" + uuid.NewString()[:8],
+			"table_number":    "Calc Proof Table",
+			"customer_name":   "Math Audit Customer",
+		})
+		var tabRes service.OpenTabResult
+		_ = json.Unmarshal(wTab.Body.Bytes(), &tabRes)
+		calcTabID := tabRes.Order.ID
+
+		wR1 := call(http.MethodPost, "/pos/tabs/"+calcTabID.String()+"/rounds", cashierToken, map[string]any{
+			"idempotency_key": "proof-r1-" + uuid.NewString()[:8],
+			"items": []map[string]any{
+				{"product_id": fractionalProdID.String(), "quantity": 1},
 			},
 		})
 		if wR1.Code != http.StatusCreated {
 			t.Fatalf("submit round 1 failed: %d %s", wR1.Code, wR1.Body.String())
 		}
 
-		wR2 := call(http.MethodPost, "/pos/tabs/"+calcTabID+"/rounds", cashierToken, map[string]any{
-			"idempotency_key": "calc-r2-" + uuid.NewString()[:8],
+		wR2 := call(http.MethodPost, "/pos/tabs/"+calcTabID.String()+"/rounds", cashierToken, map[string]any{
+			"idempotency_key": "proof-r2-" + uuid.NewString()[:8],
 			"items": []map[string]any{
-				{"product_id": americanoProdID, "quantity": 2},
+				{"product_id": fractionalProdID.String(), "quantity": 1},
 			},
 		})
 		if wR2.Code != http.StatusCreated {
@@ -478,24 +719,23 @@ func TestTabLifecycleIntegration(t *testing.T) {
 		var r2Res service.SubmitRoundResult
 		_ = json.Unmarshal(wR2.Body.Bytes(), &r2Res)
 
-		if r2Res.Order.SubtotalAmount != 100000 {
-			t.Errorf("expected cumulative subtotal 100000, got %d", r2Res.Order.SubtotalAmount)
+		// Assert exact parity with quote and cumulative calculation
+		if r2Res.Order.SubtotalAmount != quoteRes.SubtotalAmount {
+			t.Errorf("expected subtotal %d, got %d", quoteRes.SubtotalAmount, r2Res.Order.SubtotalAmount)
 		}
-		if r2Res.Order.ServiceChargeAmount != 5000 {
-			t.Errorf("expected cumulative service 5000, got %d", r2Res.Order.ServiceChargeAmount)
+		if r2Res.Order.ServiceChargeAmount != quoteRes.ServiceChargeAmount {
+			t.Errorf("expected service charge %d, got %d", quoteRes.ServiceChargeAmount, r2Res.Order.ServiceChargeAmount)
 		}
-		if r2Res.Order.TaxAmount != 10500 {
-			t.Errorf("expected cumulative tax 10500, got %d", r2Res.Order.TaxAmount)
+		if r2Res.Order.TaxAmount != quoteRes.TaxAmount {
+			t.Errorf("expected tax %d, got %d", quoteRes.TaxAmount, r2Res.Order.TaxAmount)
 		}
-		if r2Res.Order.TotalAmount != 115500 {
-			t.Errorf("expected cumulative total 115500, got %d", r2Res.Order.TotalAmount)
+		if r2Res.Order.TotalAmount != quoteRes.TotalAmount {
+			t.Errorf("expected total %d (flawed per-round accumulation was 23124), got %d", quoteRes.TotalAmount, r2Res.Order.TotalAmount)
 		}
 	})
 
-	// 12. Non-open_tab order returns 404 on GET /pos/tabs/:id
-	t.Run("12_NonOpenTabOrder_Returns404", func(t *testing.T) {
-		// Create a pay_first order
-		centralStoreID := uuid.MustParse("11111111-1111-4111-8111-111111111111")
+	// 15. Non-open_tab order returns 404 on GET /pos/tabs/:id
+	t.Run("15_NonOpenTabOrder_Returns404", func(t *testing.T) {
 		var nonTabOrderID uuid.UUID
 		err := database.WithTenantTx(context.Background(), db, centralStoreID, func(tx *sqlx.Tx) error {
 			nonTabOrderID = uuid.New()

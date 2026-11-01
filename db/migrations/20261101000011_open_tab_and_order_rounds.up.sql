@@ -13,11 +13,13 @@ ALTER TABLE orders ADD CONSTRAINT chk_orders_status CHECK (status IN ('pending_p
 
 -- 2. Order Rounds Table
 CREATE TABLE IF NOT EXISTS order_rounds (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     store_id UUID NOT NULL REFERENCES stores(id) ON DELETE RESTRICT,
     order_id UUID NOT NULL,
     round_number INT NOT NULL,
     status VARCHAR(30) NOT NULL DEFAULT 'queued',
+    idempotency_key VARCHAR(100) NOT NULL,
+    request_hash VARCHAR(64) NOT NULL,
     submitted_by_user_id UUID,
     submitted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     notes TEXT DEFAULT '',
@@ -25,13 +27,15 @@ CREATE TABLE IF NOT EXISTS order_rounds (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT uq_order_rounds_store_id UNIQUE (store_id, id),
     CONSTRAINT uq_order_rounds_order_round UNIQUE (store_id, order_id, round_number),
+    CONSTRAINT uq_order_rounds_idempotency UNIQUE (store_id, order_id, idempotency_key),
     CONSTRAINT fk_order_rounds_order FOREIGN KEY (store_id, order_id) REFERENCES orders(store_id, id) ON DELETE RESTRICT,
-    CONSTRAINT fk_order_rounds_user FOREIGN KEY (store_id, submitted_by_user_id) REFERENCES users(store_id, id) ON DELETE SET NULL,
+    CONSTRAINT fk_order_rounds_user FOREIGN KEY (store_id, submitted_by_user_id) REFERENCES users(store_id, id) ON DELETE SET NULL (submitted_by_user_id),
     CONSTRAINT chk_order_rounds_round_number CHECK (round_number > 0),
     CONSTRAINT chk_order_rounds_status CHECK (status IN ('queued', 'preparing', 'ready', 'served', 'cancelled'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_order_rounds_order ON order_rounds(store_id, order_id, round_number);
+CREATE INDEX IF NOT EXISTS idx_order_rounds_idem ON order_rounds(store_id, order_id, idempotency_key);
 
 -- 3. Link order_items to order_rounds
 ALTER TABLE order_items ADD COLUMN IF NOT EXISTS round_id UUID DEFAULT NULL;
@@ -47,8 +51,8 @@ DROP POLICY IF EXISTS p_order_rounds_tenant_isolation ON order_rounds;
 CREATE POLICY p_order_rounds_tenant_isolation ON order_rounds
     FOR ALL
     TO mycaffe_app
-    USING (store_id = NULLIF(current_setting('app.current_store_id', true), '')::UUID)
-    WITH CHECK (store_id = NULLIF(current_setting('app.current_store_id', true), '')::UUID);
+    USING (store_id = current_store_id())
+    WITH CHECK (store_id = current_store_id());
 
 -- 5. Grant permissions to non-owner application runtime role
 GRANT SELECT, INSERT, UPDATE ON order_rounds TO mycaffe_app;

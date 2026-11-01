@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,6 +23,7 @@ var (
 	ErrTabNotOpen      = errors.New("tab tidak dalam status terbuka")
 	ErrEmptyRoundItems = errors.New("ronde pesanan harus memiliki minimal satu item")
 	ErrInvalidTabInput = errors.New("input tab tidak valid")
+	ErrTabNotFound     = errors.New("tab tidak ditemukan")
 )
 
 type TabConflictError struct {
@@ -67,8 +70,31 @@ type OpenTabInput struct {
 }
 
 type OpenTabResult struct {
-	Order      *domain.Order      `json:"order"`
-	FirstRound *domain.OrderRound `json:"first_round,omitempty"`
+	Order              *domain.Order      `json:"order"`
+	FirstRound         *domain.OrderRound `json:"first_round,omitempty"`
+	IsIdempotentReplay bool               `json:"is_idempotent_replay"`
+}
+
+func computeOpenTabRequestHash(storeID uuid.UUID, actorUserID uuid.UUID, in OpenTabInput) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "store=%s|actor=%s|table=%s|name=%s|phone=%s|notes=%s|allow_dup=%t",
+		storeID.String(),
+		actorUserID.String(),
+		strings.TrimSpace(in.TableNumber),
+		strings.TrimSpace(in.CustomerName),
+		strings.TrimSpace(in.CustomerPhone),
+		strings.TrimSpace(in.Notes),
+		in.AllowDuplicateLabel,
+	)
+	for _, it := range in.InitialItems {
+		cfgHash := computeItemConfigHashFromModifiers(it.ProductID, it.Modifiers)
+		if it.VariantID != nil && *it.VariantID != uuid.Nil {
+			cfgHash += ":v=" + it.VariantID.String()
+		}
+		fmt.Fprintf(&b, "|item=%s:%d:%s:%s", it.ProductID.String(), it.Quantity, cfgHash, strings.TrimSpace(it.Notes))
+	}
+	sum := sha256.Sum256([]byte(b.String()))
+	return hex.EncodeToString(sum[:])
 }
 
 // OpenTab initializes an open tab order and optionally submits round 1 atomically.
@@ -99,13 +125,52 @@ func (s *TabService) OpenTab(ctx context.Context, actor *AuthenticatedStaff, in 
 	if in.IdempotencyKey == "" {
 		return nil, fmt.Errorf("%w: idempotency_key wajib diisi", ErrInvalidTabInput)
 	}
+	if len(in.IdempotencyKey) > 100 {
+		return nil, fmt.Errorf("%w: idempotency_key exceeds 100 characters", ErrInvalidTabInput)
+	}
+	if len(in.InitialItems) > 0 {
+		if err := ValidateItemInputs(in.InitialItems); err != nil {
+			return nil, err
+		}
+	}
 
 	var result *OpenTabResult
 
 	err := database.WithTenantTx(ctx, s.db, actor.Staff.Store.ID, func(tx *sqlx.Tx) error {
 		storeID := actor.Staff.Store.ID
+		actorUserID := actor.Staff.UserID
+		computedHash := computeOpenTabRequestHash(storeID, actorUserID, in)
 
-		// 1. Label duplicate check (unless allow_duplicate_label = true)
+		// 1. Idempotency Check (A2)
+		existingOrder, _, err := s.orderRep.GetOrderByIdempotencyKey(ctx, tx, storeID, in.IdempotencyKey)
+		if err == nil && existingOrder != nil {
+			if existingOrder.RequestHash == "" || existingOrder.RequestHash != computedHash {
+				return fmt.Errorf("%w: idempotency_key %q was already used with a different tab payload", ErrIdempotencyConflict, in.IdempotencyKey)
+			}
+			rounds, err := s.repo.ListRoundsByOrder(ctx, tx, storeID, existingOrder.ID)
+			if err != nil {
+				return err
+			}
+			var firstRound *domain.OrderRound
+			if len(rounds) > 0 {
+				firstRound = &rounds[0]
+			}
+			result = &OpenTabResult{
+				Order:              existingOrder,
+				FirstRound:         firstRound,
+				IsIdempotentReplay: true,
+			}
+			return nil
+		} else if err != nil && !errors.Is(err, postgres.ErrOrderNotFound) {
+			return err
+		}
+
+		// 2. Race condition guard on table label via PostgreSQL advisory lock (A3)
+		if err := s.repo.AcquireTabLabelLock(ctx, tx, storeID, label); err != nil {
+			return fmt.Errorf("failed to acquire tab label advisory lock: %w", err)
+		}
+
+		// 3. Label duplicate check (unless allow_duplicate_label = true)
 		if !in.AllowDuplicateLabel {
 			existingTab, err := s.repo.FindActiveTabByLabel(ctx, tx, storeID, label)
 			if err != nil {
@@ -119,7 +184,7 @@ func (s *TabService) OpenTab(ctx context.Context, actor *AuthenticatedStaff, in 
 			}
 		}
 
-		// 2. Fetch catalog and store for daily sequence
+		// 4. Fetch store configuration
 		store, err := s.orderRep.GetStoreForOrder(ctx, tx, storeID)
 		if err != nil {
 			return err
@@ -129,30 +194,17 @@ func (s *TabService) OpenTab(ctx context.Context, actor *AuthenticatedStaff, in 
 		}
 
 		currentTime := s.nowFunc().UTC()
-		businessDateISO, compactDate := resolveStoreBusinessDates(currentTime, store.Timezone)
-		seq, err := s.orderRep.AllocateDailySequence(ctx, tx, storeID, businessDateISO)
+		orderNum, queueNum, err := AllocateOrderIdentity(ctx, tx, s.orderRep, store, storeID, currentTime)
 		if err != nil {
 			return err
 		}
 
-		orderPrefix := strings.TrimSpace(store.OrderPrefix)
-		if orderPrefix == "" {
-			orderPrefix = "ORD"
-		}
-		queuePrefix := strings.TrimSpace(store.QueuePrefix)
-		if queuePrefix == "" {
-			queuePrefix = "A"
-		}
-
-		orderNum := fmt.Sprintf("%s-%s-%04d", orderPrefix, compactDate, seq)
-		queueNum := fmt.Sprintf("%s%03d", queuePrefix, seq)
-
 		orderID := uuid.New()
-		actorUserID := actor.Staff.UserID
 		order := &domain.Order{
 			ID:                  orderID,
 			StoreID:             storeID,
 			IdempotencyKey:      in.IdempotencyKey,
+			RequestHash:         computedHash,
 			OrderNumber:         orderNum,
 			QueueNumber:         queueNum,
 			TableNumber:         in.TableNumber,
@@ -180,7 +232,7 @@ func (s *TabService) OpenTab(ctx context.Context, actor *AuthenticatedStaff, in 
 		}
 
 		var firstRound *domain.OrderRound
-		// 3. If initial items exist, submit round 1 in the same transaction
+		// 5. If initial items exist, submit round 1 in the same transaction
 		if len(in.InitialItems) > 0 {
 			round, err := s.submitRoundInternal(ctx, tx, store, order, actor, SubmitRoundInput{
 				IdempotencyKey: in.IdempotencyKey + "-r1",
@@ -193,7 +245,7 @@ func (s *TabService) OpenTab(ctx context.Context, actor *AuthenticatedStaff, in 
 			firstRound = round
 		}
 
-		// 4. Audit Log
+		// 6. Audit Log
 		auditPayload, _ := json.Marshal(map[string]any{
 			"order_id":     order.ID,
 			"order_number": order.OrderNumber,
@@ -234,8 +286,23 @@ type SubmitRoundInput struct {
 }
 
 type SubmitRoundResult struct {
-	Round *domain.OrderRound `json:"round"`
-	Order *domain.Order      `json:"order"`
+	Round              *domain.OrderRound `json:"round"`
+	Order              *domain.Order      `json:"order"`
+	IsIdempotentReplay bool               `json:"is_idempotent_replay"`
+}
+
+func computeRoundRequestHash(storeID, orderID uuid.UUID, in SubmitRoundInput) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "store=%s|order=%s|notes=%s", storeID.String(), orderID.String(), strings.TrimSpace(in.Notes))
+	for _, it := range in.Items {
+		cfgHash := computeItemConfigHashFromModifiers(it.ProductID, it.Modifiers)
+		if it.VariantID != nil && *it.VariantID != uuid.Nil {
+			cfgHash += ":v=" + it.VariantID.String()
+		}
+		fmt.Fprintf(&b, "|item=%s:%d:%s:%s", it.ProductID.String(), it.Quantity, cfgHash, strings.TrimSpace(it.Notes))
+	}
+	sum := sha256.Sum256([]byte(b.String()))
+	return hex.EncodeToString(sum[:])
 }
 
 // SubmitRound appends a new round to an existing open tab.
@@ -246,8 +313,15 @@ func (s *TabService) SubmitRound(ctx context.Context, actor *AuthenticatedStaff,
 	if !actor.Can(rbac.TabManage) {
 		return nil, ErrForbidden
 	}
-	if len(in.Items) == 0 {
-		return nil, ErrEmptyRoundItems
+	in.IdempotencyKey = strings.TrimSpace(in.IdempotencyKey)
+	if in.IdempotencyKey == "" {
+		return nil, fmt.Errorf("%w: idempotency_key wajib diisi", ErrInvalidTabInput)
+	}
+	if len(in.IdempotencyKey) > 100 {
+		return nil, fmt.Errorf("%w: idempotency_key exceeds 100 characters", ErrInvalidTabInput)
+	}
+	if err := ValidateItemInputs(in.Items); err != nil {
+		return nil, err
 	}
 
 	var result *SubmitRoundResult
@@ -261,6 +335,37 @@ func (s *TabService) SubmitRound(ctx context.Context, actor *AuthenticatedStaff,
 		}
 		if order.Status != domain.OrderStatusOpen {
 			return ErrTabNotOpen
+		}
+
+		computedHash := computeRoundRequestHash(storeID, orderID, in)
+
+		// 1. Idempotency Check for Round (A1)
+		existingRound, err := s.repo.GetRoundByIdempotencyKey(ctx, tx, storeID, orderID, in.IdempotencyKey)
+		if err != nil {
+			return err
+		}
+		if existingRound != nil {
+			if existingRound.RequestHash == "" || existingRound.RequestHash != computedHash {
+				return fmt.Errorf("%w: idempotency_key %q was already used for round #%d with a different payload", ErrIdempotencyConflict, in.IdempotencyKey, existingRound.RoundNumber)
+			}
+			// Idempotent replay: populate items and return existing state without duplicate stock deductions
+			items, err := s.repo.GetOrderItemsWithOptionsByOrder(ctx, tx, storeID, orderID)
+			if err != nil {
+				return err
+			}
+			var roundItems []domain.OrderItem
+			for _, it := range items {
+				if it.RoundID != nil && *it.RoundID == existingRound.ID {
+					roundItems = append(roundItems, it)
+				}
+			}
+			existingRound.Items = roundItems
+			result = &SubmitRoundResult{
+				Round:              existingRound,
+				Order:              order,
+				IsIdempotentReplay: true,
+			}
+			return nil
 		}
 
 		store, err := s.orderRep.GetStoreForOrder(ctx, tx, storeID)
@@ -314,7 +419,7 @@ func (s *TabService) SubmitRound(ctx context.Context, actor *AuthenticatedStaff,
 }
 
 // submitRoundInternal validates pricing snapshot, commits stock, inserts order_items tied to round_id,
-// updates parent order totals, and writes outbox event 'order.round_submitted'.
+// recalculates parent order totals from all cumulative items, and writes outbox event 'order.round_submitted'.
 func (s *TabService) submitRoundInternal(
 	ctx context.Context,
 	tx *sqlx.Tx,
@@ -382,6 +487,7 @@ func (s *TabService) submitRoundInternal(
 
 	roundID := uuid.New()
 	currentTime := s.nowFunc().UTC()
+	roundHash := computeRoundRequestHash(store.ID, order.ID, in)
 
 	round := &domain.OrderRound{
 		ID:                roundID,
@@ -389,6 +495,8 @@ func (s *TabService) submitRoundInternal(
 		OrderID:           order.ID,
 		RoundNumber:       roundNumber,
 		Status:            domain.OrderRoundStatusQueued,
+		IdempotencyKey:    in.IdempotencyKey,
+		RequestHash:       roundHash,
 		SubmittedByUserID: &actorUserID,
 		SubmittedAt:       currentTime,
 		Notes:             strings.TrimSpace(in.Notes),
@@ -400,69 +508,26 @@ func (s *TabService) submitRoundInternal(
 		return nil, fmt.Errorf("failed to insert order round: %w", err)
 	}
 
-	// Insert items linked to round_id
-	var roundItems []domain.OrderItem
-	for _, pricedItem := range pricedOrder.Items {
-		itemRow := pricedItem.Item
-		itemRow.ID = uuid.New()
-		itemRow.StoreID = store.ID
-		itemRow.OrderID = order.ID
-		itemRow.RoundID = &roundID
-		itemRow.CreatedAt = currentTime
-
-		if err := s.orderRep.InsertOrderItem(ctx, tx, &itemRow); err != nil {
-			return nil, fmt.Errorf("failed to insert round item: %w", err)
-		}
-
-		for _, pricedOpt := range pricedItem.Options {
-			parentOptRow := pricedOpt.Option
-			parentOptRow.ID = uuid.New()
-			parentOptRow.StoreID = store.ID
-			parentOptRow.OrderItemID = itemRow.ID
-			parentOptRow.ParentOrderItemOptionID = nil
-			parentOptRow.CreatedAt = currentTime
-
-			if err := s.orderRep.InsertOrderItemOption(ctx, tx, &parentOptRow); err != nil {
-				return nil, fmt.Errorf("failed to insert round item option: %w", err)
-			}
-
-			for _, childOpt := range pricedOpt.Children {
-				childOptRow := childOpt
-				childOptRow.ID = uuid.New()
-				childOptRow.StoreID = store.ID
-				childOptRow.OrderItemID = itemRow.ID
-				parentRowIDCopy := parentOptRow.ID
-				childOptRow.ParentOrderItemOptionID = &parentRowIDCopy
-				childOptRow.CreatedAt = currentTime
-
-				if err := s.orderRep.InsertOrderItemOption(ctx, tx, &childOptRow); err != nil {
-					return nil, fmt.Errorf("failed to insert round child option: %w", err)
-				}
-			}
-		}
-		roundItems = append(roundItems, itemRow)
+	// Persist priced items via shared helper
+	persistedItems, err := InsertPricedItems(ctx, tx, s.orderRep, store.ID, order.ID, &roundID, pricedOrder.Items)
+	if err != nil {
+		return nil, err
 	}
-	round.Items = roundItems
+	round.Items = persistedItems
 
-	// Accumulate parent order totals
-	order.SubtotalAmount += pricedOrder.SubtotalAmount
-	order.TaxAmount += pricedOrder.TaxAmount
-	order.ServiceChargeAmount += pricedOrder.ServiceChargeAmount
-	order.TotalAmount += pricedOrder.TotalAmount
-	order.UpdatedAt = currentTime
-
-	if err := s.repo.UpdateOrderTotals(ctx, tx, order); err != nil {
-		return nil, fmt.Errorf("failed to update order totals: %w", err)
+	// Recalculate order cumulative totals once from all cumulative order items (A4)
+	if err := RecalculateOrderTotals(ctx, tx, store, order); err != nil {
+		return nil, fmt.Errorf("failed to recalculate cumulative order totals: %w", err)
 	}
 
-	// Outbox event murni: order.round_submitted
+	// Outbox event: order.round_submitted
 	outboxPayload, _ := json.Marshal(map[string]any{
 		"order_id":     order.ID,
 		"order_number": order.OrderNumber,
 		"table_number": order.TableNumber,
 		"round_id":     round.ID,
 		"round_number": round.RoundNumber,
-		"items_count":  len(roundItems),
+		"items_count":  len(persistedItems),
 		"round_total":  pricedOrder.TotalAmount,
 		"order_total":  order.TotalAmount,
 	})
@@ -488,7 +553,7 @@ type TabDetailResult struct {
 	Rounds []domain.OrderRound `json:"rounds"`
 }
 
-// GetTabDetail returns the order along with its submitted rounds.
+// GetTabDetail returns the order along with its submitted rounds and items (A6: read-only, no locks, batch items).
 func (s *TabService) GetTabDetail(ctx context.Context, actor *AuthenticatedStaff, orderID uuid.UUID) (*TabDetailResult, error) {
 	if actor == nil {
 		return nil, ErrInvalidSession
@@ -496,14 +561,38 @@ func (s *TabService) GetTabDetail(ctx context.Context, actor *AuthenticatedStaff
 
 	var result *TabDetailResult
 	err := database.WithTenantTx(ctx, s.db, actor.Staff.Store.ID, func(tx *sqlx.Tx) error {
-		order, _, err := s.orderRep.GetOrderByIDForUpdate(ctx, tx, actor.Staff.Store.ID, orderID)
+		storeID := actor.Staff.Store.ID
+
+		order, err := s.repo.GetTabOrderByIDReadOnly(ctx, tx, storeID, orderID)
+		if err != nil {
+			if errors.Is(err, postgres.ErrOrderNotFound) {
+				return ErrTabNotFound
+			}
+			return err
+		}
+		if order.BillingMode != domain.BillingModeOpenTab {
+			return ErrTabNotFound
+		}
+
+		rounds, err := s.repo.ListRoundsByOrder(ctx, tx, storeID, orderID)
 		if err != nil {
 			return err
 		}
 
-		rounds, err := s.repo.ListRoundsByOrder(ctx, tx, actor.Staff.Store.ID, orderID)
+		items, err := s.repo.GetOrderItemsWithOptionsByOrder(ctx, tx, storeID, orderID)
 		if err != nil {
 			return err
+		}
+
+		roundItemsMap := make(map[uuid.UUID][]domain.OrderItem)
+		for _, it := range items {
+			if it.RoundID != nil {
+				roundItemsMap[*it.RoundID] = append(roundItemsMap[*it.RoundID], it)
+			}
+		}
+
+		for i := range rounds {
+			rounds[i].Items = roundItemsMap[rounds[i].ID]
 		}
 
 		result = &TabDetailResult{

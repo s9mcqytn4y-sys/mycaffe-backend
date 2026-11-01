@@ -32,6 +32,8 @@ type OrderRound struct {
 	OrderID           uuid.UUID        `json:"order_id" db:"order_id"`
 	RoundNumber       int              `json:"round_number" db:"round_number"`
 	Status            OrderRoundStatus `json:"status" db:"status"`
+	IdempotencyKey    string           `json:"idempotency_key" db:"idempotency_key"`
+	RequestHash       string           `json:"request_hash" db:"request_hash"`
 	SubmittedByUserID *uuid.UUID       `json:"submitted_by_user_id,omitempty" db:"submitted_by_user_id"`
 	SubmittedAt       time.Time        `json:"submitted_at" db:"submitted_at"`
 	Notes             string           `json:"notes,omitempty" db:"notes"`

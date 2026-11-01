@@ -59,7 +59,11 @@ func (h *TabHandler) OpenTab(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, res)
+	status := http.StatusCreated
+	if res.IsIdempotentReplay {
+		status = http.StatusOK
+	}
+	c.JSON(status, res)
 }
 
 type SubmitRoundRequest struct {
@@ -97,7 +101,11 @@ func (h *TabHandler) SubmitRound(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, res)
+	status := http.StatusCreated
+	if res.IsIdempotentReplay {
+		status = http.StatusOK
+	}
+	c.JSON(status, res)
 }
 
 func (h *TabHandler) GetTab(c *gin.Context) {
@@ -132,17 +140,25 @@ func writeTabServiceError(c *gin.Context, err error) {
 			"error":             tabConflict.Message,
 			"existing_order_id": tabConflict.ExistingOrderID.String(),
 		})
+	case errors.Is(err, service.ErrIdempotencyConflict):
+		authError(c, http.StatusConflict, "IDEMPOTENCY_CONFLICT", err.Error())
 	case errors.Is(err, service.ErrTabNotOpen):
 		authError(c, http.StatusConflict, "TAB_NOT_OPEN", "Tab tidak dalam status terbuka atau sudah ditutup.")
 	case errors.Is(err, service.ErrEmptyRoundItems):
 		authError(c, http.StatusBadRequest, "EMPTY_ROUND_ITEMS", "Ronde pesanan harus memiliki minimal satu item.")
-	case errors.Is(err, service.ErrInvalidTabInput):
+	case errors.Is(err, service.ErrInvalidTabInput), errors.Is(err, service.ErrInvalidOrderInput):
 		authError(c, http.StatusBadRequest, "INVALID_INPUT", err.Error())
+	case errors.Is(err, service.ErrInsufficientStock):
+		authError(c, http.StatusUnprocessableEntity, "INSUFFICIENT_STOCK", err.Error())
+	case errors.Is(err, service.ErrProductNotFound):
+		authError(c, http.StatusNotFound, "PRODUCT_NOT_FOUND", err.Error())
+	case errors.Is(err, service.ErrProductUnavailable):
+		authError(c, http.StatusUnprocessableEntity, "PRODUCT_UNAVAILABLE", err.Error())
 	case errors.Is(err, service.ErrForbidden):
 		authError(c, http.StatusForbidden, "FORBIDDEN", "Peran Anda tidak diizinkan mengelola tab.")
 	case errors.Is(err, service.ErrInvalidSession):
 		authError(c, http.StatusUnauthorized, "SESSION_INVALID", "Sesi tidak valid. Silakan masuk kembali.")
-	case errors.Is(err, postgres.ErrOrderNotFound):
+	case errors.Is(err, service.ErrTabNotFound), errors.Is(err, postgres.ErrOrderNotFound):
 		authError(c, http.StatusNotFound, "NOT_FOUND", "Tab tidak ditemukan.")
 	case errors.As(err, &validation):
 		c.JSON(http.StatusUnprocessableEntity, gin.H{

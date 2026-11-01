@@ -1,4 +1,6 @@
 -- Migration 000011 Down: Rollback Open Tab, Order Rounds, and Table ID preparation
+-- Note: Reverting chk_orders_status and chk_audit_logs_action will fail if rows with status 'open'
+-- or audit actions 'TAB_OPEN'/'ROUND_SUBMIT' exist in the database (intended for dev/staging teardown only).
 
 -- 1. Remove round_id from order_items
 ALTER TABLE order_items DROP CONSTRAINT IF EXISTS fk_order_items_round;

@@ -616,11 +616,11 @@ func (r *OrderRepository) InsertOrderItem(ctx context.Context, tx *sqlx.Tx, item
 		INSERT INTO order_items (
 			id, store_id, order_id, product_id, config_hash, snapshot_name,
 			unit_base_price, modifier_total_price, snapshot_price, quantity,
-			subtotal_amount, selected_options, notes, variant_id, snapshot_variant_name, snapshot_sku
+			subtotal_amount, selected_options, notes, variant_id, snapshot_variant_name, snapshot_sku, round_id
 		) VALUES (
 			$1, $2, $3, $4, $5, $6,
 			$7, $8, $9, $10,
-			$11, $12::jsonb, $13, $14, $15, $16
+			$11, $12::jsonb, $13, $14, $15, $16, $17
 		)
 		RETURNING created_at
 	`
@@ -628,7 +628,7 @@ func (r *OrderRepository) InsertOrderItem(ctx context.Context, tx *sqlx.Tx, item
 		ctx, query,
 		item.ID, item.StoreID, item.OrderID, item.ProductID, item.ConfigHash, item.SnapshotName,
 		item.UnitBasePrice, item.ModifierTotalPrice, item.SnapshotPrice, item.Quantity,
-		item.SubtotalAmount, selectedOptsJSON, item.Notes, item.VariantID, item.SnapshotVariant, item.SnapshotSKU,
+		item.SubtotalAmount, selectedOptsJSON, item.Notes, item.VariantID, item.SnapshotVariant, item.SnapshotSKU, item.RoundID,
 	).Scan(&item.CreatedAt)
 }
 

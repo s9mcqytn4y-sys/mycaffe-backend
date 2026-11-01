@@ -49,6 +49,9 @@ func (s *OrderService) CreateOrder(ctx context.Context, trustedStoreID uuid.UUID
 	if len(input.Items) == 0 {
 		return nil, fmt.Errorf("%w: order must contain at least one item", ErrInvalidOrderInput)
 	}
+	if err := ValidateItemInputs(input.Items); err != nil {
+		return nil, err
+	}
 
 	res, err := s.executeCreateOrderTx(ctx, trustedStoreID, input)
 	if err != nil {
@@ -192,23 +195,10 @@ func (s *OrderService) executeCreateOrderTx(ctx context.Context, trustedStoreID 
 			}
 		}
 
-		businessDateISO, compactDate := resolveStoreBusinessDates(s.nowFunc(), store.Timezone)
-		seq, err := s.repo.AllocateDailySequence(ctx, tx, trustedStoreID, businessDateISO)
+		orderNumber, queueNumber, err := AllocateOrderIdentity(ctx, tx, s.repo, store, trustedStoreID, s.nowFunc())
 		if err != nil {
 			return err
 		}
-
-		orderPrefix := strings.TrimSpace(store.OrderPrefix)
-		if orderPrefix == "" {
-			orderPrefix = "ORD"
-		}
-		queuePrefix := strings.TrimSpace(store.QueuePrefix)
-		if queuePrefix == "" {
-			queuePrefix = "A"
-		}
-
-		orderNumber := fmt.Sprintf("%s-%s-%04d", orderPrefix, compactDate, seq)
-		queueNumber := fmt.Sprintf("%s%03d", queuePrefix, seq)
 
 		initialOrderStatus := domain.OrderStatusPendingPayment
 		var expiresAt *time.Time
@@ -264,48 +254,9 @@ func (s *OrderService) executeCreateOrderTx(ctx context.Context, trustedStoreID 
 			return fmt.Errorf("failed to insert order: %w", err)
 		}
 
-		persistedItems := make([]domain.OrderItem, 0, len(priced.Items))
-		for _, pricedItem := range priced.Items {
-			itemRow := pricedItem.Item
-			itemRow.ID = uuid.New()
-			itemRow.StoreID = trustedStoreID
-			itemRow.OrderID = order.ID
-
-			if err := s.repo.InsertOrderItem(ctx, tx, &itemRow); err != nil {
-				return fmt.Errorf("failed to insert order item: %w", err)
-			}
-
-			persistedOpts := make([]domain.OrderItemOption, 0, len(pricedItem.Options))
-
-			for _, pricedOpt := range pricedItem.Options {
-				parentOptRow := pricedOpt.Option
-				parentOptRow.ID = uuid.New()
-				parentOptRow.StoreID = trustedStoreID
-				parentOptRow.OrderItemID = itemRow.ID
-				parentOptRow.ParentOrderItemOptionID = nil
-
-				if err := s.repo.InsertOrderItemOption(ctx, tx, &parentOptRow); err != nil {
-					return fmt.Errorf("failed to insert parent order item option: %w", err)
-				}
-				persistedOpts = append(persistedOpts, parentOptRow)
-
-				for _, childOpt := range pricedOpt.Children {
-					childOptRow := childOpt
-					childOptRow.ID = uuid.New()
-					childOptRow.StoreID = trustedStoreID
-					childOptRow.OrderItemID = itemRow.ID
-					parentRowIDCopy := parentOptRow.ID
-					childOptRow.ParentOrderItemOptionID = &parentRowIDCopy
-
-					if err := s.repo.InsertOrderItemOption(ctx, tx, &childOptRow); err != nil {
-						return fmt.Errorf("failed to insert child order item option: %w", err)
-					}
-					persistedOpts = append(persistedOpts, childOptRow)
-				}
-			}
-
-			itemRow.Options = persistedOpts
-			persistedItems = append(persistedItems, itemRow)
+		persistedItems, err := InsertPricedItems(ctx, tx, s.repo, trustedStoreID, order.ID, nil, priced.Items)
+		if err != nil {
+			return err
 		}
 		order.Items = persistedItems
 

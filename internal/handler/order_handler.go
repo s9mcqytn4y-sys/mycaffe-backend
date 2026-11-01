@@ -1,27 +1,22 @@
 package handler
 
 import (
-	"fmt"
 	"log"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/config"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/domain"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/auth"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/midtrans"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/realtime"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/service"
 )
 
 type OrderHandler struct {
 	cfg            *config.Config
 	midtransClient *midtrans.Client
 	realtimeHub    *realtime.Hub
-	orderService   *service.OrderService
 }
 
 func NewOrderHandler(cfg *config.Config, client *midtrans.Client, hub *realtime.Hub) *OrderHandler {
@@ -30,97 +25,6 @@ func NewOrderHandler(cfg *config.Config, client *midtrans.Client, hub *realtime.
 		midtransClient: client,
 		realtimeHub:    hub,
 	}
-}
-
-func (h *OrderHandler) SetOrderService(svc *service.OrderService) {
-	h.orderService = svc
-}
-
-type CreateOrderItemRequest struct {
-	ProductID uuid.UUID `json:"product_id" binding:"required"`
-	Quantity  int       `json:"quantity" binding:"required,min=1"`
-	Notes     string    `json:"notes"`
-}
-
-type CreateOrderRequest struct {
-	StoreID       uuid.UUID                `json:"store_id" binding:"required"`
-	TableNumber   string                   `json:"table_number"`
-	CustomerName  string                   `json:"customer_name" binding:"required"`
-	CustomerPhone string                   `json:"customer_phone"`
-	OrderType     domain.OrderType         `json:"order_type" binding:"required"`
-	PaymentMethod domain.PaymentMethod     `json:"payment_method" binding:"required"`
-	Bank          string                   `json:"bank,omitempty"`
-	Items         []CreateOrderItemRequest `json:"items" binding:"required,min=1"`
-}
-
-// CreateOrder handles customer order creation and initiates payment.
-// @Summary Create Customer Order & Initiate Core API Payment
-// @Description Enforces server-side recalculation and fails-closed in staging and production until trusted tenant identity middleware (staff JWT or signed table QR token) is wired on public HTTP routes.
-// @Tags Orders
-// @Accept json
-// @Produce json
-// @Param order body CreateOrderRequest true "Order Request"
-// @Success 201 {object} map[string]interface{}
-// @Failure 400 {object} map[string]interface{}
-// @Failure 503 {object} map[string]interface{}
-// @Router /api/v1/orders [post]
-func (h *OrderHandler) CreateOrder(c *gin.Context) {
-	// P0 Containment: Staging and production fail closed until trusted tenant identity middleware
-	// (staff JWT or signed table QR token) is bound to the public HTTP endpoint.
-	if h.cfg.AppEnv == "production" || h.cfg.AppEnv == "staging" {
-		reqID := uuid.NewString()
-		log.Printf("[ORDER CONTAINMENT] request_id=%s env=%s ip=%s blocked public order creation: trusted tenant identity binding not yet active", reqID, h.cfg.AppEnv, c.ClientIP())
-		c.JSON(http.StatusServiceUnavailable, gin.H{
-			"error":      "Layanan pemesanan sedang dalam pemeliharaan. Silakan hubungi kasir untuk bantuan pemesanan.",
-			"code":       "SERVICE_TEMPORARILY_UNAVAILABLE",
-			"request_id": reqID,
-		})
-		return
-	}
-
-	var req CreateOrderRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	orderID := uuid.New()
-	orderNumber := fmt.Sprintf("ORD-%s-%s", time.Now().Format("20060102"), orderID.String()[:8])
-	queueNumber := fmt.Sprintf("A%s", orderID.String()[:3])
-
-	// In development simulation without authenticated tenant context:
-	var subtotal int64 = 25000
-	var taxRate int64 = 10
-	var taxAmount int64 = (subtotal * taxRate) / 100
-	var totalAmount int64 = subtotal + taxAmount
-
-	order := &domain.Order{
-		ID:                  orderID,
-		StoreID:             req.StoreID,
-		OrderNumber:         orderNumber,
-		QueueNumber:         queueNumber,
-		TableNumber:         req.TableNumber,
-		CustomerName:        req.CustomerName,
-		CustomerPhone:       req.CustomerPhone,
-		OrderType:           req.OrderType,
-		BillingMode:         domain.BillingModePayFirst,
-		Status:              domain.OrderStatusPendingPayment,
-		PaymentStatus:       domain.OrderPaymentStatusUnpaid,
-		SubtotalAmount:      subtotal,
-		DiscountAmount:      0,
-		TaxAmount:           taxAmount,
-		ServiceChargeAmount: 0,
-		TotalAmount:         totalAmount,
-		CreatedAt:           time.Now(),
-		UpdatedAt:           time.Now(),
-	}
-
-	c.JSON(http.StatusCreated, gin.H{
-		"message":      "Order draft created (Simulation Mode - use authenticated OrderService for transactional persistence)",
-		"order":        order,
-		"status":       "draft",
-		"payment_mode": "mock_preview",
-	})
 }
 
 // HandleWebSocket upgrades connection for KDS / TV Queue display with cryptographic token authorization.

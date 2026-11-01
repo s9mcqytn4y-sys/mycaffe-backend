@@ -314,6 +314,23 @@ BEGIN
         RAISE EXCEPTION 'SECURITY FAILURE: resolve_table_qr is executable by PUBLIC!';
     END IF;
 
+    -- 10F-3. Guest sessions and the public tracker (migration 000017).
+    IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.guest_sessions'::regclass) THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: guest_sessions does not have row-level security enabled!';
+    END IF;
+    IF has_table_privilege('mycaffe_app', 'public.guest_sessions', 'DELETE') THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may DELETE guest_sessions!';
+    END IF;
+    IF NOT has_function_privilege('mycaffe_app', 'public.track_order_by_token(bytea)', 'EXECUTE') THEN
+        RAISE EXCEPTION 'track_order_by_token is not executable by mycaffe_app';
+    END IF;
+    IF EXISTS (
+        SELECT 1 FROM pg_proc p, aclexplode(p.proacl) a
+        WHERE p.proname = 'track_order_by_token' AND a.grantee = 0 AND a.privilege_type = 'EXECUTE'
+    ) THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: track_order_by_token is executable by PUBLIC!';
+    END IF;
+
     -- 10G. Account tokens and email outbox (migration 000006): RLS on, no DELETE, discovery
     --      function not executable by PUBLIC.
     IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.account_tokens'::regclass)

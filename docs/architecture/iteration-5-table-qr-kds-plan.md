@@ -188,8 +188,8 @@ ALTER TABLE orders ADD CONSTRAINT fk_orders_guest_session
 |---------------|-------|
 | `POST /api/v1/public/qr/:token/session` | refuses when the store/table is inactive or `qr_ordering_paused` (409 `QR_ORDERING_PAUSED`) or the store is closed (§7); opens the table session if none is open (`opened_via='qr'`), creates the guest session, sets the cookie |
 | `GET /api/v1/public/guest/session` | table, store, expiry, ordering_open |
-| `POST /api/v1/public/guest/orders/quote` | same engine as `POST /pos/orders/quote` |
-| `POST /api/v1/public/guest/orders` | `idempotency_key`, items, `expected_total` (409 `QUOTE_CHANGED`), optional `customer_name` and email + separate unchecked marketing consent (E4). Creates a `pending_payment` order with stock reserved and `expires_at`, bound to the table, table session and guest session |
+| ~~`POST /api/v1/public/guest/orders/quote`~~ | not added: guests use the existing `POST /api/v1/public/stores/{slug}/orders/quote` (same engine), the store slug comes from `GET /api/v1/public/qr/:token` |
+| `POST /api/v1/public/guest/orders` | `idempotency_key`, items, `expected_total` (409 `QUOTE_CHANGED`), optional `customer_name` (email + E4 consent deferred to the receipts iteration). Creates a `pending_payment` order with stock reserved and `expires_at`, bound to the table, table session and guest session |
 | `POST /api/v1/public/guest/orders/:id/payments` | dynamic QRIS only (Midtrans), idempotent; only orders of this guest session |
 | `GET /api/v1/public/guest/orders` | orders of this guest session only (never the table's other devices) |
 | `GET /api/v1/public/orders/track/:tracking_token` | public tracker (§3.3) |
@@ -304,7 +304,7 @@ table is needed.
 | Phase | Scope | Migration | Depends on |
 |-------|-------|-----------|------------|
 | 5a | tables CRUD, QR rotate, table sessions, derived status, lazy auto-close, QR resolve | 000016 | **implemented** (PR for branch `feature/iteration-5a-tables`) |
-| 5b | guest session cookie, guest quote/order/QRIS payment, own-orders list, tracker, delete `POST /api/v1/orders` | 000017 | 5a, `track_order_by_token` approved |
+| 5b | guest session cookie, guest quote/order/QRIS payment, own-orders list, tracker, delete `POST /api/v1/orders` | 000017 | **implemented** (branch `feature/iteration-5b-guest-orders`); `settled_at` upkeep and "session ends when all orders are completed" wait for KDS serve events (5d) |
 | 5c | `store_seq`, relay worker, replay, WS tickets, channels, `/ws` opened | 000018 | `list_stores_with_pending_outbox` approved |
 | 5d | KDS tickets, transitions, derived order/round status, void waste vs restock | 000019 | 5c |
 

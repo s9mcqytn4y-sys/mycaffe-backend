@@ -113,6 +113,10 @@ type Order struct {
 	CreatedByUserID *uuid.UUID         `json:"created_by_user_id,omitempty" db:"created_by_user_id"`
 	ShiftID         *uuid.UUID         `json:"shift_id,omitempty" db:"shift_id"`
 	TableID         *uuid.UUID         `json:"table_id,omitempty" db:"table_id"`
+	TableSessionID  *uuid.UUID         `json:"table_session_id,omitempty" db:"table_session_id"`
+	GuestSessionID  *uuid.UUID         `json:"guest_session_id,omitempty" db:"guest_session_id"`
+	// TrackingTokenHash is the SHA-256 of the public tracker token (decision QR6); never serialized.
+	TrackingTokenHash []byte `json:"-" db:"tracking_token_hash"`
 
 	SubtotalAmount      int64 `json:"subtotal_amount" db:"subtotal_amount"`
 	DiscountAmount      int64 `json:"discount_amount" db:"discount_amount"`

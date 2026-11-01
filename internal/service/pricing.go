@@ -62,6 +62,8 @@ type OrderCreationInput struct {
 	ExpectedQuoteFingerprint string             `json:"expected_quote_fingerprint,omitempty"`
 	Notes                    string             `json:"notes,omitempty"`
 	Items                    []OrderItemInput   `json:"items"`
+	// Guest binds a QR order to its table, table session and guest session (iteration 5b); never from JSON.
+	Guest *GuestOrderBinding `json:"-"`
 }
 
 type CatalogSnapshot struct {

@@ -51,7 +51,7 @@ Midtrans webhook. Contained (503 in staging/production): guest `POST /api/v1/ord
 | 4d | **Void / refund (P4, P5, O1, C2)** + split rework (R4) | void before paid, refund after paid (cash from open drawer), owner PIN above threshold, `commitPaidOrderTx` settles one split | shift |
 | 4 | **ADR-004 catalog cleanup** (done before iteration 5, owner 2026-11-01) | variant-only pricing, `single ⇒ max_select = 1` CHECK, unit stock stays on products | — |
 | 5 | **5a Tables, table sessions, QR resolve** (plan: [iteration-5-table-qr-kds-plan.md](iteration-5-table-qr-kds-plan.md)) | tables CRUD, opaque rotatable QR (QR1), derived occupancy (T1), emergency pause honoured | implemented (migration 000016) |
-| 5 | **02.01-E Guest session + table session (T1, T2)** + optional email/consent (E4) | per-device guest token, pay-first QR orders, table occupancy states, auto-close | 02.01-D |
+| 5 | **5b Guest session + QR pay-first orders + tracker** (T2, Q6, QR5, QR6) | cookie guest session, own-orders isolation, unpaid caps, QRIS, 24 h tracker | implemented (migration 000017); email/consent (E4) deferred |
 | 5 | **Outbox relay → WebSocket + WS ticket** (risk R2) | events delivered with replay by sequence, KDS/POS/TV channels, `/ws` opened | — |
 | 6 | **KDS tickets** (station routing, preparing/ready/served, late-payment flag) | barista/kitchen permissions enforced, SLA timestamps | relay |
 | 6 | **Receipts (R1)**: ESC/POS payload + digital receipt link + email | snapshot-only amounts, 90-day token | void/refund |

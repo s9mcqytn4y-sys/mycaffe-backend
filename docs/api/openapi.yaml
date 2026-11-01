@@ -838,6 +838,336 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /api/v1/pos/drawers:
+    get:
+      tags: [POS Shifts]
+      operationId: listCashDrawers
+      summary: List all cash drawers in the store (staff)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: List of cash drawers
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  drawers:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/CashDrawer"
+    post:
+      tags: [POS Shifts]
+      operationId: createCashDrawer
+      summary: Create a new physical cash drawer (owner only)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  example: "Kasir Bar"
+                is_active:
+                  type: boolean
+                  default: true
+      responses:
+        "201":
+          description: Cash drawer created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CashDrawer"
+
+  /api/v1/pos/drawers/{drawer_id}:
+    patch:
+      tags: [POS Shifts]
+      operationId: updateCashDrawer
+      summary: Update cash drawer details or status (owner only)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: drawer_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                is_active:
+                  type: boolean
+      responses:
+        "200":
+          description: Cash drawer updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CashDrawer"
+
+  /api/v1/pos/shifts:
+    post:
+      tags: [POS Shifts]
+      operationId: openShift
+      summary: Open a new cashier shift session (cashier/owner)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [opening_float]
+              properties:
+                drawer_id:
+                  type: string
+                  format: uuid
+                opening_float:
+                  type: integer
+                  format: int64
+                  example: 200000
+                notes:
+                  type: string
+      responses:
+        "201":
+          description: Shift opened successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  shift:
+                    $ref: "#/components/schemas/Shift"
+                  open_drawer:
+                    type: boolean
+                    example: true
+        "409":
+          description: Drawer already has an open shift
+
+  /api/v1/pos/shifts/current:
+    get:
+      tags: [POS Shifts]
+      operationId: getCurrentShift
+      summary: Get the current active open shift for a drawer (staff)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: drawer_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Active shift session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Shift"
+        "409":
+          description: No active open shift
+
+  /api/v1/pos/shifts/movements:
+    post:
+      tags: [POS Shifts]
+      operationId: createCashMovement
+      summary: Record a cash movement (paid_out, cash_in, tip, staff_meal, no_sale)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [movement_type, reason]
+              properties:
+                shift_id:
+                  type: string
+                  format: uuid
+                drawer_id:
+                  type: string
+                  format: uuid
+                movement_type:
+                  type: string
+                  enum: [paid_out, cash_in, tip, staff_meal, no_sale]
+                amount:
+                  type: integer
+                  format: int64
+                reason:
+                  type: string
+                  example: "Beli es batu kristal"
+      responses:
+        "201":
+          description: Cash movement recorded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  movement:
+                    $ref: "#/components/schemas/CashMovement"
+                  open_drawer:
+                    type: boolean
+                    example: true
+        "422":
+          description: Insufficient cash or validation failure
+
+  /api/v1/pos/shifts/{shift_id}/close:
+    post:
+      tags: [POS Shifts]
+      operationId: closeShift
+      summary: Close shift with blind cash count and optional owner PIN override (cashier/owner)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: shift_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [counted_cash]
+              properties:
+                counted_cash:
+                  type: integer
+                  format: int64
+                  example: 350000
+                variance_reason:
+                  type: string
+                owner_pin:
+                  type: string
+                  example: "482913"
+                notes:
+                  type: string
+      responses:
+        "200":
+          description: Shift closed, immutable Z Report returned
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  report:
+                    $ref: "#/components/schemas/ZReport"
+                  open_drawer:
+                    type: boolean
+                    example: true
+        "422":
+          description: Variance exceeds tolerance and owner PIN / reason missing
+
+  /api/v1/pos/shifts/{shift_id}/force-close:
+    post:
+      tags: [POS Shifts]
+      operationId: forceCloseShift
+      summary: Force close an abandoned shift with required reason (owner only)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: shift_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                counted_cash:
+                  type: integer
+                  format: int64
+                notes:
+                  type: string
+      responses:
+        "200":
+          description: Shift force closed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ZReport"
+
+  /api/v1/pos/shifts/{shift_id}/x-report:
+    get:
+      tags: [POS Shifts]
+      operationId: getXReport
+      summary: Get interim X Report (expected_cash redacted for cashier during open shift)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: shift_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Interim X Report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/XReport"
+
+  /api/v1/pos/shifts/{shift_id}/z-report:
+    get:
+      tags: [POS Shifts]
+      operationId: getZReport
+      summary: Get permanent Z Report for a closed shift
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: shift_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Final Z Report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ZReport"
+
   /api/v1/store/settings:
     get:
       tags: [Staff]
@@ -1457,6 +1787,199 @@ components:
             $ref: "#/components/schemas/ValidationErrorResponse"
 
   schemas:
+    CashDrawer:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        store_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    Shift:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        store_id:
+          type: string
+          format: uuid
+        drawer_id:
+          type: string
+          format: uuid
+        opened_by:
+          type: string
+          format: uuid
+        opening_float:
+          type: integer
+          format: int64
+        opened_at:
+          type: string
+          format: date-time
+        closed_by:
+          type: string
+          format: uuid
+        closed_at:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [open, closed, force_closed]
+        expected_cash:
+          type: integer
+          format: int64
+        counted_cash:
+          type: integer
+          format: int64
+        variance:
+          type: integer
+          format: int64
+        variance_reason:
+          type: string
+        owner_override_by:
+          type: string
+          format: uuid
+        notes:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CashMovement:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        store_id:
+          type: string
+          format: uuid
+        shift_id:
+          type: string
+          format: uuid
+        movement_type:
+          type: string
+          enum: [opening_float, sale, refund, paid_out, cash_in, no_sale, tip, staff_meal]
+        amount:
+          type: integer
+          format: int64
+        actor_id:
+          type: string
+          format: uuid
+        reason:
+          type: string
+        order_id:
+          type: string
+          format: uuid
+        payment_id:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+
+    XReport:
+      type: object
+      properties:
+        shift_id:
+          type: string
+          format: uuid
+        store_id:
+          type: string
+          format: uuid
+        drawer_id:
+          type: string
+          format: uuid
+        drawer_name:
+          type: string
+        opened_by:
+          type: string
+          format: uuid
+        opened_by_name:
+          type: string
+        opened_at:
+          type: string
+          format: date-time
+        generated_at:
+          type: string
+          format: date-time
+        status:
+          type: string
+        summary:
+          type: object
+        expected_cash:
+          type: integer
+          format: int64
+        expected_redacted:
+          type: boolean
+
+    ZReport:
+      type: object
+      properties:
+        shift_id:
+          type: string
+          format: uuid
+        store_id:
+          type: string
+          format: uuid
+        drawer_id:
+          type: string
+          format: uuid
+        drawer_name:
+          type: string
+        opened_by:
+          type: string
+          format: uuid
+        opened_by_name:
+          type: string
+        opened_at:
+          type: string
+          format: date-time
+        closed_by:
+          type: string
+          format: uuid
+        closed_by_name:
+          type: string
+        closed_at:
+          type: string
+          format: date-time
+        status:
+          type: string
+        summary:
+          type: object
+        expected_cash:
+          type: integer
+          format: int64
+        counted_cash:
+          type: integer
+          format: int64
+        variance:
+          type: integer
+          format: int64
+        variance_reason:
+          type: string
+        owner_override_by:
+          type: string
+          format: uuid
+        override_by_name:
+          type: string
+        notes:
+          type: string
     ValidationErrorResponse:
       type: object
       required: [code, error, fields]

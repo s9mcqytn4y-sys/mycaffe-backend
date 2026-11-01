@@ -27,6 +27,9 @@ const (
 	SplitBillManage        Permission = "split_bill.manage"
 	ShiftOpen              Permission = "shift.open"
 	ShiftClose             Permission = "shift.close"
+	ShiftForceClose        Permission = "shift.force_close"
+	CashMovementCreate     Permission = "cash.movement.create"
+	CashDrawerManage       Permission = "cash.drawer.manage"
 	OrderVoid              Permission = "order.void"
 	PaymentRefund          Permission = "payment.refund"
 	OrderDiscountApply     Permission = "order.discount.apply"
@@ -53,14 +56,15 @@ type Options struct {
 var all = []Permission{
 	StoreSettingsManage, StaffManage, CatalogManage, CatalogCostRead, ReportFinanceRead,
 	OrderPOSCreate, OrderReadStore, PaymentTenderDirect, PaymentInitiateGateway, TabManage, SplitBillManage,
-	ShiftOpen, ShiftClose, OrderVoid, PaymentRefund, OrderDiscountApply, StockOverride,
+	ShiftOpen, ShiftClose, ShiftForceClose, CashMovementCreate, CashDrawerManage,
+	OrderVoid, PaymentRefund, OrderDiscountApply, StockOverride,
 	KDSBaristaRead, KDSBaristaUpdate, KDSKitchenRead, KDSKitchenUpdate,
 	AvailabilityToggleBeverage, AvailabilityToggleFood, TableManage, TableQRManage,
 }
 
 var cashierBase = []Permission{
 	OrderPOSCreate, OrderReadStore, PaymentTenderDirect, PaymentInitiateGateway, TabManage, SplitBillManage,
-	ShiftOpen, ShiftClose,
+	ShiftOpen, ShiftClose, CashMovementCreate,
 	// Void/refund/discount/stock override are granted, but the service applies the owner-PIN
 	// thresholds of O1/O4 (stock override always needs the owner PIN).
 	OrderVoid, PaymentRefund, OrderDiscountApply, StockOverride,

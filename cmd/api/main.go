@@ -121,6 +121,7 @@ func main() {
 	var authHandler *handler.AuthHandler
 	var posHandler *handler.POSHandler
 	var catalogHandler *handler.CatalogHandler
+	var shiftHandler *handler.ShiftHandler
 	if db != nil {
 		authService := service.NewAuthService(db, postgres.NewAuthRepository(), cfg.JWTSecret, service.AuthPolicy{
 			AccessTokenTTL:     cfg.StaffAccessTokenTTL,
@@ -142,6 +143,7 @@ func main() {
 		midtransHandler.SetPaymentService(paymentService)
 		posHandler = handler.NewPOSHandler(orderService, paymentService, service.NewSettingsService(db))
 		catalogHandler = handler.NewCatalogHandler(service.NewCatalogService(db))
+		shiftHandler = handler.NewShiftHandler(service.NewShiftService(db))
 
 		go paymentService.StartReconciliationWorker(workerCtx, 30*time.Second, 2*time.Minute, 50)
 	}
@@ -178,6 +180,19 @@ func main() {
 			pos.POST("/orders/quote", authHandler.RequirePermission(rbac.OrderPOSCreate), posHandler.QuoteOrder)
 			pos.POST("/orders/:id/payments", authHandler.RequireStaff(), posHandler.InitiatePayment)
 			pos.GET("/catalog", authHandler.RequireStaff(), catalogHandler.StaffCatalog)
+
+			// Cash Drawers & Shifts (Iteration 4b)
+			pos.POST("/drawers", authHandler.RequirePermission(rbac.CashDrawerManage), shiftHandler.CreateDrawer)
+			pos.GET("/drawers", authHandler.RequireStaff(), shiftHandler.ListDrawers)
+			pos.PATCH("/drawers/:id", authHandler.RequirePermission(rbac.CashDrawerManage), shiftHandler.UpdateDrawer)
+
+			pos.POST("/shifts", authHandler.RequirePermission(rbac.ShiftOpen), shiftHandler.OpenShift)
+			pos.GET("/shifts/current", authHandler.RequireStaff(), shiftHandler.GetCurrentShift)
+			pos.POST("/shifts/movements", authHandler.RequirePermission(rbac.CashMovementCreate), shiftHandler.CreateCashMovement)
+			pos.POST("/shifts/:id/close", authHandler.RequirePermission(rbac.ShiftClose), shiftHandler.CloseShift)
+			pos.POST("/shifts/:id/force-close", authHandler.RequirePermission(rbac.ShiftForceClose), shiftHandler.ForceCloseShift)
+			pos.GET("/shifts/:id/x-report", authHandler.RequireStaff(), shiftHandler.GetXReport)
+			pos.GET("/shifts/:id/z-report", authHandler.RequireStaff(), shiftHandler.GetZReport)
 
 			// Guest menu & quote (public, cacheable catalog; dynamic quote for guest carts).
 			v1.GET("/public/stores/:slug/catalog", catalogHandler.PublicCatalog)

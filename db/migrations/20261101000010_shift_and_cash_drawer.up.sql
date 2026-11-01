@@ -119,3 +119,4 @@ ALTER TABLE audit_logs ADD CONSTRAINT chk_audit_logs_action CHECK (
         'CASH_MOVEMENT', 'DRAWER_CREATE', 'DRAWER_UPDATE'
     )
 );
+

@@ -117,3 +117,4 @@ type ZReport struct {
 	OverrideByName  *string          `json:"override_by_name,omitempty"`
 	Notes           *string          `json:"notes,omitempty"`
 }
+

@@ -28,3 +28,4 @@ ALTER TABLE audit_logs ADD CONSTRAINT chk_audit_logs_action CHECK (
         'STAFF_DEACTIVATED', 'STAFF_SESSION_REVOKED'
     )
 );
+

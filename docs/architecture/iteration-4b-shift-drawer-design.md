@@ -67,7 +67,7 @@ CREATE TABLE cash_movements (
     store_id UUID NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
     shift_id UUID NOT NULL REFERENCES shifts(id) ON DELETE RESTRICT,
     movement_type VARCHAR(20) NOT NULL CHECK (
-        movement_type IN ('opening_float', 'sale', 'refund', 'paid_out', 'cash_in', 'no_sale')
+        movement_type IN ('opening_float', 'sale', 'refund', 'paid_out', 'cash_in', 'no_sale', 'tip', 'staff_meal')
     ),
     amount BIGINT NOT NULL CHECK (amount >= 0), -- 0 untuk no_sale
     actor_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
@@ -138,7 +138,7 @@ stateDiagram-v2
 
 Uang kas yang diharapkan di dalam laci kas dihitung secara deterministik dan hanya mencakup transaksi fisik tunai:
 
-$$\text{Expected Cash} = \text{Opening Float} + \sum \text{Cash Sales} - \sum \text{Cash Refunds} - \sum \text{Paid Outs} + \sum \text{Cash Ins}$$
+$$\text{Expected Cash} = \text{Opening Float} + \sum \text{Cash Sales} + \sum \text{Tips} - \sum \text{Cash Refunds} - \sum \text{Paid Outs} - \sum \text{Staff Meals} + \sum \text{Cash Ins}$$
 
 > [!IMPORTANT]
 > **Pemisahan Non-Tunai:** Pembayaran QRIS (Midtrans/Statis) dan EDC tidak pernah dihitung ke dalam `expected_cash` laci kas fisik. Seluruh transaksi non-tunai diagregasikan secara terpisah pada X/Z Report untuk rekonsiliasi terminal perbankan dan settlement gateway.
@@ -166,10 +166,12 @@ Semua mutasi kas dicatat dalam tabel `cash_movements` di dalam transaksi databas
 | Mutasi | Sifat | Pengaruh Kas | Kondisi & Validasi |
 |--------|-------|--------------|-------------------|
 | `opening_float` | Otomatis | $+ \text{amount}$ | Dibuat saat shift dibuka. Modal awal kas di laci kas. |
-| `sale` | Otomatis | $+ \text{amount}$ | Dibuat saat POS menerima cash tender (`POST /pos/orders/{id}/payments` method `cash`). Memeriksa shift aktif; jika tidak ada, gagal `409 NO_OPEN_SHIFT`. Mengembalikan `open_drawer: true`. |
+| `sale` | Otomatis | $+ \text{amount}$ | Dibuat saat POS menerima cash tender (`POST /pos/orders/{id}/payments` method `cash`). Memeriksa shift aktif; jika tidak ada, gagal `409 NO_OPEN_SHIFT` (kecuali mode `single_auto` auto-open). Mengembalikan `open_drawer: true`. |
 | `refund` | Otomatis | $- \text{amount}$ | Dibuat saat cash refund diproses (Iteration 4d). Memeriksa shift aktif & $\text{amount} \le \text{expected\_cash}$. Mengembalikan `open_drawer: true`. |
 | `paid_out` | Manual | $- \text{amount}$ | Kasir/owner mengambil kas untuk pengeluaran operasional (e.g. es batu, gas, bumbu darurat). Wajib ada `reason` tertulis. $\text{amount} \le \text{expected\_cash}$. Mengembalikan `open_drawer: true`. |
 | `cash_in` | Manual | $+ \text{amount}$ | Tambahan modal kas masuk di pertengahan shift. Wajib ada `reason`. Mengembalikan `open_drawer: true`. |
+| `tip` | Manual | $+ \text{amount}$ | Uang tip tunai yang dimasukkan pelanggan ke laci kasir. Wajib ada `reason`. Mengembalikan `open_drawer: true`. |
+| `staff_meal` | Manual | $- \text{amount}$ | Biaya makan/konsumsi staf kafe yang diambil dari kas laci. Wajib ada `reason`. $\text{amount} \le \text{expected\_cash}$. Mengembalikan `open_drawer: true`. |
 | `no_sale` | Manual | $0$ | Buka laci kas tanpa mutasi finansial (e.g. tukar receh). Wajib ada `reason`. Mengembalikan `open_drawer: true`. Dicatat dan diaudit khusus pada X/Z report untuk mencegah fraud. |
 
 ### Aturan Jumlah Transaksi Kas

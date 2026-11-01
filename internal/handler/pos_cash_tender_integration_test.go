@@ -2,6 +2,7 @@ package handler_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/config"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/domain"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/handler"
@@ -219,14 +221,16 @@ func TestPOSCashTenderIntegration(t *testing.T) {
 			t.Fatalf("expected order.ShiftID=%s, got %v", shift.ID, res.Order.ShiftID)
 		}
 
-		// Verify cash movement in database
+		// Verify cash movement in database via tenant transaction
 		var movement domain.CashMovement
 		query := `
 			SELECT id, store_id, shift_id, movement_type, amount, actor_id, order_id, payment_id
 			FROM cash_movements
 			WHERE store_id = $1 AND shift_id = $2 AND movement_type = 'sale' AND payment_id = $3
 		`
-		err := db.Get(&movement, query, shift.StoreID, shift.ID, res.Payment.ID)
+		err := database.WithTenantTx(context.Background(), db, shift.StoreID, func(tx *sqlx.Tx) error {
+			return tx.GetContext(context.Background(), &movement, query, shift.StoreID, shift.ID, res.Payment.ID)
+		})
 		if err != nil {
 			t.Fatalf("failed to query cash_movements for payment: %v", err)
 		}
@@ -286,7 +290,9 @@ func TestPOSCashTenderIntegration(t *testing.T) {
 
 		// Ensure NO cash_movements row exists for static QRIS
 		var staticMvCount int
-		err := db.Get(&staticMvCount, `SELECT COUNT(*) FROM cash_movements WHERE payment_id = $1`, staticRes.Payment.ID)
+		err := database.WithTenantTx(context.Background(), db, shift.StoreID, func(tx *sqlx.Tx) error {
+			return tx.GetContext(context.Background(), &staticMvCount, `SELECT COUNT(*) FROM cash_movements WHERE payment_id = $1`, staticRes.Payment.ID)
+		})
 		if err != nil {
 			t.Fatalf("query cash_movements failed: %v", err)
 		}
@@ -306,7 +312,11 @@ func TestPOSCashTenderIntegration(t *testing.T) {
 
 		expectedTotal := int64(150000 + 27720)
 		if xReport.ExpectedCash == nil || *xReport.ExpectedCash != expectedTotal {
-			t.Errorf("expected expected_cash=%d, got %v", expectedTotal, xReport.ExpectedCash)
+			var gotVal any = "nil"
+			if xReport.ExpectedCash != nil {
+				gotVal = *xReport.ExpectedCash
+			}
+			t.Errorf("expected expected_cash=%d, got %v", expectedTotal, gotVal)
 		}
 		if xReport.Summary.CashSales != 27720 {
 			t.Errorf("expected cash_sales=27720 in summary, got %+v", xReport.Summary)

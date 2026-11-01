@@ -72,7 +72,7 @@ jobs:
   docker-build:
     name: Docker, Compose, Nginx TLS Bootstrap & Backup/Restore Script Verification
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 15
     steps:
       - name: Checkout code
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -108,7 +108,7 @@ jobs:
   database-migration-test:
     name: PostgreSQL 18 Triple-Role, Migrator CLI, RLS, Direct mycaffe_app Login & Seed
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 15
     services:
       postgres:
         image: postgres:18-alpine
@@ -230,8 +230,12 @@ jobs:
           TEST_APP_DATABASE_URL: postgres://mycaffe_app:mycaffe_app_password@localhost:5432/mycaffe_test?sslmode=disable
           TEST_MIGRATOR_DATABASE_URL: postgres://mycaffe_migrator:mycaffe_migrator_password@localhost:5432/mycaffe_test?sslmode=disable
         run: |
-          go test -v -race -run TestDirectAppRoleLoginAndTenantRLS ./internal/pkg/database/...
-          go test -v -race -run 'TestRBACRoutesIntegration|TestCatalogIntegration|TestIteration4aIntegration|TestShiftLifecycleIntegration|TestPOSCashTenderIntegration|TestTabLifecycleIntegration' ./internal/handler/...
-          go test -v -race -run TestOrderServiceIntegration_EndToEnd ./internal/service/...
-          go test -v -race -run TestPaymentServiceIntegration_EndToEnd ./internal/service/...
-          go test -v -race -run 'TestAuthServiceIntegration_EndToEnd|TestStaffAdminIntegration|TestStaffLifecycleIntegration' ./internal/service/...
+          # Same command as ./scripts/dev.ps1 test-int: every package, so a new integration test cannot be left out.
+          set -o pipefail
+          go test -v -race -count=1 -timeout 10m ./... | tee go-test.log
+          # With a database available, a skipped DB test means its env wiring broke: fail instead of passing silently.
+          if grep -E -- '--- SKIP: Test[A-Za-z0-9_]*(Integration|RLS)' go-test.log; then
+            echo "Integration tests were skipped although TEST_APP_DATABASE_URL is set." >&2
+            exit 1
+          fi
+          echo "Integration tests run: $(grep -cE -- '^--- PASS: Test[A-Za-z0-9_]*(Integration|RLS)' go-test.log)"

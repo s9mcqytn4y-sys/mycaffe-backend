@@ -149,4 +149,3 @@ Plan: [iteration-5-table-qr-kds-plan.md](iteration-5-table-qr-kds-plan.md).
 | ------- | ----------- | ----------------------- |
 | Production domain name & DNS | Named Cloudflare Tunnel / TLS, cookie domain (O2) | Quick Tunnel URL for demo only |
 | Midtrans production credentials & VPS provisioning | Production cutover | Sandbox only |
-| WebSocket ticket lifecycle (TTL, single use) | Phase 03 realtime | `/ws` stays `503` in staging/production |

@@ -15,6 +15,7 @@ import (
 type Config struct {
 	AppEnv               string
 	Port                 string
+	MetricsAddr          string
 	FrontendURL          string
 	AllowedOrigins       []string
 	TrustedProxies       []string
@@ -147,6 +148,7 @@ func LoadConfig() (*Config, error) {
 	cfg := &Config{
 		AppEnv:                  appEnv,
 		Port:                    getEnv("PORT", "8080"),
+		MetricsAddr:             getEnv("METRICS_ADDR", "127.0.0.1:9091"),
 		FrontendURL:             frontendURL,
 		AllowedOrigins:          allowedOrigins,
 		TrustedProxies:          splitCSV(getEnv("TRUSTED_PROXIES", "")),

@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/jmoiron/sqlx"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/database"
+	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/metrics"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/rbac"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/realtime"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/repository/postgres"
@@ -307,8 +308,12 @@ func (s *RealtimeService) RunRelay(ctx context.Context, hub Publisher) {
 	ticker := time.NewTicker(relayPollInterval)
 	defer ticker.Stop()
 	for {
-		if err := s.RelayOnce(ctx, hub); err != nil && ctx.Err() == nil {
-			log.Printf("[RELAY] %v", err)
+		if err := s.RelayOnce(ctx, hub); err != nil {
+			if ctx.Err() == nil {
+				log.Printf("[RELAY] %v", err)
+			}
+		} else {
+			metrics.WorkerSucceeded("outbox_relay")
 		}
 		select {
 		case <-ctx.Done():

@@ -1,12 +1,12 @@
 # Iteration 5 Plan: Tables, Table Sessions, QR Pay-First Ordering, Outbox Relay & KDS
 
-- **Status**: Plan (documentation only). Each phase below is one PR with an additive migration, HTTP
+- **Status**: Plan approved 2026-11-01 (decisions QR1–QR7); not implemented yet. Each phase below is one PR with an additive migration, HTTP
   integration tests on PostgreSQL 18, OpenAPI and docs. Nothing in this document is implemented yet.
 - **Rewritten** 2026-11-01 after the owner audit of v0.4.2: the previous draft contradicted decisions
   T1, T2, Q5 and Q6, ignored the emergency pause, and contained SQL that would fail or silently do the
   wrong thing (see §9).
 - **Binding decisions**: T1, T2, Q5 (superseded by QR1 once approved), Q6, Q7, C3, N1, R1, E4 in the
-  [decision register](decision-register.md); ADR-004 (variant pricing, product stock); hotfix rules
+  [decision register](decision-register.md) and QR1–QR7; ADR-004 (variant pricing, product stock); hotfix rules
   HF1–HF6.
 
 ## 1. Principles
@@ -322,7 +322,7 @@ table is needed.
   on guest routes, email validated and stored only with E4 consent rules.
 - Logs never contain guest cookies, tracking tokens or full QR tokens (first 6 chars only).
 
-## 8. Approvals needed before 5a starts
+## 8. Approvals (granted 2026-11-01 as QR1–QR7)
 
 | Item | Why it needs approval |
 |------|----------------------|

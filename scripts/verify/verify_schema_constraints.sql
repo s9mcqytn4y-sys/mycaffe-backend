@@ -295,6 +295,70 @@ BEGIN
         RAISE EXCEPTION 'SECURITY FAILURE: resolve_store_for_login is executable by PUBLIC!';
     END IF;
 
+    -- 10F-2. Tables and table sessions (migration 000016): RLS on, no DELETE, QR resolver private.
+    IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.tables'::regclass)
+       OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.table_sessions'::regclass) THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: tables/table_sessions do not have row-level security enabled!';
+    END IF;
+    IF has_table_privilege('mycaffe_app', 'public.tables', 'DELETE')
+       OR has_table_privilege('mycaffe_app', 'public.table_sessions', 'DELETE') THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may DELETE tables or table_sessions (archive/close instead)!';
+    END IF;
+    IF NOT has_function_privilege('mycaffe_app', 'public.resolve_table_qr(character varying)', 'EXECUTE') THEN
+        RAISE EXCEPTION 'resolve_table_qr is not executable by mycaffe_app';
+    END IF;
+    IF EXISTS (
+        SELECT 1 FROM pg_proc p, aclexplode(p.proacl) a
+        WHERE p.proname = 'resolve_table_qr' AND a.grantee = 0 AND a.privilege_type = 'EXECUTE'
+    ) THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: resolve_table_qr is executable by PUBLIC!';
+    END IF;
+
+    -- 10F-3. Guest sessions and the public tracker (migration 000017).
+    IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.guest_sessions'::regclass) THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: guest_sessions does not have row-level security enabled!';
+    END IF;
+    IF has_table_privilege('mycaffe_app', 'public.guest_sessions', 'DELETE') THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may DELETE guest_sessions!';
+    END IF;
+    IF NOT has_function_privilege('mycaffe_app', 'public.track_order_by_token(bytea)', 'EXECUTE') THEN
+        RAISE EXCEPTION 'track_order_by_token is not executable by mycaffe_app';
+    END IF;
+    IF EXISTS (
+        SELECT 1 FROM pg_proc p, aclexplode(p.proacl) a
+        WHERE p.proname = 'track_order_by_token' AND a.grantee = 0 AND a.privilege_type = 'EXECUTE'
+    ) THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: track_order_by_token is executable by PUBLIC!';
+    END IF;
+
+    -- 10F-4. Outbox relay and WebSocket tickets (migration 000018).
+    IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.ws_tickets'::regclass)
+       OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.store_event_sequences'::regclass) THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: ws_tickets/store_event_sequences do not have row-level security enabled!';
+    END IF;
+    IF has_table_privilege('mycaffe_app', 'public.ws_tickets', 'DELETE') THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may DELETE ws_tickets!';
+    END IF;
+    IF NOT has_function_privilege('mycaffe_app', 'public.list_stores_with_pending_outbox(integer)', 'EXECUTE') THEN
+        RAISE EXCEPTION 'list_stores_with_pending_outbox is not executable by mycaffe_app';
+    END IF;
+    IF EXISTS (
+        SELECT 1 FROM pg_proc p, aclexplode(p.proacl) a
+        WHERE p.proname = 'list_stores_with_pending_outbox' AND a.grantee = 0 AND a.privilege_type = 'EXECUTE'
+    ) THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: list_stores_with_pending_outbox is executable by PUBLIC!';
+    END IF;
+    -- 10F-5. KDS tickets (migration 000019).
+    IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.kds_tickets'::regclass) THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: kds_tickets does not have row-level security enabled!';
+    END IF;
+    IF has_table_privilege('mycaffe_app', 'public.kds_tickets', 'DELETE') THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may DELETE kds_tickets!';
+    END IF;
+    IF EXISTS (SELECT 1 FROM outbox_events WHERE store_seq IS NULL) THEN
+        RAISE EXCEPTION 'outbox_events rows without store_seq';
+    END IF;
+
     -- 10G. Account tokens and email outbox (migration 000006): RLS on, no DELETE, discovery
     --      function not executable by PUBLIC.
     IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.account_tokens'::regclass)

@@ -16,9 +16,9 @@ Earlier decisions live in [decisions-before-code.md](decisions-before-code.md) a
 | O2 | Production domains | POS frontend and API share **one registrable domain** (e.g. `pos.<domain>` + `api.<domain>`) | Refresh token in `__Secure-mc_staff_rt` HttpOnly cookie, `SameSite=Strict` (ADR-003). Domain name itself still to be purchased/assigned. | 02.01-B refresh transport |
 | O3 | Staff sessions | Max **3** active sessions per staff (oldest revoked), **idle timeout 2 h**, absolute **12 h** | `STAFF_MAX_SESSIONS_PER_USER=3`, new `STAFF_SESSION_IDLE_TIMEOUT=2h` checked on refresh | 02.01-B |
 | O4 | Discount & stock override | Cashier may discount up to a per-store max percent (default **10%**) with mandatory reason. Above that, and **every** stock override, require owner PIN. | New store setting `cashier_max_discount_bps` (default 1000). | POS discounts, inventory |
-| Q5 | Printed table QR lifetime | **No time expiry.** Version-based revocation (`qr_version`) per table, signing-key rotation via key ID, plus a per-store **emergency pause** that disables all QR session creation instantly. | Dedicated QR signing key (never `JWT_SECRET_KEY`). | 02.01-D |
+| Q5 | Printed table QR lifetime (**superseded by QR1**) | **No time expiry.** Version-based revocation (`qr_version`) per table, signing-key rotation via key ID, plus a per-store **emergency pause** that disables all QR session creation instantly. | Dedicated QR signing key (never `JWT_SECRET_KEY`). | 02.01-D |
 | Q6 | Guest sessions | **One session per device**; a guest sees only orders bound to its own session. TTL **3 h**, or ends when all of its orders are paid and completed. | Distinct `aud`/`typ` from staff tokens. | 02.01-E |
-| Q7 | Late settlement after expiry | Keep current behavior: revive the order to the queue if stock allows, otherwise cancel + `payment.late_settlement_stock_exhausted`. **Add a "late payment" flag** visible on KDS and cashier screens. | Flag not implemented yet. | KDS (Phase 03) |
+| Q7 | Late settlement after expiry | Keep current behavior: revive the order to the queue if stock allows, otherwise cancel + `payment.late_settlement_stock_exhausted`. **Add a "late payment" flag** visible on KDS and cashier screens. | Implemented in 5d: `kds_tickets.late_payment`. | KDS (5d) |
 | Q8 | Demo / staging environment | Local Docker Compose stack + **Cloudflare Quick Tunnel**, auto-restart, `APP_ENV=staging`, Midtrans sandbox | [docs/setup/demo-staging-environment.md](../setup/demo-staging-environment.md) | — |
 
 ## Infrastructure & Phase 02.01-B (recorded 2026-10-31, second interview)
@@ -110,6 +110,26 @@ window, one shift per drawer, drawer kick + no-sale, local cart + quote, plan ap
 | HF5 | PINs re-entered for void, refund, stock override and shift variance use the login counter (5 wrong → locked 15 min, which also ends running sessions). Wrong owner PINs advance every unlocked owner's counter (the targeted owner is unknown) and are audited `OWNER_PIN_FAILED`; 5 of them by one actor in 15 min → 429 `PIN_ATTEMPTS_EXCEEDED`. Accepted risk: a cashier can lock the owner out for 15 min with 5 guesses (same as guessing the owner's login) |
 | HF6 | Stock override no longer turns tracking on silently: untracked product → 422 `PRODUCT_NOT_TRACKED` unless `enable_tracking: true`; unknown product → 404 |
 
+## Catalog cleanup (recorded 2026-11-01)
+
+| ID | Decision |
+|----|----------|
+| ADR4 | Catalog cleanup done now, before Iteration 5: pricing reads only the variant price, `products.base_price` kept as a deprecated mirror, unit stock stays on products (variants share it), DB CHECK single-choice groups `max_select = 1`. See [ADR-004](adr-004-catalog-schema-modernization.md) |
+
+## Iteration 5 (recorded 2026-11-01, seventh interview)
+
+Plan: [iteration-5-table-qr-kds-plan.md](iteration-5-table-qr-kds-plan.md).
+
+| ID | Decision | Approved option |
+|----|----------|-----------------|
+| QR1 | Printed table QR | Opaque 256-bit random token, rotatable by the owner (old sticker stops at once), unique lookup across stores. **Supersedes Q5.** Pause via `qr_ordering_paused` (store) and `tables.is_active` (table) |
+| QR2 | New SECURITY DEFINER functions | `resolve_table_qr` (5a), `track_order_by_token` (5b), `list_stores_with_pending_outbox` (5c); minimal output, owned by `mycaffe_migrator`, EXECUTE for `mycaffe_app` only; `AGENTS.md` allow-list updated in the PR that adds each |
+| QR3 | Table management | New permission `table.manage`, **owner only**; closing a table session stays with cashier/owner |
+| QR4 | Store closed for QR ordering | No shift open on any drawer → 409 `STORE_CLOSED` (no opening-hours setting) |
+| QR5 | Public anti-abuse | 2 unpaid orders per guest session, 6 per table session; 10 order attempts per guest session / 10 min; 10 new sessions per IP / 10 min; Nginx 30 req/min per IP (burst 20); ≤ 30 items per order, quantity ≤ 20 per line; constants, not store settings |
+| QR6 | Public order tracker | Link valid until 24 h after the order completes; the R1 digital receipt keeps its own 90-day token |
+| QR7 | Table session auto-close | Lazy: status derived at read time, session closed on the next read/scan after `settled_at + table_idle_close_minutes`; no worker |
+
 ## Awaiting owner approval
 
 | ID | Proposal | Until approved |
@@ -129,4 +149,3 @@ window, one shift per drawer, drawer kick + no-sale, local cart + quote, plan ap
 | ------- | ----------- | ----------------------- |
 | Production domain name & DNS | Named Cloudflare Tunnel / TLS, cookie domain (O2) | Quick Tunnel URL for demo only |
 | Midtrans production credentials & VPS provisioning | Production cutover | Sandbox only |
-| WebSocket ticket lifecycle (TTL, single use) | Phase 03 realtime | `/ws` stays `503` in staging/production |

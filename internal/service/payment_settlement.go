@@ -121,6 +121,9 @@ func (s *PaymentService) commitPaidOrderTx(ctx context.Context, tx *sqlx.Tx, ord
 			if err := s.orderRepo.UpdateOrderStatusAndStock(ctx, tx, order); err != nil {
 				return fmt.Errorf("failed to update paid tab order: %w", err)
 			}
+			if err := refreshTableSettledTx(ctx, tx, order.StoreID, order.TableSessionID, s.nowFunc().UTC()); err != nil {
+				return err
+			}
 			return s.insertPaymentOutboxTx(ctx, tx, order, "order.paid", map[string]any{
 				"paid_amount":  order.PaidAmount,
 				"status":       order.Status,
@@ -139,12 +142,23 @@ func (s *PaymentService) commitPaidOrderTx(ctx context.Context, tx *sqlx.Tx, ord
 		})
 	}
 
+	// A cancelled order revived by a late settlement is flagged on its KDS tickets (decision Q7).
+	latePayment := order.Status == domain.OrderStatusCancelled
 	if order.Status == domain.OrderStatusPendingPayment || order.Status == domain.OrderStatusCancelled {
 		order.Status = domain.OrderStatusQueued
 	}
 	order.PaymentStatus = domain.OrderPaymentStatusPaid
 	order.PaidAmount = order.TotalAmount
 	order.ExpiresAt = nil
+	if order.Status == domain.OrderStatusQueued {
+		tickets, err := createKDSTicketsTx(ctx, tx, s.orderRepo, order, nil, latePayment, s.nowFunc().UTC())
+		if err != nil {
+			return err
+		}
+		if tickets == 0 {
+			order.Status = domain.OrderStatusReady // nothing to prepare (ready-to-serve items only)
+		}
+	}
 	if err := s.orderRepo.UpdateOrderStatusAndStock(ctx, tx, order); err != nil {
 		return fmt.Errorf("failed to update paid order: %w", err)
 	}

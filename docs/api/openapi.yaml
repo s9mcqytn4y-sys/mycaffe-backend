@@ -29,6 +29,12 @@ tags:
     description: Owner staff management - invitation, PIN reset link, temporary PIN (owner decision E2)
   - name: KDS
     description: Kitchen Display System and Barista preparation queue transitions
+  - name: Tables
+    description: Tables, derived table occupancy, table sessions and public QR resolution (iteration 5a)
+  - name: Guest
+    description: QR guest sessions, pay-first guest orders and the public order tracker (iteration 5b)
+  - name: Realtime
+    description: Outbox relay over WebSocket with single-use tickets, per-store sequence and replay (iteration 5c)
 
 paths:
   /health:
@@ -653,55 +659,6 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
-  /api/v1/orders:
-    post:
-      tags: [Orders]
-      operationId: createOrder
-      summary: Create an order with server-side pricing, modifier validation, and atomic stock reservation
-      description: |
-        In `staging` and `production`, the public HTTP route fails closed (`503 Service Unavailable`) until signed table QR token or staff JWT tenant binding middleware is attached in Phase 02.
-        The underlying `OrderService.CreateOrder` is **Implemented & Tested** against PostgreSQL 18.
-      security:
-        - BearerStaffJWT: []
-        - TableQRToken: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/CreateOrderRequest"
-      responses:
-        "201":
-          description: Order created (or idempotent replay returned)
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/CreateOrderResponse"
-        "400":
-          description: Validation error (invalid modifiers, sub-addons, or missing idempotency_key)
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "403":
-          description: Unauthorized billing_mode (e.g. open_tab requested without active cashier/owner token)
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "409":
-          description: Idempotency key conflict (reused with different payload) or insufficient stock
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "503":
-          description: Endpoint fail-closed in staging/production while tenant binding is being completed
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-
   /api/v1/pos/orders:
     post:
       tags: [Orders]
@@ -839,6 +796,549 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /api/v1/pos/tables:
+    get:
+      tags: [Tables]
+      operationId: listTables
+      summary: Table board with derived occupancy (any staff; QR token only with table.qr.manage)
+      description: Lazily closes settled sessions past `table_idle_close_minutes` before reading (decision QR7).
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: Non-archived tables of the caller's store
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [tables]
+                properties:
+                  tables:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/TableBoardEntry"
+    post:
+      tags: [Tables]
+      operationId: createTable
+      summary: Create a table with a fresh opaque QR token (owner, table.manage)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TableInput"
+      responses:
+        "201":
+          description: Created table (includes qr_token for printing)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Table"
+        "400":
+          $ref: "#/components/responses/InvalidJSON"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+  /api/v1/pos/tables/{id}:
+    patch:
+      tags: [Tables]
+      operationId: updateTable
+      summary: Update number, label, section, capacity or is_active (owner, table.manage)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - $ref: "#/components/parameters/ResourceID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TableInput"
+      responses:
+        "200":
+          description: Updated table
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Table"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+  /api/v1/pos/tables/{id}/archive:
+    post:
+      tags: [Tables]
+      operationId: archiveTable
+      summary: Retire a table; its QR stops resolving (owner, table.manage)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - $ref: "#/components/parameters/ResourceID"
+      responses:
+        "204":
+          description: Archived
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: TABLE_SESSION_OPEN
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/pos/tables/{id}/rotate-qr:
+    post:
+      tags: [Tables]
+      operationId: rotateTableQR
+      summary: Replace the QR token; the old sticker stops at once (owner, table.qr.manage, audited)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - $ref: "#/components/parameters/ResourceID"
+      responses:
+        "200":
+          description: Table with the new qr_token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Table"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/v1/pos/tables/{id}/sessions:
+    post:
+      tags: [Tables]
+      operationId: openTableSession
+      summary: Seat guests from the POS; returns the already open session if any (tab.manage)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - $ref: "#/components/parameters/ResourceID"
+      responses:
+        "200":
+          description: Open session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TableSession"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: TABLE_INACTIVE
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/pos/table-sessions/{id}/close:
+    post:
+      tags: [Tables]
+      operationId: closeTableSession
+      summary: "Kosongkan meja: close a session once no order is unpaid (tab.manage, audited)"
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - $ref: "#/components/parameters/ResourceID"
+      responses:
+        "200":
+          description: Closed session (idempotent)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TableSession"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: TABLE_HAS_UNPAID_ORDERS
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/public/qr/{token}:
+    get:
+      security: []
+      tags: [Tables]
+      operationId: resolveTableQR
+      summary: Resolve a scanned table QR (public, rate-limited, Cache-Control no-store)
+      description: >-
+        Unknown tokens and archived tables or stores answer 404 alike. A paused store, a store without
+        an open shift (QR4) or an inactive table still resolve with ordering_open false and a reason.
+      x-implementation-status: implemented
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 22
+            maxLength: 64
+      responses:
+        "200":
+          description: Table and ordering availability
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublicTable"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          description: Rate limited by Nginx (30 req/min per IP, decision QR5)
+  /api/v1/public/qr/{token}/session:
+    post:
+      security: []
+      tags: [Guest]
+      operationId: startGuestSession
+      summary: Start a guest session from a scanned table QR (sets the __Secure-mc_guest cookie)
+      description: >-
+        Requires `X-CSRF-Protection: 1`. Joins the table's open session or opens one (opened_via qr).
+        Limited to 10 sessions per IP per 10 minutes (QR5). The cookie is HttpOnly, Secure,
+        SameSite=Strict, Path=/api/v1/public and lives 3 hours (Q6).
+      x-implementation-status: implemented
+      parameters:
+        - $ref: "#/components/parameters/CsrfProtectionHeader"
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "201":
+          description: Session started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GuestSession"
+        "403":
+          description: CSRF_HEADER_REQUIRED
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: QR_ORDERING_PAUSED, STORE_CLOSED (no open shift, QR4) or TABLE_INACTIVE
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: TOO_MANY_REQUESTS
+  /api/v1/public/guest/session:
+    get:
+      security: []
+      tags: [Guest]
+      operationId: getGuestSession
+      summary: Current guest session (cookie)
+      x-implementation-status: implemented
+      responses:
+        "200":
+          description: Session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GuestSession"
+        "401":
+          description: GUEST_SESSION_EXPIRED (missing, forged, expired, or table session closed)
+  /api/v1/public/guest/orders:
+    get:
+      security: []
+      tags: [Guest]
+      operationId: listGuestOrders
+      summary: Orders of this guest session only (Q6)
+      x-implementation-status: implemented
+      responses:
+        "200":
+          description: Up to 50 most recent orders
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [orders]
+                properties:
+                  orders:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/GuestOrderSummary"
+        "401":
+          description: GUEST_SESSION_EXPIRED
+    post:
+      security: []
+      tags: [Guest]
+      operationId: createGuestOrder
+      summary: Place a pay-first dine-in QR order for the guest's table (T2)
+      description: >-
+        Requires `X-CSRF-Protection: 1`. Re-priced server-side; `expected_total` mismatch answers 409
+        QUOTE_CHANGED. Idempotency keys are namespaced per guest session. At most 2 unpaid orders per
+        guest session and 6 per table session; 10 attempts per guest session per 10 minutes; at most
+        30 items, quantity 1..20 per line (QR5). Price the cart first with
+        `POST /api/v1/public/stores/{store_slug}/orders/quote`.
+      x-implementation-status: implemented
+      parameters:
+        - $ref: "#/components/parameters/CsrfProtectionHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GuestOrderRequest"
+      responses:
+        "201":
+          description: Order created with a one-time tracking_token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GuestOrderResponse"
+        "200":
+          description: Idempotent replay (no tracking_token)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GuestOrderResponse"
+        "401":
+          description: GUEST_SESSION_EXPIRED
+        "409":
+          description: QUOTE_CHANGED, UNPAID_ORDER_LIMIT, QR_ORDERING_PAUSED, STORE_CLOSED, TABLE_INACTIVE, UNAVAILABLE
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+        "429":
+          description: TOO_MANY_REQUESTS
+  /api/v1/public/guest/orders/{id}/payments:
+    post:
+      security: []
+      tags: [Guest]
+      operationId: payGuestOrder
+      summary: Pay one of this guest's orders with dynamic QRIS (Midtrans)
+      description: "Requires `X-CSRF-Protection: 1`. Another guest's order answers 404."
+      x-implementation-status: implemented
+      parameters:
+        - $ref: "#/components/parameters/CsrfProtectionHeader"
+        - $ref: "#/components/parameters/ResourceID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [idempotency_key]
+              properties:
+                idempotency_key:
+                  type: string
+                  maxLength: 50
+      responses:
+        "200":
+          description: Pending QRIS charge (or idempotent replay)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InitiatePaymentResponse"
+        "401":
+          description: GUEST_SESSION_EXPIRED
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/v1/public/orders/track/{token}:
+    get:
+      security: []
+      tags: [Guest]
+      operationId: trackOrder
+      summary: Public order tracker (QR6)
+      description: Visible until 24 hours after the order reaches served, completed or cancelled.
+      x-implementation-status: implemented
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 43
+            maxLength: 43
+      responses:
+        "200":
+          description: Minimal order status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TrackedOrder"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/v1/pos/ws-ticket:
+    post:
+      tags: [Realtime]
+      operationId: issueStaffWSTicket
+      summary: Single-use 30 s WebSocket ticket for staff; channels follow RBAC
+      description: >-
+        pos needs order.read.store; kds.bar needs kds.ticket.read.barista; kds.kitchen needs
+        kds.ticket.read.kitchen (cashier gains bar with cashier_handles_bar). No channel → 403.
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "201":
+          description: Ticket
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WSTicket"
+        "401":
+          description: SESSION_INVALID
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/public/guest/ws-ticket:
+    post:
+      security: []
+      tags: [Realtime]
+      operationId: issueGuestWSTicket
+      summary: Single-use 30 s WebSocket ticket for the guest's own orders (guest cookie + CSRF)
+      x-implementation-status: implemented
+      parameters:
+        - $ref: "#/components/parameters/CsrfProtectionHeader"
+      responses:
+        "201":
+          description: Ticket for channel guest.<guest_session_id>
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WSTicket"
+        "401":
+          description: GUEST_SESSION_EXPIRED
+  /ws:
+    get:
+      security: []
+      tags: [Realtime]
+      operationId: connectWebSocket
+      summary: WebSocket upgrade with a ticket; replays missed events after last_seq
+      description: >-
+        The ticket is consumed on first use and re-checks its subject (staff session live and user active,
+        or guest session valid). Messages are JSON `{seq, type, store_id, payload}`, one per frame, delivered
+        at least once in per-store sequence order; clients keep the highest seq and deduplicate. With
+        last_seq, events after it are replayed (filtered to the ticket's channels); more than 500 missed
+        events yield a single `resync_required` and the client reloads over REST. Staff channels get the
+        full outbox payload; a guest gets only order_id, order_number, queue_number, status and
+        payment_status of its own orders. Origin must be in ALLOWED_ORIGINS.
+      x-implementation-status: implemented
+      parameters:
+        - name: ticket
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: last_seq
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+            minimum: 0
+      responses:
+        "101":
+          description: Switching protocols
+        "401":
+          description: WS_TICKET_REQUIRED or WS_TICKET_INVALID (unknown, used, expired, or subject no longer valid)
+  /api/v1/kds/tickets:
+    get:
+      tags: [KDS]
+      operationId: listKDSTickets
+      summary: Open tickets of one station (queued, preparing, ready), oldest first
+      description: >-
+        bar needs kds.ticket.read.barista (cashier with cashier_handles_bar), kitchen needs
+        kds.ticket.read.kitchen. One ticket per (order or tab round) x station; items with prep station
+        none never create a ticket. late_payment marks orders revived by a late settlement (Q7).
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: station
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [bar, kitchen]
+      responses:
+        "200":
+          description: Tickets with their lines
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [tickets]
+                properties:
+                  tickets:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/KDSTicket"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+  /api/v1/kds/tickets/{id}/transition:
+    post:
+      tags: [KDS]
+      operationId: transitionKDSTicket
+      summary: Move a ticket (queued→preparing→ready→served, ready→preparing recall)
+      description: >-
+        expected_status guards against two screens overwriting each other. The order (or tab round)
+        status is derived in the same transaction: all served → served; all ready or served → ready;
+        any work started → preparing; otherwise queued. When every order of a table session is paid and
+        done, the session's settled_at starts the auto-close countdown. Emits kds.ticket_updated.
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - $ref: "#/components/parameters/ResourceID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [to, expected_status]
+              properties:
+                to:
+                  type: string
+                  enum: [preparing, ready, served]
+                expected_status:
+                  type: string
+                  enum: [queued, preparing, ready]
+      responses:
+        "200":
+          description: Updated ticket
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KDSTicket"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: KDS_STALE_STATUS or KDS_TRANSITION_NOT_ALLOWED
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
   /api/v1/pos/drawers:
     get:
       tags: [POS Shifts]
@@ -2239,6 +2739,288 @@ components:
             $ref: "#/components/schemas/ValidationErrorResponse"
 
   schemas:
+    KDSTicket:
+      type: object
+      required: [id, order_id, order_number, queue_number, table_number, station, status, late_payment, created_at, lines]
+      properties:
+        id:
+          type: string
+          format: uuid
+        order_id:
+          type: string
+          format: uuid
+        round_id:
+          type: string
+          format: uuid
+        round_number:
+          type: integer
+        order_number:
+          type: string
+        queue_number:
+          type: string
+        table_number:
+          type: string
+        station:
+          type: string
+          enum: [bar, kitchen]
+        status:
+          type: string
+          enum: [queued, preparing, ready, served, cancelled]
+        late_payment:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        started_at:
+          type: string
+          format: date-time
+        ready_at:
+          type: string
+          format: date-time
+        served_at:
+          type: string
+          format: date-time
+        lines:
+          type: array
+          items:
+            type: object
+            required: [name, quantity, options]
+            properties:
+              name:
+                type: string
+              variant:
+                type: string
+              quantity:
+                type: integer
+              options:
+                type: string
+                description: JSON snapshot of the selected modifiers
+              notes:
+                type: string
+    WSTicket:
+      type: object
+      required: [ticket, expires_at, channels]
+      properties:
+        ticket:
+          type: string
+          description: "<store_id>.<ticket_id>.<secret>; pass as GET /ws?ticket= within 30 seconds"
+        expires_at:
+          type: string
+          format: date-time
+        channels:
+          type: array
+          items:
+            type: string
+            description: pos, kds.bar, kds.kitchen or guest.<guest_session_id>
+    GuestSession:
+      type: object
+      required: [table_number, expires_at]
+      properties:
+        table_number:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+    GuestOrderRequest:
+      type: object
+      required: [idempotency_key, items]
+      properties:
+        idempotency_key:
+          type: string
+          minLength: 1
+          maxLength: 50
+        customer_name:
+          type: string
+          maxLength: 60
+          description: Defaults to "Tamu Meja <table number>"
+        notes:
+          type: string
+          maxLength: 140
+        expected_total:
+          type: integer
+          format: int64
+        expected_quote_fingerprint:
+          type: string
+        items:
+          type: array
+          minItems: 1
+          maxItems: 30
+          items:
+            $ref: "#/components/schemas/OrderItemInput"
+    GuestOrderResponse:
+      type: object
+      required: [order, is_idempotent_replay]
+      properties:
+        order:
+          $ref: "#/components/schemas/Order"
+        tracking_token:
+          type: string
+          description: Shown once; only its SHA-256 is stored
+        is_idempotent_replay:
+          type: boolean
+    GuestOrderSummary:
+      type: object
+      required: [id, order_number, queue_number, status, payment_status, total_amount, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        order_number:
+          type: string
+        queue_number:
+          type: string
+        status:
+          type: string
+        payment_status:
+          type: string
+        total_amount:
+          type: integer
+          format: int64
+        expires_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+    TrackedOrder:
+      type: object
+      required: [store_name, order_number, queue_number, status, payment_status, updated_at]
+      properties:
+        store_name:
+          type: string
+        order_number:
+          type: string
+        queue_number:
+          type: string
+        status:
+          type: string
+        payment_status:
+          type: string
+        updated_at:
+          type: string
+          format: date-time
+    TableInput:
+      type: object
+      properties:
+        table_number:
+          type: string
+          minLength: 1
+          maxLength: 50
+          description: Required on create; unique per store among non-archived tables (case-insensitive)
+        label:
+          type: string
+          maxLength: 100
+        section:
+          type: string
+          maxLength: 50
+        capacity:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 4
+        is_active:
+          type: boolean
+    Table:
+      type: object
+      required: [id, table_number, label, section, capacity, qr_rotated_at, is_active, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        table_number:
+          type: string
+        label:
+          type: string
+        section:
+          type: string
+        capacity:
+          type: integer
+        qr_token:
+          type: string
+          description: Opaque 256-bit base64url token printed as QR (decision QR1); omitted for staff without table.qr.manage
+        qr_rotated_at:
+          type: string
+          format: date-time
+        is_active:
+          type: boolean
+        archived_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    TableSession:
+      type: object
+      required: [id, table_id, status, opened_at, opened_via]
+      properties:
+        id:
+          type: string
+          format: uuid
+        table_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [open, closed]
+        opened_at:
+          type: string
+          format: date-time
+        opened_via:
+          type: string
+          enum: [qr, staff]
+        opened_by_user_id:
+          type: string
+          format: uuid
+        settled_at:
+          type: string
+          format: date-time
+          description: All orders paid and served; starts the auto-close countdown
+        closed_at:
+          type: string
+          format: date-time
+        closed_by_user_id:
+          type: string
+          format: uuid
+        close_reason:
+          type: string
+          enum: [cashier, auto]
+    TableBoardEntry:
+      allOf:
+        - $ref: "#/components/schemas/Table"
+        - type: object
+          required: [status, unpaid_orders, unpaid_amount]
+          properties:
+            status:
+              type: string
+              enum: [available, occupied, settled]
+              description: Derived from the open table session (decision T1), never stored
+            session:
+              $ref: "#/components/schemas/TableSession"
+            unpaid_orders:
+              type: integer
+            unpaid_amount:
+              type: integer
+              format: int64
+    PublicTable:
+      type: object
+      required: [store_name, store_slug, table_number, label, ordering_open]
+      properties:
+        store_name:
+          type: string
+        store_slug:
+          type: string
+        table_number:
+          type: string
+        label:
+          type: string
+        ordering_open:
+          type: boolean
+        closed_reason:
+          type: string
+          enum: [paused, store_closed, table_inactive]
     CashDrawer:
       type: object
       properties:

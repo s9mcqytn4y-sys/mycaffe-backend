@@ -584,6 +584,18 @@ func (s *TabService) submitRoundInternal(
 	}
 	round.Items = persistedItems
 
+	// Each round reaches the stations as its own tickets (decision P2); a round of ready-to-serve items only is ready at once.
+	tickets, err := createKDSTicketsTx(ctx, tx, s.orderRep, order, &roundID, false, currentTime)
+	if err != nil {
+		return nil, err
+	}
+	if tickets == 0 {
+		if _, err := tx.ExecContext(ctx, `UPDATE order_rounds SET status = 'ready' WHERE store_id = $1 AND id = $2`, store.ID, roundID); err != nil {
+			return nil, err
+		}
+		round.Status = domain.OrderRoundStatusReady
+	}
+
 	// Recalculate order cumulative totals once from all cumulative order items (A4)
 	if err := RecalculateOrderTotals(ctx, tx, store, order); err != nil {
 		return nil, fmt.Errorf("failed to recalculate cumulative order totals: %w", err)

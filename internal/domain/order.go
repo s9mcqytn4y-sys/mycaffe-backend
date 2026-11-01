@@ -113,6 +113,10 @@ type Order struct {
 	CreatedByUserID *uuid.UUID         `json:"created_by_user_id,omitempty" db:"created_by_user_id"`
 	ShiftID         *uuid.UUID         `json:"shift_id,omitempty" db:"shift_id"`
 	TableID         *uuid.UUID         `json:"table_id,omitempty" db:"table_id"`
+	TableSessionID  *uuid.UUID         `json:"table_session_id,omitempty" db:"table_session_id"`
+	GuestSessionID  *uuid.UUID         `json:"guest_session_id,omitempty" db:"guest_session_id"`
+	// TrackingTokenHash is the SHA-256 of the public tracker token (decision QR6); never serialized.
+	TrackingTokenHash []byte `json:"-" db:"tracking_token_hash"`
 
 	SubtotalAmount      int64 `json:"subtotal_amount" db:"subtotal_amount"`
 	DiscountAmount      int64 `json:"discount_amount" db:"discount_amount"`
@@ -129,25 +133,26 @@ type Order struct {
 }
 
 type OrderItem struct {
-	ID                 uuid.UUID         `json:"id" db:"id"`
-	StoreID            uuid.UUID         `json:"store_id" db:"store_id"`
-	OrderID            uuid.UUID         `json:"order_id" db:"order_id"`
-	ProductID          *uuid.UUID        `json:"product_id,omitempty" db:"product_id"`
-	VariantID          *uuid.UUID        `json:"variant_id,omitempty" db:"variant_id"`
-	SnapshotVariant    string            `json:"snapshot_variant_name,omitempty" db:"snapshot_variant_name"`
-	SnapshotSKU        string            `json:"snapshot_sku,omitempty" db:"snapshot_sku"`
-	ConfigHash         string            `json:"config_hash" db:"config_hash"`
-	SnapshotName       string            `json:"snapshot_name" db:"snapshot_name"`
-	UnitBasePrice      int64             `json:"unit_base_price" db:"unit_base_price"`
-	ModifierTotalPrice int64             `json:"modifier_total_price" db:"modifier_total_price"`
-	SnapshotPrice      int64             `json:"snapshot_price" db:"snapshot_price"`
-	Quantity           int               `json:"quantity" db:"quantity"`
-	SubtotalAmount     int64             `json:"subtotal_amount" db:"subtotal_amount"`
-	RoundID            *uuid.UUID        `json:"round_id,omitempty" db:"round_id"`
-	SelectedOptions    string            `json:"selected_options" db:"selected_options"`
-	Options            []OrderItemOption `json:"options,omitempty"`
-	Notes              string            `json:"notes,omitempty" db:"notes"`
-	CreatedAt          time.Time         `json:"created_at" db:"created_at"`
+	ID                  uuid.UUID         `json:"id" db:"id"`
+	StoreID             uuid.UUID         `json:"store_id" db:"store_id"`
+	OrderID             uuid.UUID         `json:"order_id" db:"order_id"`
+	ProductID           *uuid.UUID        `json:"product_id,omitempty" db:"product_id"`
+	VariantID           *uuid.UUID        `json:"variant_id,omitempty" db:"variant_id"`
+	SnapshotVariant     string            `json:"snapshot_variant_name,omitempty" db:"snapshot_variant_name"`
+	SnapshotSKU         string            `json:"snapshot_sku,omitempty" db:"snapshot_sku"`
+	ConfigHash          string            `json:"config_hash" db:"config_hash"`
+	SnapshotName        string            `json:"snapshot_name" db:"snapshot_name"`
+	UnitBasePrice       int64             `json:"unit_base_price" db:"unit_base_price"`
+	ModifierTotalPrice  int64             `json:"modifier_total_price" db:"modifier_total_price"`
+	SnapshotPrice       int64             `json:"snapshot_price" db:"snapshot_price"`
+	Quantity            int               `json:"quantity" db:"quantity"`
+	SubtotalAmount      int64             `json:"subtotal_amount" db:"subtotal_amount"`
+	RoundID             *uuid.UUID        `json:"round_id,omitempty" db:"round_id"`
+	SnapshotPrepStation string            `json:"snapshot_prep_station,omitempty" db:"snapshot_prep_station"`
+	SelectedOptions     string            `json:"selected_options" db:"selected_options"`
+	Options             []OrderItemOption `json:"options,omitempty"`
+	Notes               string            `json:"notes,omitempty" db:"notes"`
+	CreatedAt           time.Time         `json:"created_at" db:"created_at"`
 }
 
 type OrderItemOption struct {

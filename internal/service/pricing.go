@@ -62,6 +62,8 @@ type OrderCreationInput struct {
 	ExpectedQuoteFingerprint string             `json:"expected_quote_fingerprint,omitempty"`
 	Notes                    string             `json:"notes,omitempty"`
 	Items                    []OrderItemInput   `json:"items"`
+	// Guest binds a QR order to its table, table session and guest session (iteration 5b); never from JSON.
+	Guest *GuestOrderBinding `json:"-"`
 }
 
 type CatalogSnapshot struct {
@@ -183,10 +185,6 @@ func ValidateAndPriceOrder(store domain.Store, input OrderCreationInput, catalog
 		if !product.IsAvailable {
 			return nil, fmt.Errorf("%w: product %q is unavailable", ErrProductUnavailable, product.Name)
 		}
-		if product.BasePrice < 0 {
-			return nil, fmt.Errorf("%w: product %q has negative base_price", ErrInvalidOrderInput, product.Name)
-		}
-
 		if product.TrackStock {
 			productDeducts[product.ID] += reqItem.Quantity
 			if productDeducts[product.ID] > product.StockQuantity {
@@ -257,10 +255,7 @@ func priceSingleOrderItem(
 	catalog CatalogSnapshot,
 	optionDeducts map[uuid.UUID]int,
 ) (*PricedOrderItem, error) {
-	unitBase := product.BasePrice
-	if variant != nil {
-		unitBase = variant.Price
-	}
+	unitBase := variant.Price // ADR-004: the variant is the only price source; products.base_price is a legacy mirror.
 	attachedLinks := catalog.ProductGroups[product.ID]
 	allowedGroups := make(map[uuid.UUID]domain.ProductModifierGroup, len(attachedLinks))
 	for _, link := range attachedLinks {
@@ -423,30 +418,29 @@ func priceSingleOrderItem(
 	prodIDCopy := product.ID
 	var variantID *uuid.UUID
 	var variantName, sku string
-	if variant != nil {
-		id := variant.ID
-		variantID, variantName, sku = &id, variant.Name, variant.SKU
-		// Distinct variants of the same product must not share a line configuration.
-		sum := sha256.Sum256([]byte(cfgHash + "|variant=" + id.String()))
-		cfgHash = hex.EncodeToString(sum[:])
-	}
+	id := variant.ID
+	variantID, variantName, sku = &id, variant.Name, variant.SKU
+	// Distinct variants of the same product must not share a line configuration.
+	sum := sha256.Sum256([]byte(cfgHash + "|variant=" + id.String()))
+	cfgHash = hex.EncodeToString(sum[:])
 
 	return &PricedOrderItem{
 		Item: domain.OrderItem{
-			StoreID:            storeID,
-			ProductID:          &prodIDCopy,
-			ConfigHash:         cfgHash,
-			SnapshotName:       product.Name,
-			VariantID:          variantID,
-			SnapshotVariant:    variantName,
-			SnapshotSKU:        sku,
-			UnitBasePrice:      unitBase,
-			ModifierTotalPrice: modifierUnitTotal,
-			SnapshotPrice:      unitSnapshotPrice,
-			Quantity:           reqItem.Quantity,
-			SubtotalAmount:     lineSubtotal,
-			SelectedOptions:    string(selectedOptionsBytes),
-			Notes:              strings.TrimSpace(reqItem.Notes),
+			StoreID:             storeID,
+			ProductID:           &prodIDCopy,
+			ConfigHash:          cfgHash,
+			SnapshotName:        product.Name,
+			VariantID:           variantID,
+			SnapshotVariant:     variantName,
+			SnapshotSKU:         sku,
+			SnapshotPrepStation: product.PrepStation,
+			UnitBasePrice:       unitBase,
+			ModifierTotalPrice:  modifierUnitTotal,
+			SnapshotPrice:       unitSnapshotPrice,
+			Quantity:            reqItem.Quantity,
+			SubtotalAmount:      lineSubtotal,
+			SelectedOptions:     string(selectedOptionsBytes),
+			Notes:               strings.TrimSpace(reqItem.Notes),
 		},
 		Options: pricedOptions,
 	}, nil
@@ -691,7 +685,7 @@ func safeMulInt64(a, b int64) (int64, error) {
 }
 
 // resolveVariant picks the requested variant, or the product's default variant when none is
-// requested. Products without variants (legacy rows) price from base_price and return nil.
+// requested. A product without an available default variant cannot be sold (ADR-004, fail closed).
 func resolveVariant(product domain.Product, requested *uuid.UUID, catalog CatalogSnapshot) (*domain.ProductVariant, error) {
 	if requested != nil && *requested != uuid.Nil {
 		v, ok := catalog.Variants[*requested]
@@ -711,5 +705,5 @@ func resolveVariant(product domain.Product, requested *uuid.UUID, catalog Catalo
 			return &v, nil
 		}
 	}
-	return nil, nil
+	return nil, fmt.Errorf("%w: product %q has no default variant", ErrProductUnavailable, product.Name)
 }

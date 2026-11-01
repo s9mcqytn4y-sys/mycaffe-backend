@@ -124,7 +124,7 @@ func (r *OrderRepository) GetOrderByIDForUpdate(ctx context.Context, tx *sqlx.Tx
 			id, store_id, idempotency_key, request_hash, order_number, queue_number,
 			table_number, customer_name, COALESCE(customer_phone, '') AS customer_phone,
 			order_type, billing_mode, status, payment_status, stock_status,
-			expires_at, created_by_user_id,
+			expires_at, created_by_user_id, table_id, table_session_id, guest_session_id,
 			subtotal_amount, discount_amount, tax_amount, service_charge_amount,
 			total_amount, paid_amount, refunded_amount, COALESCE(notes, '') AS notes,
 			created_at, updated_at
@@ -547,13 +547,15 @@ func (r *OrderRepository) InsertOrder(ctx context.Context, tx *sqlx.Tx, order *d
 			table_number, customer_name, customer_phone, order_type, billing_mode,
 			status, payment_status, stock_status, expires_at, created_by_user_id,
 			subtotal_amount, discount_amount, tax_amount,
-			service_charge_amount, total_amount, paid_amount, refunded_amount, notes
+			service_charge_amount, total_amount, paid_amount, refunded_amount, notes,
+			table_id, table_session_id, guest_session_id, tracking_token_hash
 		) VALUES (
 			$1, $2, $3, $4, $5, $6,
 			$7, $8, $9, $10, $11,
 			$12, $13, $14, $15, $16,
 			$17, $18, $19,
-			$20, $21, $22, $23, $24
+			$20, $21, $22, $23, $24,
+			$25, $26, $27, $28
 		)
 		RETURNING created_at, updated_at
 	`
@@ -564,6 +566,7 @@ func (r *OrderRepository) InsertOrder(ctx context.Context, tx *sqlx.Tx, order *d
 		order.Status, order.PaymentStatus, order.StockStatus, order.ExpiresAt, order.CreatedByUserID,
 		order.SubtotalAmount, order.DiscountAmount, order.TaxAmount,
 		order.ServiceChargeAmount, order.TotalAmount, order.PaidAmount, order.RefundedAmount, order.Notes,
+		order.TableID, order.TableSessionID, order.GuestSessionID, order.TrackingTokenHash,
 	).Scan(&order.CreatedAt, &order.UpdatedAt)
 }
 
@@ -616,11 +619,12 @@ func (r *OrderRepository) InsertOrderItem(ctx context.Context, tx *sqlx.Tx, item
 		INSERT INTO order_items (
 			id, store_id, order_id, product_id, config_hash, snapshot_name,
 			unit_base_price, modifier_total_price, snapshot_price, quantity,
-			subtotal_amount, selected_options, notes, variant_id, snapshot_variant_name, snapshot_sku, round_id
+			subtotal_amount, selected_options, notes, variant_id, snapshot_variant_name, snapshot_sku, round_id,
+			snapshot_prep_station
 		) VALUES (
 			$1, $2, $3, $4, $5, $6,
 			$7, $8, $9, $10,
-			$11, $12::jsonb, $13, $14, $15, $16, $17
+			$11, $12::jsonb, $13, $14, $15, $16, $17, $18
 		)
 		RETURNING created_at
 	`
@@ -628,7 +632,7 @@ func (r *OrderRepository) InsertOrderItem(ctx context.Context, tx *sqlx.Tx, item
 		ctx, query,
 		item.ID, item.StoreID, item.OrderID, item.ProductID, item.ConfigHash, item.SnapshotName,
 		item.UnitBasePrice, item.ModifierTotalPrice, item.SnapshotPrice, item.Quantity,
-		item.SubtotalAmount, selectedOptsJSON, item.Notes, item.VariantID, item.SnapshotVariant, item.SnapshotSKU, item.RoundID,
+		item.SubtotalAmount, selectedOptsJSON, item.Notes, item.VariantID, item.SnapshotVariant, item.SnapshotSKU, item.RoundID, prepStationValue(item.SnapshotPrepStation),
 	).Scan(&item.CreatedAt)
 }
 
@@ -708,4 +712,12 @@ func mapKeysSorted(set map[uuid.UUID]struct{}) []uuid.UUID {
 		return out[i].String() < out[j].String()
 	})
 	return out
+}
+
+// prepStationValue keeps lines priced without a catalog station (tests, legacy rows) valid for the CHECK.
+func prepStationValue(station string) string {
+	if station == "" {
+		return domain.PrepStationNone
+	}
+	return station
 }

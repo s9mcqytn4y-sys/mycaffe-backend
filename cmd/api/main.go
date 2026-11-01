@@ -117,12 +117,15 @@ func main() {
 	// Initialize Handlers
 	healthHandler := handler.NewHealthHandler("MyCaffe POS Backend", cfg.AppEnv, db)
 	midtransHandler := handler.NewMidtransHandler(midtransClient, hub)
-	orderHandler := handler.NewOrderHandler(cfg, midtransClient, hub)
 	var authHandler *handler.AuthHandler
 	var posHandler *handler.POSHandler
 	var catalogHandler *handler.CatalogHandler
 	var shiftHandler *handler.ShiftHandler
 	var tabHandler *handler.TabHandler
+	var tableHandler *handler.TableHandler
+	var guestHandler *handler.GuestHandler
+	var realtimeHandler *handler.RealtimeHandler
+	var kdsHandler *handler.KDSHandler
 	if db != nil {
 		authService := service.NewAuthService(db, postgres.NewAuthRepository(), cfg.JWTSecret, service.AuthPolicy{
 			AccessTokenTTL:     cfg.StaffAccessTokenTTL,
@@ -137,7 +140,6 @@ func main() {
 
 		orderRepo := postgres.NewOrderRepository()
 		orderService := service.NewOrderService(db, orderRepo)
-		orderHandler.SetOrderService(orderService)
 
 		paymentRepo := postgres.NewPaymentRepository()
 		paymentService := service.NewPaymentService(db, paymentRepo, orderRepo, midtransClient)
@@ -148,6 +150,13 @@ func main() {
 		catalogHandler = handler.NewCatalogHandler(service.NewCatalogService(db))
 		shiftHandler = handler.NewShiftHandler(service.NewShiftService(db))
 		tabHandler = handler.NewTabHandler(service.NewTabService(db, postgres.NewTabRepository(), orderRepo))
+		tableHandler = handler.NewTableHandler(service.NewTableService(db))
+		guestHandler = handler.NewGuestHandler(service.NewGuestService(db, orderService, paymentService))
+		kdsHandler = handler.NewKDSHandler(service.NewKDSService(db))
+		realtimeService := service.NewRealtimeService(db)
+		realtimeHandler = handler.NewRealtimeHandler(hub, realtimeService)
+		// Outbox relay (iteration 5c): LISTEN outbox + 2 s polling, at-least-once, ordered per store.
+		go realtimeService.RunRelay(workerCtx, hub)
 
 		go paymentService.StartReconciliationWorker(workerCtx, 30*time.Second, 2*time.Minute, 50)
 	}
@@ -156,7 +165,6 @@ func main() {
 	v1 := router.Group("/api/v1")
 	{
 		v1.GET("/health", healthHandler.Check)
-		v1.POST("/orders", orderHandler.CreateOrder)
 		v1.POST("/payments/midtrans/webhook", midtransHandler.HandleWebhook)
 		if authHandler != nil {
 			staffAuth := v1.Group("/auth/staff")
@@ -210,6 +218,32 @@ func main() {
 			pos.POST("/orders/:id/payments/:payment_id/refund", authHandler.RequirePermission(rbac.PaymentRefund), posHandler.RefundPayment)
 			pos.POST("/products/:id/stock-override", authHandler.RequirePermission(rbac.StockOverride), posHandler.OverrideStock)
 
+			// Tables & table sessions (iteration 5a): table board for staff, CRUD for the owner (QR3).
+			pos.GET("/tables", authHandler.RequireStaff(), tableHandler.ListTables)
+			pos.POST("/tables", authHandler.RequirePermission(rbac.TableManage), tableHandler.CreateTable)
+			pos.PATCH("/tables/:id", authHandler.RequirePermission(rbac.TableManage), tableHandler.UpdateTable)
+			pos.POST("/tables/:id/archive", authHandler.RequirePermission(rbac.TableManage), tableHandler.ArchiveTable)
+			pos.POST("/tables/:id/rotate-qr", authHandler.RequirePermission(rbac.TableQRManage), tableHandler.RotateQR)
+			pos.POST("/tables/:id/sessions", authHandler.RequirePermission(rbac.TabManage), tableHandler.OpenSession)
+			pos.POST("/table-sessions/:id/close", authHandler.RequirePermission(rbac.TabManage), tableHandler.CloseSession)
+			v1.GET("/public/qr/:token", tableHandler.ResolveQR)
+
+			// QR guest ordering (iteration 5b): pay-first per device (T2), own orders only (Q6).
+			v1.POST("/public/qr/:token/session", guestHandler.StartSession)
+			v1.GET("/public/orders/track/:token", guestHandler.Track)
+			guest := v1.Group("/public/guest", handler.LimitBody(64<<10), guestHandler.RequireGuest())
+			guest.GET("/session", guestHandler.Session)
+			guest.GET("/orders", guestHandler.ListOrders)
+			guest.POST("/orders", guestHandler.CreateOrder)
+			guest.POST("/orders/:id/payments", guestHandler.InitiatePayment)
+			guest.POST("/ws-ticket", realtimeHandler.IssueGuestTicket)
+			pos.POST("/ws-ticket", authHandler.RequireStaff(), realtimeHandler.IssueStaffTicket)
+
+			// KDS (iteration 5d): station permissions are checked per ticket in the service.
+			kds := v1.Group("/kds", authHandler.RequireStaff())
+			kds.GET("/tickets", kdsHandler.ListTickets)
+			kds.POST("/tickets/:id/transition", kdsHandler.Transition)
+
 			// Guest menu & quote (public, cacheable catalog; dynamic quote for guest carts).
 			v1.GET("/public/stores/:slug/catalog", catalogHandler.PublicCatalog)
 			v1.POST("/public/stores/:slug/orders/quote", posHandler.PublicQuoteOrder)
@@ -247,8 +281,11 @@ func main() {
 	router.GET("/health/live", healthHandler.Liveness)
 	router.GET("/health/ready", healthHandler.Check)
 
-	// WebSocket endpoint for KDS & TV Queue realtime updates (guarded by token/tenant validation)
-	router.GET("/ws", orderHandler.HandleWebSocket)
+	// WebSocket (iteration 5c): single-use 30 s ticket from POST /api/v1/pos/ws-ticket or
+	// /api/v1/public/guest/ws-ticket; replay with last_seq.
+	if realtimeHandler != nil {
+		router.GET("/ws", realtimeHandler.Connect)
+	}
 
 	// Root greeting
 	router.GET("/", func(c *gin.Context) {

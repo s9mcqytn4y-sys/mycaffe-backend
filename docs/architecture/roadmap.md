@@ -49,10 +49,11 @@ Midtrans webhook. Contained (503 in staging/production): guest `POST /api/v1/ord
 | 4b | **Shift & cash drawer (P6, P7, C1, H1)** | open with float, cash payments require an open shift, paid-out, blind close, variance > tolerance needs owner PIN, X/Z report, audit | store_settings ✅ |
 | 4c | **Open tab, rounds, split bill (P2, P3, T2)** | split by equal N or items; server recomputes shares; deterministic rupiah rounding remainder to split 1 (equal N) or last split (by item); locked after first payment | 4a, 4b |
 | 4d | **Void / refund (P4, P5, O1, C2)** + split rework (R4) | void before paid, refund after paid (cash from open drawer), owner PIN above threshold, `commitPaidOrderTx` settles one split | shift |
-| 5 | **02.01-D Tables & signed QR** | tables CRUD, HMAC QR with key id, rotate/revoke, emergency pause honoured | — |
-| 5 | **02.01-E Guest session + table session (T1, T2)** + optional email/consent (E4) | per-device guest token, pay-first QR orders, table occupancy states, auto-close | 02.01-D |
-| 5 | **Outbox relay → WebSocket + WS ticket** (risk R2) | events delivered with replay by sequence, KDS/POS/TV channels, `/ws` opened | — |
-| 6 | **KDS tickets** (station routing, preparing/ready/served, late-payment flag) | barista/kitchen permissions enforced, SLA timestamps | relay |
+| 4 | **ADR-004 catalog cleanup** (done before iteration 5, owner 2026-11-01) | variant-only pricing, `single ⇒ max_select = 1` CHECK, unit stock stays on products | — |
+| 5 | **5a Tables, table sessions, QR resolve** (plan: [iteration-5-table-qr-kds-plan.md](iteration-5-table-qr-kds-plan.md)) | tables CRUD, opaque rotatable QR (QR1), derived occupancy (T1), emergency pause honoured | implemented (migration 000016) |
+| 5 | **5b Guest session + QR pay-first orders + tracker** (T2, Q6, QR5, QR6) | cookie guest session, own-orders isolation, unpaid caps, QRIS, 24 h tracker | implemented (migration 000017); email/consent (E4) deferred |
+| 5 | **5c Outbox relay → WebSocket + WS ticket** (risk R2) | per-store `store_seq`, LISTEN/NOTIFY + polling relay, replay by `last_seq`, `resync_required`, POS/KDS/guest channels, single-use 30 s tickets | implemented (migration 000018); TV queue display channel later |
+| 5 | **5d KDS tickets** (station routing, preparing/ready/served, recall, late-payment flag Q7) | ticket per (order/round) × station, barista/kitchen permissions, SLA timestamps, derived order/round status, table `settled_at`, void restock vs waste | implemented (migration 000019) |
 | 6 | **Receipts (R1)**: ESC/POS payload + digital receipt link + email | snapshot-only amounts, 90-day token | void/refund |
 | 6 | **Inventory (C5)**: ingredients, recipes, movements, opname, low-stock email; HPP snapshot (C7) | gross profit only for recipe-backed items | variants ✅ |
 | 7 | Promotions & bundles (K7), loyalty stamps (K6), static QRIS fallback flow (K8) | single best promo per line, snapshot on order | catalog |

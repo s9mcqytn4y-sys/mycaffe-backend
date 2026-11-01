@@ -117,8 +117,10 @@ func TestVoidRefundHotfix4d1Integration(t *testing.T) {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO products (id, store_id, name, base_price, is_available, track_stock, stock_quantity)
-			VALUES ($1, $2, $3, 10000, true, true, 1000)`, productID, storeID, "Hotfix Roti "+productID.String()[:6]); err != nil {
+			WITH p AS (INSERT INTO products (id, store_id, name, base_price, is_available, track_stock, stock_quantity)
+			VALUES ($1, $2, $3, 10000, true, true, 1000)
+				RETURNING store_id, id, base_price)
+				INSERT INTO product_variants (store_id, product_id, name, price, is_default) SELECT store_id, id, 'Reguler', base_price, true FROM p`, productID, storeID, "Hotfix Roti "+productID.String()[:6]); err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `
@@ -490,8 +492,10 @@ func TestVoidRefundHotfix4d1Integration(t *testing.T) {
 	t.Run("StockOverrideTrackingRules", func(t *testing.T) {
 		untracked := uuid.New()
 		inStore(storeID, func(tx *sqlx.Tx) error {
-			_, err := tx.ExecContext(ctx, `INSERT INTO products (id, store_id, name, base_price, is_available, track_stock, stock_quantity)
-				VALUES ($1, $2, $3, 5000, true, false, 0)`, untracked, storeID, "Hotfix Untracked "+untracked.String()[:6])
+			_, err := tx.ExecContext(ctx, `WITH p AS (INSERT INTO products (id, store_id, name, base_price, is_available, track_stock, stock_quantity)
+				VALUES ($1, $2, $3, 5000, true, false, 0)
+				RETURNING store_id, id, base_price)
+				INSERT INTO product_variants (store_id, product_id, name, price, is_default) SELECT store_id, id, 'Reguler', base_price, true FROM p`, untracked, storeID, "Hotfix Untracked "+untracked.String()[:6])
 			return err
 		})
 		body := map[string]any{"new_quantity": 10, "reason": "Opname", "owner_pin": "482913"}
@@ -526,8 +530,10 @@ func TestVoidRefundHotfix4d1Integration(t *testing.T) {
 					return err
 				}
 			}
-			_, err := tx.ExecContext(ctx, `INSERT INTO products (id, store_id, name, base_price, is_available, track_stock, stock_quantity)
-				VALUES ($1, $2, $3, 10000, true, false, 0)`, expressProduct, expressID, "Hotfix Express "+suffix)
+			_, err := tx.ExecContext(ctx, `WITH p AS (INSERT INTO products (id, store_id, name, base_price, is_available, track_stock, stock_quantity)
+				VALUES ($1, $2, $3, 10000, true, false, 0)
+				RETURNING store_id, id, base_price)
+				INSERT INTO product_variants (store_id, product_id, name, price, is_default) SELECT store_id, id, 'Reguler', base_price, true FROM p`, expressProduct, expressID, "Hotfix Express "+suffix)
 			return err
 		})
 		token := login("express-counter", cashierEmail)

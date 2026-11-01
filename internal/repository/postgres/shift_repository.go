@@ -282,4 +282,3 @@ func (r *ShiftRepository) GetUserFullName(ctx context.Context, tx *sqlx.Tx, stor
 	}
 	return name, err
 }
-

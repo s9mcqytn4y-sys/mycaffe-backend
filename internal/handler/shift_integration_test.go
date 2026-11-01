@@ -330,4 +330,3 @@ func TestShiftLifecycleIntegration(t *testing.T) {
 		}
 	})
 }
-

@@ -130,6 +130,22 @@ Plan: [iteration-5-table-qr-kds-plan.md](iteration-5-table-qr-kds-plan.md).
 | QR6 | Public order tracker | Link valid until 24 h after the order completes; the R1 digital receipt keeps its own 90-day token |
 | QR7 | Table session auto-close | Lazy: status derived at read time, session closed on the next read/scan after `settled_at + table_idle_close_minutes`; no worker |
 
+## Offline cash & static QRIS (recorded 2026-11-02, eighth interview)
+
+ADR: [adr-005-offline-cash-sync.md](adr-005-offline-cash-sync.md). Status: decided, implementation planned.
+
+| ID | Decision | Approved option |
+|----|----------|-----------------|
+| OF1 | Offline scope | Fully paid `takeaway`/`dine_in` orders by cash or static QRIS only; no tabs, splits, void, refund, gateway payments |
+| OF2 | Offline identity | Owner-registered POS device + local PIN against a per-device verifier (72 h expiry, wiped on revoke, 5-fail local lockout, failures uploaded and audited) |
+| OF3 | Offline pricing | Server re-prices from its stored snapshot of the device's `catalog_version`; older than 24 h → accepted and flagged `stale_catalog`; delta reported |
+| OF4 | Offline shift | Order stays in the shift open when it was taken; shift close refused while the device reports unsynced orders (owner force-close allowed); late orders mark the Z-report `amended` |
+| OF5 | Offline stock | Never rejected for stock; balance may go negative, line flagged `oversold` (stock CHECK change needs its own approval) |
+| OF6 | Offline numbering | Device-prefixed local queue number on the receipt; official number assigned by the server at sync |
+| OF7 | Offline limits | 12 h or 300 orders since last sync, per-store settings |
+| OF8 | Offline static QRIS | Amount + reference required; stored `offline_unreconciled` until settlement matching |
+| OF9 | Failed sync | Never discarded: stored as `rejected` with a reason, owner accepts or rejects, both audited |
+
 ## Awaiting owner approval
 
 | ID | Proposal | Until approved |

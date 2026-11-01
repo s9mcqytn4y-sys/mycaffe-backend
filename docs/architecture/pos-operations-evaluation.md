@@ -6,7 +6,7 @@ Disusun 2026-10-31 setelah wawancara owner (keputusan E1–E5, T1–T2, C1–C3,
 ## 1. Review sistem autentikasi
 
 | Area | Kondisi sekarang | Status |
-|------|------------------|--------|
+| ------ | ------------------ | -------- |
 | Login staf | `store_slug + email + PIN 6 digit`, argon2id, pesan gagal generik | Implemented & Tested |
 | PIN | **Tepat 6 digit angka**; ditolak bila semua sama, berurutan (`123456`, `654321`), pola tahun (`198519`), atau ada di denylist | Implemented & Tested |
 | Email staf | Di-trim, huruf kecil, alamat RFC 5322 tanpa nama tampilan, ≤255 karakter, unik per toko tanpa peduli huruf besar/kecil | Implemented & Tested |
@@ -24,7 +24,7 @@ completed`) terpisah dari status pembayaran, dan pemisahan ini sudah benar.
 
 **Desain yang disetujui (T1, T2):**
 
-```
+```text
 tables (store_id, id, label, area, seats, qr_version, qr_ordering_enabled, is_active)
 table_sessions (store_id, id, table_id, status, opened_at, opened_by, closed_at, closed_by, close_reason)
   status: occupied → awaiting_payment → needs_cleaning → closed
@@ -33,7 +33,7 @@ guest_sessions (store_id, id, table_session_id, device_token_hash, expires_at)  
 ```
 
 | Sinyal | Efek pada meja |
-|--------|----------------|
+| -------- | ---------------- |
 | Scan QR pertama / kasir buat order dine-in untuk meja | buka `table_session` (occupied) |
 | Ada order dine-in belum lunas (open tab) | `awaiting_payment` |
 | Semua order lunas **dan** `served`/`completed` | mulai timer idle (default 30 menit, per toko) |
@@ -57,19 +57,21 @@ guest_sessions (store_id, id, table_session_id, device_token_hash, expires_at)  
 - **Form email tamu (E4, Planned):** kolom `email` opsional di checkout QR, plus checkbox *terpisah*
   "Saya mau menerima promo dari {toko}" yang default **tidak tercentang**. Struk digital dikirim bila email diisi.
 
-```
+```text
 customer_contacts (store_id, id, email_normalized, first_seen_at, last_order_at)
 marketing_consents (store_id, id, contact_id, granted bool, text_version, source, ip_hash, created_at)  -- append-only
 orders.receipt_email (snapshot, nullable)
 ```
+
   Persetujuan dicatat append-only (versi teks, sumber, waktu) dan bisa dicabut lewat link unsubscribe.
   Data ini disimpan per toko; antar tenant tidak saling melihat (UU PDP 27/2022).
 
 ## 4. POS end-to-end: kebutuhan & pain point per peran
 
 ### Kasir
+
 | Alur | Kebutuhan | Kondisi | Gap |
-|------|-----------|---------|-----|
+| ------ | ----------- | --------- | ----- |
 | Walk-in tanpa meja | Order takeaway/dine-in langsung di POS, bayar di tempat | Layanan order + pembayaran tunai/EDC/static QRIS sudah ada | Rute HTTP kasir terkunci sampai 02.01-C |
 | Dine-in vs takeaway | `order_type` + service charge/pajak takeaway per toko | `order_type` ada | Aturan service charge takeaway per toko belum ada |
 | Tunai | Uang diterima, kembalian, laci | `cash_tendered_amount`, `change_given_amount` | Belum terikat shift/laci |
@@ -84,8 +86,9 @@ selisih kas akhir hari tanpa jejak. Desain menjawabnya dengan: satu layar POS ya
 bar bila toggle C3 aktif, kalkulasi kembalian di server, blind count, dan audit per aksi.
 
 ### Barista & dapur (KDS)
+
 | Kebutuhan | Kondisi | Gap |
-|-----------|---------|-----|
+| ----------- | --------- | ----- |
 | Tiket per stasiun (bar/dapur) | Belum ada atribut stasiun pada produk | Tambah `products.prep_station` (bar/kitchen/none) + routing |
 | Order baru muncul tanpa refresh + bunyi | `outbox_events` ditulis, **relay ke WebSocket belum ada** | Outbox relay worker + WS ticket (Phase 03) |
 | Modifier kritis menonjol | Snapshot modifier sudah tersimpan | Format tiket KDS |
@@ -94,13 +97,14 @@ bar bila toggle C3 aktif, kalkulasi kembalian di server, blind count, dan audit 
 | Penanda "bayar telat" (Q7) | Event `order.paid` dari late settlement | Flag di tiket |
 
 ### Owner
+
 Undang staf, reset PIN, notifikasi akun terkunci (**Implemented**); laporan shift, refund, penjualan, HPP,
 dan settlement (Planned, Phase 04–06).
 
 ## 5. Perangkat keras (H1)
 
 | Perangkat | Pendekatan | Backend menyediakan |
-|-----------|------------|---------------------|
+| ----------- | ------------ | --------------------- |
 | Printer thermal 58/80 mm ESC/POS (USB/LAN/Bluetooth) | Chrome: WebUSB/Web Serial untuk USB; aplikasi *print bridge* lokal untuk LAN/BT | `GET /orders/{id}/receipt?format=escpos\|text\|json` dari snapshot |
 | Laci kas | Kick lewat port RJ11 printer (perintah ESC/POS `ESC p`) | Disertakan di payload struk tunai |
 | Layar pelanggan (dual screen) | Perangkat sama: `BroadcastChannel`; perangkat beda: WebSocket kanal `customer-display` per terminal | Event keranjang, total, QR dinamis, status lunas |
@@ -121,7 +125,7 @@ tunai, tetapi pembayaran online tidak bisa diproses saat internet mati.
 ## 7. Background job, worker, goroutine
 
 | Worker | Interval | Fungsi | Status |
-|--------|----------|--------|--------|
+| -------- | ---------- | -------- | -------- |
 | Realtime hub | event loop | Fan-out WebSocket per tenant | Implemented |
 | Payment reconciliation | 30 detik | Expire order lewat batas waktu, `CheckTransaction` untuk pending > 2 menit | Implemented |
 | **Email outbox** | 10 detik | Kirim email + retry/backoff, lease 10 menit, `SKIP LOCKED` | **Implemented (PR ini)** |
@@ -137,7 +141,7 @@ Klaim baris memakai `FOR UPDATE SKIP LOCKED` agar aman bila ada lebih dari satu 
 ## 8. Kanal umpan balik
 
 | Kanal | Untuk | Sumber | Status |
-|-------|-------|--------|--------|
+| ------- | ------- | -------- | -------- |
 | Toast / flash di POS & KDS | Hasil aksi langsung (sukses, gagal, `REFRESH_RACE`) | Respons API (`code` + pesan Bahasa Indonesia) | Kontrak error tersedia |
 | Notifikasi in-app real-time + suara | Order baru, siap saji, pembayaran lunas | WebSocket dari outbox relay | Planned |
 | Email | Aktivasi, reset, PIN berubah, akun terkunci | `email_outbox` | Implemented |
@@ -149,7 +153,7 @@ Klaim baris memakai `FOR UPDATE SKIP LOCKED` agar aman bila ada lebih dari satu 
 ## 9. Backlog berurutan
 
 | # | Item | Bergantung pada | Status |
-|---|------|-----------------|--------|
+| --- | ------ | ----------------- | -------- |
 | 1 | Email outbox + aktivasi/reset PIN + PIN 6 digit | — | **Selesai di PR ini** |
 | 2 | ✅ Selesai — 02.01-C RBAC: matriks izin, `/me.permissions`, identitas tepercaya di rute order/pembayaran, PIN owner untuk ambang O1/O4, toggle C3 | 1 | Next |
 | 3 | 02.01-D Tabel meja + signed QR + jeda darurat | 2 | Planned |

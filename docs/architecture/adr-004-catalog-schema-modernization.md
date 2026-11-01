@@ -29,10 +29,12 @@ Pada arsitektur awal MyCaffe (Iteration 1–3), tabel `products` memiliki kolom 
 ## 3. Considered Options
 
 ### Opsi 1: Mempertahankan `products.base_price` sebagai fallback jika varian kosong
+
 - *Kelebihan*: Kompatibilitas mundur dengan schema Iteration 1.
 - *Kekurangan*: Kompleksitas logika di `pricing.go` (dua jalur kalkulasi harga), rawan bug inkonsistensi saat sinkronisasi frontend POS, dan mempersulit audit harga.
 
 ### Opsi 2 (Dipilih): Variant-Driven Pricing Murni (Menghapus `products.base_price`)
+
 - *Kelebihan*:
   - Setiap produk otomatis memiliki minimal 1 default variant (`"Regular"` / `"Standar"`).
   - Harga item selalu `variant.price + sum(modifier_options.price_delta)`.
@@ -46,21 +48,26 @@ Pada arsitektur awal MyCaffe (Iteration 1–3), tabel `products` memiliki kolom 
 ## 4. Architectural Decision & Technical Design
 
 ### A. Catalog Schema Evolution (Additive Migration Plan)
+
 1. **Backfill Default Variant**:
    Untuk setiap produk yang belum memiliki entri di `product_variants`, buat satu varian default:
+
    ```sql
    INSERT INTO product_variants (id, store_id, product_id, name, sku, price, is_default, track_stock, stock_quantity)
    SELECT uuid_generate_v4(), store_id, id, 'Regular', 'REG-' || SUBSTRING(id::text, 1, 8), base_price, true, track_stock, stock_quantity
    FROM products p
    WHERE NOT EXISTS (SELECT 1 FROM product_variants pv WHERE pv.product_id = p.id);
    ```
+
 2. **Deprecate & Drop `products.base_price`**:
    Kolom `base_price` pada `products` di-drop setelah seluruh consumer kode diarahkan ke `product_variants.price`.
 3. **Stock Delegation to Variants**:
    Pengecekan dan pengurangan stok atomik dialihkan dari `DeductProductStock` ke `DeductVariantStock(ctx, tx, storeID, variantID, qty)`.
 
 ### B. Modifier Constraint Standardization
+
 Bounds constraint pada `modifier_groups` dikonsolidasikan secara universal:
+
 ```sql
 ALTER TABLE modifier_groups 
 ADD CONSTRAINT chk_modifier_groups_bounds 
@@ -68,6 +75,7 @@ CHECK (min_select >= 0 AND max_select >= 1 AND min_select <= max_select);
 ```
 
 ### C. Catalog Status Semantics
+
 - **`is_available (BOOLEAN)`**: Status dinamis operasional kasir (misal susu oat habis hari ini -> di-toggle false oleh staff). Produk tetap tampil di menu dengan badge "Habis".
 - **`archived_at (TIMESTAMPTZ)`**: Soft-delete administratif oleh store owner. Produk disembunyikan dari menu POS & QR customer, namun historical orders tetap merujuk UUID produk tanpa melanggar FK RESTRICT.
 

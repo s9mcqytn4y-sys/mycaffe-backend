@@ -9,7 +9,7 @@ Dokumen ini menyajikan inventarisasi lengkap source code Go pada repositori `myc
 Berdasarkan inventarisasi AST dan baris kode aktual pada commit `316cfa9`:
 
 | Peringkat | File Path | Baris | Fungsi | Tanggung Jawab Utama | Tingkat Kohesi | Risiko Arsitektur | Tindakan Rekomendasi |
-|-----------|-----------|-------|--------|----------------------|----------------|-------------------|----------------------|
+| ----------- | ----------- | ------- | -------- | ---------------------- | ---------------- | ------------------- | ---------------------- |
 | 1 | `internal/service/catalog_service.go` | 1.123 | 36 | CRUD Kategori, Produk, Varian, Modifier Groups, Modifier Options, dan Sub-Addon Linking | **Low** (Terlalu banyak domain aggregate tercampur) | **High** (Perubahan modifier berisiko merusak katalog produk dasar) | **Split** menjadi beberapa file dalam package yang sama (PR 4b-0) |
 | 2 | `internal/service/order_service.go` | 857 | 15 | Siklus Order (Create, Cancel, Payment Confirm, Quote API, Stock Reservation, Fingerprint) | **Medium-Low** | **High** (Mencampur quoting stateless dengan mutasi order stateful) | **Split** memisahkan quote engine dan lifecycle order |
 | 3 | `internal/service/payment_service_integration_test.go` | 785 | 18 | Integrasi payment ledger, settlement, dan Midtrans webhook | **Medium** | **Medium** (Test suite terlalu panjang dan sulit dinavigasi) | **Consolidate** pisahkan berdasarkan capability pembayaran |
@@ -31,6 +31,7 @@ Berdasarkan inventarisasi AST dan baris kode aktual pada commit `316cfa9`:
 ## 2. Temuan Code Smell & Potensi Spaghetti Code
 
 ### 2.1 Monolithic Catalog Service (`catalog_service.go` — 1.123 baris)
+
 - **Masalah**: Satu file menangani 4 aggregate root yang berbeda: Kategori, Produk, Varian, dan Graf Modifiers (Modifier Group, Modifier Option, Sub-Addon Depth-1 Linking).
 - **Dampak**: Navigasi kode sulit, merge conflict tinggi jika beberapa fitur katalog dikembangkan bersamaan, dan resiko regresi logika saat mengubah relasi modifier.
 - **Rekomendasi Pemisahan**:
@@ -40,6 +41,7 @@ Berdasarkan inventarisasi AST dan baris kode aktual pada commit `316cfa9`:
   - `catalog_modifier.go`: Method CRUD modifier groups, options, sub-addon child linking, validasi kedalaman graf, dan audit perubahan harga (`CreateModifierGroup`, `UpdateModifierGroup`, `ArchiveModifierGroup`, `CreateModifierOption`, dsb.).
 
 ### 2.2 Pencampuran Quoting Stateless dan Mutasi Transaksional Order (`order_service.go` — 857 baris)
+
 - **Masalah**: File ini mencampur pembuatan pesanan transaksional yang mengubah stok fisik (`CreateOrder`, `CancelOrExpireUnpaidOrder`, `ConfirmOrderPaymentAndCommitStock`) dengan kalkulasi quote stateless (`QuoteOrder`, `buildQuoteResult`, `ComputeQuoteFingerprint`).
 - **Rekomendasi Pemisahan**:
   - `order_service.go`: Struct `OrderService`, constructor, dan transisi status order (`CancelOrExpireUnpaidOrder`, `ConfirmOrderPaymentAndCommitStock`).
@@ -47,6 +49,7 @@ Berdasarkan inventarisasi AST dan baris kode aktual pada commit `316cfa9`:
   - `order_quote.go`: Mesin quotation POS & Publik, kalkulasi fingerprint SHA-256 (`QuoteOrder`, `ComputeQuoteFingerprint`, `buildQuoteResult`).
 
 ### 2.3 SQL Order Repository Memuat Query Katalog Quote (`order_repository.go` — 711 baris)
+
 - **Masalah**: `OrderRepository` memuat method `LockAndLoadCatalogForOrder` dan `LoadCatalogForQuote` yang membaca tabel katalog (`categories`, `products`, `variants`, `modifier_groups`, `modifier_options`).
 - **Evaluasi Arsitektural**: Hal ini dilakukan untuk menjaga transaksi pemesanan berjalan dalam 1 query roundtrip terpadu dengan row-lock `FOR UPDATE` terhadap opsi modifier dan produk. Pemisahan query ini tetap harus berada di bawah repository PostgreSQL yang kohesif tanpa menciptakan siklus dependensi antar-repository.
 
@@ -55,6 +58,7 @@ Berdasarkan inventarisasi AST dan baris kode aktual pada commit `316cfa9`:
 ## 3. Evaluasi Keterikatan Antarservice (Service Coupling)
 
 Menjelang implementasi **Iteration 4b (Shift & Cash Drawer)**:
+
 1. **Risiko Cyclic Import / Direct Dependency**:
    - `PaymentService` membutuhkan pencatatan kas masuk ke laci kas saat menerima pembayaran tunai (*cash tender*).
    - `ShiftService` membutuhkan ringkasan pembayaran tunai dan non-tunai saat mencetak laporan X dan Z.
@@ -73,6 +77,7 @@ Menjelang implementasi **Iteration 4b (Shift & Cash Drawer)**:
 ## 4. Rencana Kerja Refactoring (PR 4b-0)
 
 Pekerjaan modularisasi akan dilakukan secara mekanis pada PR terpisah (**PR 4b-0**) sebelum migrasi 000010 dibuat:
+
 - **Scope**: Memecah `catalog_service.go` dan `order_service.go` menjadi file-file kapabilitas dalam package yang sama (`package service`).
 - **Guarantees**:
   - Nol perubahan signature exported function / method (`CatalogService` API tetap 100% kompatibel).

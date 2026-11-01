@@ -2,13 +2,33 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Launch MyCaffe Backend",
+            "name": "Launch API Server (Debug)",
             "type": "go",
             "request": "launch",
             "mode": "auto",
             "program": "${workspaceFolder}/cmd/api",
             "envFile": "${workspaceFolder}/.env"
+        },
+        {
+            "name": "Test Current File",
+            "type": "go",
+            "request": "launch",
+            "mode": "test",
+            "program": "${fileDirname}",
+            "envFile": "${workspaceFolder}/.env",
+            "args": [
+                "-test.v",
+                "-test.run",
+                "^${selectedText}$"
+            ]
+        },
+        {
+            "name": "Test Current Package",
+            "type": "go",
+            "request": "launch",
+            "mode": "test",
+            "program": "${fileDirname}",
+            "envFile": "${workspaceFolder}/.env"
         }
     ]
 }
-

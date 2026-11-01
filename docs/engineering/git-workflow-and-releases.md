@@ -39,19 +39,23 @@ main (branch produksi terlindungi + Immutable GHCR Image)
 1. Pastikan seluruh PR fitur telah berstatus MERGED di `staging`.
 2. Pastikan CI di `staging` hijau (3 job lolos).
 3. Buat PR promosi dari `staging` ke `main`:
+
    ```bash
    gh pr create --base main --head staging --title "release: vX.Y.Z - <Milestone Name>" --body "<Changelog>"
    ```
+
 4. Tunggu seluruh checks di PR hijau.
 5. Laporkan ke Owner dan tunggu persetujuan eksplisit.
 6. Setelah disetujui, merge menggunakan **merge commit**:
+
    ```bash
    gh pr merge <PR> --merge
    ```
+
 7. Buat tag semver pada `main`:
+
    ```bash
    git checkout main && git pull origin main
    git tag -a vX.Y.Z -m "Release vX.Y.Z: <Summary>"
    git push origin vX.Y.Z
    ```
-

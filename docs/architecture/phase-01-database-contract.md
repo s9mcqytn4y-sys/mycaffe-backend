@@ -1,11 +1,13 @@
 # Phase 01: Database & Transactional Architecture Contract
-**MyCaffe Core POS: Multi-Tenant POS, QR Table Ordering, Kitchen Display System (KDS), and Queue Platform**
+
+MyCaffe Core POS: Multi-Tenant POS, QR Table Ordering, Kitchen Display System (KDS), and Queue Platform
 
 ---
 
 ## 1. Executive Summary & Design Scope
 
 Dokumen ini mendefinisikan arsitektur data dan kontrak transaksional untuk **MyCaffe Core POS** pada Phase 01 (Sub-task 1, Sub-task 2, dan Sub-task 3). Tujuannya adalah menjamin:
+
 - **Tenant Isolation (Defense-in-Depth)**: Isolasi data per store/tenant menggunakan filter eksplisit `store_id` di Go ditambah PostgreSQL 18 Row-Level Security (`ENABLE ROW LEVEL SECURITY`) dengan runtime role `mycaffe_app` (`NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS`).
 - **Streamlined 4 Operational Roles & Fast-Action Audit**: Empat role operasional (`owner`, `cashier`, `barista`, `kitchen`) tanpa gate persetujuan berlapis yang menghambat kasir. Aksi sensitif kasir dicatat ke `audit_logs` dengan PIN + kode alasan wajib.
 - **Payment & Financial Integrity**: Perhitungan harga, opsi modifier, pajak, service charge, dan split bill menggunakan integer Rupiah (`BIGINT` / `int64`) serta Basis Points (`BPS`) tanpa floating-point (`float64`).
@@ -18,17 +20,21 @@ Dokumen ini mendefinisikan arsitektur data dan kontrak transaksional untuk **MyC
 ## 2. Multi-Tenant Isolation, Triple-Role Separation & Row-Level Security (RLS)
 
 ### 2.1 Triple-Role Database Separation (`deploy/postgres/00-init-roles.sh`)
+
 1. **`postgres` (Container Bootstrap Superuser)**: Hanya digunakan saat inisialisasi container (`initdb`) untuk mengeksekusi `00-init-roles.sh`.
 2. **`mycaffe_migrator` (DDL / Schema Owner Role)**: Role non-superuser (`NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS`) yang menjadi pemilik database dan skema `public`, digunakan khusus oleh CLI `cmd/migrate` (`DATABASE_MIGRATION_URL`) dengan penguncian `pg_advisory_lock`.
 3. **`mycaffe_app` (DML / Runtime API Role)**: Role non-superuser (`NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS`) yang digunakan oleh server Go API (`DATABASE_URL`). Hak izin `DELETE` dicabut (`REVOKE DELETE`) pada seluruh tabel histori finansial dan audit (`stores`, `users`, `orders`, `order_items`, `order_item_options`, `payment_splits`, `payment_split_items`, `payments`, `payment_notification_logs`, `audit_logs`).
 
 ### 2.2 RLS Context Setting & Webhook Context Resolution
+
 Setiap transaksi aplikasi yang dijalankan melalui `database.WithTenantTx(ctx, db, storeID, fn)` menyetel session variable lokal:
+
 ```sql
 SELECT set_config('app.current_store_id', '11111111-1111-4111-8111-111111111111', true);
 ```
 
 Fungsi helper RLS:
+
 ```sql
 CREATE OR REPLACE FUNCTION current_store_id() RETURNS UUID AS $$
     SELECT NULLIF(current_setting('app.current_store_id', true), '')::UUID;
@@ -54,11 +60,13 @@ Seluruh 17 tabel operasional (`stores`, `users`, `categories`, `products`, `modi
 ## 4. Financial Modeling: Integer Rupiah & Basis Points (BPS)
 
 ### 4.1 Zero Floating-Point Rule
+
 - Seluruh nominal uang disimpan dalam **integer Rupiah** (`BIGINT` di PostgreSQL / `int64` di Go).
 - Seluruh tarif persentase (PB1, Service Charge, MDR QRIS) disimpan dalam **Basis Points (BPS)** (`100 bps = 1%`, `1000 bps = 10%`).
 - String `gross_amount` dari webhook Midtrans (misal `"58905.00"`) wajib diverifikasi tanda tangannya (`SHA-512`) menggunakan string mentah asli, kemudian dikonversi ke `int64` menggunakan parser integer murni (`midtrans.ParseGrossAmountIDR`) yang menolak sen desimal tidak nol.
 
 ### 4.2 Formula Kalkulasi Finansial Server-Side (Round-Half-Up)
+
 $$\text{Item Unit Price} = \text{Base Price} + \sum (\text{Option Price Delta} \times \text{Option Qty}) + \sum (\text{Sub-Option Price Delta} \times \text{Sub-Option Qty})$$
 $$\text{Service Charge} = \left\lfloor \frac{(\text{Subtotal} - \text{Discount}) \times \text{service\_charge\_bps} + 5000}{10000} \right\rfloor$$
 $$\text{Tax Amount} = \left\lfloor \frac{(\text{Subtotal} - \text{Discount} + \text{Service Charge}) \times \text{tax\_rate\_bps} + 5000}{10000} \right\rfloor$$
@@ -79,11 +87,13 @@ $$\text{Total Amount} = \text{Subtotal} - \text{Discount} + \text{Service Charge
 ## 6. Split Bill, Payment Attempts & KDS State Machine
 
 ### 6.1 Order, Split Bill & Payment Attempt Hierarchy
+
 - **`orders`**: Memiliki `billing_mode` (`pay_first`, `open_tab`, `split_bill`), `idempotency_key`, `total_amount`, `paid_amount`, `refunded_amount`, `status` (`pending_payment`, `queued`, `preparing`, `ready`, `served`, `completed`, `cancelled`), dan `payment_status` (`OrderPaymentStatus`).
 - **`payment_splits`**: Membagi tagihan `orders` ke dalam 1 bagian (`full`) atau beberapa bagian (`equal`, `by_item`, `custom_amount`) dengan invarian $\sum \text{split.total\_amount} = \text{orders.total\_amount}$ yang diverifikasi oleh `domain.ValidateSplitAllocations`.
 - **`payments`**: Mencatat setiap percobaan pembayaran (`attempt_no`, `idempotency_key`) untuk suatu split/order dengan `provider_order_id` berformat `{order_number}-S{split_number}-A{attempt_no}` dan indeks unik `uq_payments_store_idempotency_key` serta `uq_payments_provider_tx_id`.
 
 ### 6.2 Midtrans Core API Status Mapping & Guard
+
 | Midtrans `transaction_status` | `fraud_status` | Internal `PaymentAttemptStatus` | Keterangan |
 | :--- | :--- | :--- | :--- |
 | `authorize` | `accept` | `authorized` | Pre-auth kartu kredit |
@@ -107,6 +117,7 @@ Fungsi `domain.CanTransitionPaymentStatus(from, to)` memastikan webhook yang dat
 ## 7. Migration CLI & Verification Lifecycle
 
 Seluruh migrasi database dikelola oleh `cmd/migrate` (`internal/pkg/database/migrator.go`) yang mencatat versi dan checksum SHA-256 pada tabel `schema_migrations`. Pipeline CI menguji siklus penuh pada PostgreSQL 18:
+
 1. `sh deploy/postgres/00-init-roles.sh` (Inisialisasi non-superuser `mycaffe_migrator` dan `mycaffe_app`)
 2. `go run ./cmd/migrate -action=up` (Fresh Install sebagai `mycaffe_migrator`)
 3. `psql -f scripts/verify/verify_schema_constraints.sql` (Uji FK `RESTRICT`, Check Constraints, Idempotensi Queue, pencabutan `DELETE`, dan Isolasi RLS `mycaffe_app`)
@@ -121,23 +132,30 @@ Seluruh migrasi database dikelola oleh `cmd/migrate` (`internal/pkg/database/mig
 ## 8. Phase 01 Sub-task 03A & 03B: Transactional Order Persistence & Pricing Contract
 
 ### 8.1 Additive Migration `20261029000002_add_orders_request_hash`
+
 Untuk mendeteksi konflik penggunaan ulang `idempotency_key` dengan payload pesanan yang berbeda tanpa mengubah file migrasi awal (`20261028000001_init_schema.up.sql` yang sudah terkunci checksum SHA-256-nya), migrasi aditif `20261029000002_add_orders_request_hash.up.sql` menambahkan kolom:
+
 ```sql
 ALTER TABLE orders
 ADD COLUMN IF NOT EXISTS request_hash VARCHAR(64) NOT NULL DEFAULT '';
 ```
+
 Nilai `request_hash` dihitung secara deterministik menggunakan SHA-256 (`service.ComputeInputRequestHash`) atas:
+
 - `store_id` terautentikasi
 - `order_type` dan `billing_mode` efektif
 - `table_number`, `customer_name`, `customer_phone`, dan `notes` yang telah dinormalisasi (`strings.TrimSpace`)
 - Daftar berurutan item pesanan beserta `product_id`, `quantity`, `config_hash` (kanonikal atas opsi modifier dan sub-addon 1 level), serta catatan item.
 
 Aturan idempotensi di dalam `OrderService.CreateOrder`:
+
 1. Jika `(store_id, idempotency_key)` sudah ada di tabel `orders` dan `existing.request_hash == canonicalRequestHash`, layanan langsung mengembalikan pesanan beserta `payment_splits` yang sudah tersimpan (`IsIdempotentReplay = true`) tanpa mengurangi stok atau mengalokasikan nomor antrean baru.
 2. Jika `(store_id, idempotency_key)` sudah ada tetapi `existing.request_hash != canonicalRequestHash`, layanan menolak permintaan dengan `service.ErrIdempotencyConflict`.
 
 ### 8.2 Atomic Transaction Flow (`OrderService.CreateOrder`)
+
 Seluruh pembuatan pesanan dieksekusi di dalam satu transaksi `database.WithTenantTx(ctx, db, trustedStoreID, ...)`:
+
 1. Menyetel konteks RLS `SELECT set_config('app.current_store_id', $1, true)`.
 2. Memuat dan memvalidasi status aktif toko (`stores.is_active = true AND stores.deleted_at IS NULL`).
 3. Memeriksa `idempotency_key` dan membandingkan `orders.request_hash`.
@@ -149,6 +167,6 @@ Seluruh pembuatan pesanan dieksekusi di dalam satu transaksi `database.WithTenan
 9. Menyimpan event `order.created` ke tabel `outbox_events` dalam transaksi yang sama untuk pengiriman realtime KDS/TV Queue yang andal.
 
 ### 8.3 Boundary Kontrak HTTP Publik (`POST /api/v1/orders`) & Proposal Phase 02
+
 - Pada tahap ini, rute HTTP publik `POST /api/v1/orders` **tetap dikunci fail-closed (`503 Service Unavailable`) pada environment `staging` dan `production`** karena kontrak DTO publik lama masih menerima `store_id` dari body JSON klien dan belum diikat ke middleware tanda tangan QR meja atau JWT kasir.
 - Ketika middleware autentikasi penuh diaktifkan pada Phase 02, endpoint akan menurunkan `trustedStoreID` secara eksklusif dari klaim token terverifikasi (bukan dari body request) dan meneruskan `service.OrderCreationInput` (lengkap dengan `idempotency_key`, `modifiers`, dan `sub_addons`) langsung ke `OrderService.CreateOrder`.
-

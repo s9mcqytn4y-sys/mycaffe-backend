@@ -16,7 +16,7 @@ Midtrans webhook. Contained (503 in staging/production): guest `POST /api/v1/ord
 ## Done (iterations 1–3)
 
 | Area | Status | Evidence |
-|------|--------|----------|
+| ------ | -------- | ---------- |
 | 01 Database runtime, triple-role RLS, migrator | Implemented & Tested | migrations 000001–000003, verify script |
 | 01 Pricing engine, transactional orders, stock reservation | Implemented & Tested | `pricing.go`, order integration tests |
 | 01.04 Payment ledger, webhook inbox, reconciliation, duplicate settlement | Implemented & Tested | migration 000004, payment integration tests |
@@ -44,7 +44,7 @@ Midtrans webhook. Contained (503 in staging/production): guest `POST /api/v1/ord
 ## Next iterations (ordered; each item = one PR with migration, tests, OpenAPI, docs)
 
 | Iter | Item | Acceptance criteria | Depends on / blocker |
-|------|------|---------------------|----------------------|
+| ------ | ------ | --------------------- | ---------------------- |
 | 4a | **C3b Modifier groups & options CRUD** + product↔group links + Quote APIs | 422/409 contract, negative delta P1, nested sub-addon depth 1, cycle protection, POS quote RBAC (order.pos.create), quote fingerprint anti-compensating check (P8) | Implemented & Tested ✅ |
 | 4b | **Shift & cash drawer (P6, P7, C1, H1)** | open with float, cash payments require an open shift, paid-out, blind close, variance > tolerance needs owner PIN, X/Z report, audit | store_settings ✅ |
 | 4c | **Open tab, rounds, split bill (P2, P3, T2)** | split by equal N or items; server recomputes shares; deterministic rupiah rounding remainder to split 1 (equal N) or last split (by item); locked after first payment | 4a, 4b |
@@ -62,7 +62,7 @@ Midtrans webhook. Contained (503 in staging/production): guest `POST /api/v1/ord
 ## Production readiness (prepare now, cut over when the client buys domain + VPS)
 
 | Item | Status |
-|------|--------|
+| ------ | -------- |
 | Immutable GHCR images, prod compose with fail-fast required secrets | Implemented (CI) |
 | Nginx TLS bootstrap, HSTS, request id, rate limits | Implemented |
 | Edge subnet + `TRUSTED_PROXIES`, internal-only DB network | Implemented |

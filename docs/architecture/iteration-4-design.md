@@ -7,7 +7,7 @@ HTTP, OpenAPI, and docs, following [api-conventions.md](api-conventions.md).
 ## 1. Add-ons, sub-add-ons, variants & categories (PR 4a)
 
 | Topic | Current | Decision |
-|-------|---------|----------|
+| ------- | --------- | ---------- |
 | Variants | ✅ own SKU/price (iteration 3) | sizes/temperature are variants, never modifiers |
 | Modifier price | `price_delta >= 0` | **P1**: negative allowed ("Tanpa susu −Rp2.000"); unit price of a line (variant + all modifiers) must stay ≥ Rp0 |
 | Sub-add-ons | 1 level (option → child group), enforced by pricing | kept at 1 level (P1) |
@@ -26,7 +26,7 @@ delta changes audited as `PRICE_CHANGE`.
 
 ## 2. Cart lifecycle & group order (PR 4a, P8)
 
-```
+```text
 device cart (local storage) ──add/remove──► POST …/quote ──► priced lines + totals (nothing stored)
      │                                           ▲
      └── checkout ──► POST /pos/orders | guest order ─┘ re-priced server-side;
@@ -42,7 +42,7 @@ device cart (local storage) ──add/remove──► POST …/quote ──► p
 
 ## 3. Shift & cash drawer (PR 4b, P6, P7, C1)
 
-```
+```text
             open (float, cashier|owner)            close (blind count)
  [no shift] ─────────────────────────► [open] ─────────────────────────► [closed]
                                           │  variance > tolerance ⇒ reason + owner PIN
@@ -54,6 +54,7 @@ closed_by, counted_cash, expected_cash, variance, status), `cash_movements` (app
 `refund`, `paid_out`, `cash_in`, `no_sale`, `float`; amount, actor, reason, ref).
 
 Rules:
+
 - One open shift per drawer; cash tender is rejected (409 `NO_OPEN_SHIFT`) without one. Non-cash tenders
   need no shift but are reported on the shift that was open on that terminal (if any).
 - Expected cash = float + sales − refunds − paid-outs + cash-ins. QRIS/EDC never count as drawer cash.
@@ -73,7 +74,7 @@ negative expected cash (refund larger than drawer) ⇒ refused.
 
 ## 4. Open tab, rounds & split bill (PR 4c, P2, P3, T2)
 
-```
+```text
 open tab (cashier) → round 1 (items → KDS, stock committed, prices frozen) → round n …
   → close tab → [optional split: equal N | by item] → pay each split (any method) → paid
 ```
@@ -92,7 +93,7 @@ refused (refund flow); tab with zero items cannot close; tab older than the busi
 ## 5. Void & refund (PR 4d, P4, P5, O1, C2)
 
 | | Void | Refund |
-|--|------|--------|
+| -- | ------ | -------- |
 | When | before payment (line or whole order) | after payment (line, partial qty, or whole) |
 | Stock | ticket not started ⇒ restock; preparing/ready ⇒ `waste` movement | optional restock flag |
 | Money | none | cash from the open drawer (needs open shift); non-cash: Midtrans API where supported, else manual transfer recorded |
@@ -107,7 +108,7 @@ from `order_status`.
 ## 6. Decisions recorded
 
 | ID | Decision |
-|----|----------|
+| ---- | ---------- |
 | P1 | Negative modifier deltas allowed; line unit price ≥ 0; sub-add-ons stay 1 level |
 | P2 | Open tab = one order with rounds; each round goes to KDS with frozen prices |
 | P3 | Split equal + by item; deterministic rupiah remainder; locked after first split payment |

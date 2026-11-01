@@ -7,27 +7,29 @@ Kontrak HTTP: [docs/api/openapi.yaml](../api/openapi.yaml). Izin: `internal/pkg/
 ## 1. Aktor & kelas rute (ADR-003 D8)
 
 | Aktor | Kredensial | Rute |
-|-------|-----------|------|
+| ------- | ----------- | ------ |
 | Tamu (pelanggan di meja) | guest session token ⏳ | `/api/v1/public/*` ⏳; `POST /api/v1/orders` 🔒 |
 | Kasir, Barista, Dapur, Owner | access token 15 menit + refresh cookie | `/api/v1/auth/staff/*`, `/api/v1/pos/*`, `/api/v1/staff/*`, `/api/v1/store/*` |
-| Operator (pemilik server) | akses shell VPS | `cmd/migrate -action=bootstrap-store|reset-owner-pin|up|seed` |
+| Operator (pemilik server) | akses shell VPS | `cmd/migrate -action=bootstrap-store \| reset-owner-pin \| up \| seed` |
 | Midtrans | signature SHA-512 | `POST /api/v1/payments/midtrans/webhook` ✅ |
 | Worker sistem | — | rekonsiliasi pembayaran ✅, email outbox ✅, outbox relay ⏳, tutup meja ⏳ |
 
 ## 2. Use case per peran
 
 ### Tamu
+
 | Use case | Langkah inti | Dependensi | Status |
-|----------|--------------|------------|--------|
+| ---------- | -------------- | ------------ | -------- |
 | Lihat menu | scan QR → katalog toko | signed QR (02.01-D), catalog API (C1) | ⏳ |
 | Pesan & bayar sendiri | keranjang → order (harga dihitung server) → QRIS/e-wallet | guest session (02.01-E), payment ✅ | ⏳ |
 | Pantau status | nomor antrean + diproses/siap | outbox relay + WS (Phase 03) | ⏳ |
 | Struk & promo | email opsional, opt-in terpisah | R1, E4 | ⏳ |
 
 ### Kasir
+
 | Use case | Endpoint | Izin | Status |
-|----------|----------|------|--------|
-| Masuk/keluar, ganti PIN | `auth/staff/login|refresh|logout|pin/change` | — | ✅ |
+| ---------- | ---------- | ------ | -------- |
+| Masuk/keluar, ganti PIN | `auth/staff/login \| refresh \| logout \| pin/change` | — | ✅ |
 | Order walk-in / dine-in / takeaway | `POST /pos/orders` | `order.pos.create` | ✅ |
 | Terima tunai, QRIS statis, EDC | `POST /pos/orders/{id}/payments` (method langsung) | `payment.tender.direct` | ✅ |
 | Buat QRIS dinamis / e-wallet / VA | `POST /pos/orders/{id}/payments` (method gateway) | `payment.initiate.gateway` | ✅ (Midtrans sandbox) |
@@ -38,18 +40,21 @@ Kontrak HTTP: [docs/api/openapi.yaml](../api/openapi.yaml). Izin: `internal/pkg/
 | Tiket bar (bila toggle C3) | — | `kds.ticket.update.barista` | ✅ izin; ⏳ KDS |
 
 ### Barista / Dapur
+
 | Use case | Izin | Status |
 |----------|------|--------|
-| Lihat & update tiket stasiunnya | `kds.ticket.read/update.{barista|kitchen}` | ✅ izin; ⏳ endpoint |
-| Tandai menu habis (minuman / makanan) | `item.availability.toggle.{beverage|food}` | ✅ izin; ⏳ endpoint |
+| Lihat & update tiket stasiunnya | `kds.ticket.read/update.{barista\|kitchen}` | ✅ izin; ⏳ endpoint |
+| Tandai menu habis (minuman / makanan) | `item.availability.toggle.{beverage\|food}` | ✅ izin; ⏳ endpoint |
 
 ### Owner
+
 Semua izin. Implemented: kelola staf, reset PIN, PIN sementara, pengaturan operasional, order & pembayaran
 POS. Planned: katalog, laporan, shift review, refund di atas ambang, meja & QR, promo, loyalty, langganan.
 
 ## 3. Sequence (yang sudah berjalan)
 
 ### 3.1 Login staf, refresh, dan race antar-tab
+
 ```mermaid
 sequenceDiagram
     participant POS as POS (browser)
@@ -67,6 +72,7 @@ sequenceDiagram
 ```
 
 ### 3.2 Owner mengundang staf
+
 ```mermaid
 sequenceDiagram
     participant Owner
@@ -83,6 +89,7 @@ sequenceDiagram
 ```
 
 ### 3.3 Order POS + tunai
+
 ```mermaid
 sequenceDiagram
     participant Kasir
@@ -98,6 +105,7 @@ sequenceDiagram
 ```
 
 ### 3.4 QRIS dinamis + webhook
+
 ```mermaid
 sequenceDiagram
     participant Kasir
@@ -117,7 +125,7 @@ sequenceDiagram
 ## 4. Alur yang direncanakan (ringkas)
 
 | Alur | Ringkasan | Referensi |
-|------|-----------|-----------|
+| ------ | ----------- | ----------- |
 | QR meja → table session → guest session per perangkat → order pay-first | signed QR (key ID, versi, jeda darurat) | T1, T2, Q5, Q6 |
 | Outbox relay → WS ticket → KDS/POS/TV dengan replay | `outbox_events.processed_at`, nomor urut | N1, Phase 03 |
 | Shift: buka modal → transaksi → blind count → selisih > toleransi = PIN owner → Z | `store_settings.cash_variance_tolerance` | C1 |
@@ -127,7 +135,7 @@ sequenceDiagram
 
 ## 5. Ketergantungan modul
 
-```
+```text
 auth (02.01-B) ─► RBAC + settings (02.01-C) ─┬─► POS order/payment ✅
                                               ├─► meja & signed QR (02.01-D) ─► guest session (02.01-E)
                                               ├─► shift & laci (C1) ─► void/refund (O1/C2) ─► split/open tab

@@ -6,7 +6,7 @@ shifts, promos, and later modules. Machine contract: [docs/api/openapi.yaml](../
 
 ## 1. Request pipeline
 
-```
+```text
 Cloudflare / Nginx (TLS, limit_req, X-Request-ID=$request_id, real client IP)
  └─ Gin
     ├─ RequestID          echo/propagate X-Request-ID (logs + responses)
@@ -22,7 +22,7 @@ Server limits: `ReadHeaderTimeout` 5 s, `ReadTimeout` 15 s, `WriteTimeout` 30 s,
 ## 2. Status codes & error body
 
 | Code | When | Body |
-|------|------|------|
+| ------ | ------ | ------ |
 | 200 | read / update | resource |
 | 201 | create | created resource |
 | 202 | accepted, side effect async (email) | `{message}` |
@@ -45,7 +45,7 @@ errors are never echoed to clients.
 ## 3. CRUD checklist (per resource)
 
 | Item | Catalog (done) | Required for every new resource |
-|------|----------------|---------------------------------|
+| ------ | ---------------- | --------------------------------- |
 | Permission per route (`RequirePermission`) + re-check in service | ✅ | ✅ |
 | Store from token only; ids scoped by `WithTenantTx` + RLS | ✅ | ✅ |
 | Create returns 201 with the resource; PATCH is partial (pointer fields) | ✅ | ✅ |

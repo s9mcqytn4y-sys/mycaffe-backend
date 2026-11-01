@@ -6,7 +6,7 @@ are sent through the Hostinger mailbox.
 
 ## 1. How it works
 
-```
+```text
 business transaction (WithTenantTx)
    ├─ change rows (user, token, ...)
    └─ INSERT email_outbox (rendered subject + HTML + text)     ← same commit, so no email for rolled-back work
@@ -31,7 +31,7 @@ Crema palette, 560 px, preheader, button + plain link fallback) and a plain-text
 with `html/template` (auto-escaped); headers are stripped of CR/LF.
 
 | Template | Sent to | Trigger |
-|----------|---------|---------|
+| ---------- | --------- | --------- |
 | `staff_invite` | new staff | owner invites (`POST /api/v1/staff`); link valid 48 h |
 | `pin_reset` | staff | "lupa PIN" or owner `POST /api/v1/staff/{id}/pin-reset`; link valid 30 min |
 | `pin_changed` | staff | PIN changed via reset link or `pin/change` (security notice) |
@@ -43,7 +43,7 @@ alert, daily owner summary.
 ## 3. Environment configuration
 
 | Variable | Dev (`go run`) | Demo (Quick Tunnel) | Production (Hostinger) |
-|----------|----------------|---------------------|------------------------|
+| ---------- | ---------------- | --------------------- | ------------------------ |
 | `EMAIL_DRIVER` | `log` (default) | `log`, or `smtp` via `.env.demo` | `smtp` (enforced) |
 | `SMTP_HOST` / `SMTP_PORT` | — | `smtp.gmail.com` / `587` | `smtp.hostinger.com` / `465` |
 | `SMTP_TLS_MODE` | — | `starttls` (auto for 587) | `implicit` (auto for 465) |
@@ -57,6 +57,7 @@ alert, daily owner summary.
 - STARTTLS is mandatory on port 587: the sender refuses to authenticate if the server does not offer it.
 
 ### Gmail for dev/demo
+
 1. Turn on 2-Step Verification for the Google account.
 2. Create an App Password at <https://myaccount.google.com/apppasswords> (16 characters).
 3. Copy `.env.demo.example` to `.env.demo`, fill the Gmail address and App Password, and set
@@ -64,6 +65,7 @@ alert, daily owner summary.
 4. `./scripts/dev.ps1 demo-up`. Gmail limits personal accounts to roughly 500 recipients/day; fine for demos.
 
 ### Hostinger mailbox for production
+
 1. Buy the domain and an email plan; create a mailbox such as `noreply@<domain>`.
 2. In Hostinger DNS add the records Hostinger shows for the mailbox: **MX**, **SPF**
    (`v=spf1 include:_spf.mail.hostinger.com ~all`), **DKIM** (enable in hPanel), and a **DMARC** record
@@ -73,6 +75,7 @@ alert, daily owner summary.
    (invites, resets, receipts) is far below it, which is why marketing campaigns are excluded (E3).
 
 ## 4. Failure handling & monitoring
+
 - `email_outbox.status = 'failed'` rows with `last_error` are the delivery problems to review. A backoffice
   view and an owner alert for failed security emails are on the backlog.
 - Emails are never sent twice by concurrent workers (`SKIP LOCKED`), but SMTP itself can deliver a message

@@ -6,7 +6,7 @@ cafe transactions (owner decision I1). Everything is driven by `scripts/dev.ps1`
 ## 1. Environments
 
 | Environment | How it runs | `APP_ENV` | Database | Reachable from | Purpose |
-|-------------|-------------|-----------|----------|----------------|---------|
+| ------------- | ------------- | ----------- | ---------- | ---------------- | --------- |
 | **dev** | `go run ./cmd/api` on Windows + PostgreSQL 18 in Docker | `development` | `mycaffe-postgres-dev` (`127.0.0.1:5432`), seed data | this laptop only | daily coding, debugging (VS Code F5), full order/payment simulation |
 | **test** | `dev.ps1 test-int`: throwaway PostgreSQL 18 container | `test` | `mycaffe-pg-integration` (`127.0.0.1:55432`), created and deleted per run | this laptop only | integration tests identical to CI |
 | **demo / staging** | `dev.ps1 demo-up`: whole stack in Docker + Cloudflare Quick Tunnel | `staging` | `mycaffe-demo` volume, seed data | anyone with the `*.trycloudflare.com` URL (HTTPS) | showing the product, testing on tablets/phones, Midtrans sandbox webhooks |
@@ -19,7 +19,7 @@ Run **one stack at a time** on 8 GB RAM: `dev.ps1 down` before `demo-up` and vic
 Nothing listens on the Wi-Fi/LAN interface. Devices reach the demo only through the tunnel (decision I2).
 
 | Port | Bound to | Service | Environment |
-|------|----------|---------|-------------|
+| ------ | ---------- | --------- | ------------- |
 | 5432 | `127.0.0.1` | PostgreSQL (dev compose) | dev |
 | 8080 | all interfaces (Go default) — keep Windows Firewall blocking inbound | Go API (`go run`) | dev |
 | 80 | `127.0.0.1` | Nginx (dev compose, only if started) | dev |
@@ -48,7 +48,7 @@ The tunnel needs **no inbound rule**: `cloudflared` only makes outbound connecti
 
 ## 4. Request path (demo)
 
-```
+```text
 Browser / tablet (HTTPS)
   -> Cloudflare edge (TLS, *.trycloudflare.com)
   -> cloudflared container (outbound tunnel, edge subnet 172.29.10.0/24)

@@ -8,7 +8,7 @@ are extended, never duplicated.
 ## 1. Current state (Implemented & Tested)
 
 | Table | What it holds | Gaps |
-|-------|---------------|------|
+| ------- | --------------- | ------ |
 | `categories` | name, order, active | no image, no parent, no availability schedule |
 | `products` | name, description, `base_price`, `image_url`, available, `track_stock` + `stock_quantity` (finished goods) | no SKU, no variants, no unit, no station, no type, no cost/HPP |
 | `modifier_groups` / `modifier_options` | single/multiple, min/max, price delta, optional stock | — (kept for add-ons) |
@@ -20,7 +20,7 @@ trusted for prices.
 
 ## 2. Target model
 
-```
+```text
 categories        + image_key, parent_id (1 level), schedule (optional)
 products          + product_type ('prepared' | 'ready_to_serve' | 'bundle'),
                     prep_station ('bar' | 'kitchen' | 'none'), tags[], allergens[], is_featured
@@ -42,6 +42,7 @@ promotions        (store_id, id, kind ['percent','amount','bundle_price'], scope
 ```
 
 Rules:
+
 - **Variant = what you sell** (own SKU, price, recipe). **Modifier = what you add** (extra shot, oat milk).
   An order line references `variant_id`; modifiers stay as today.
 - **Prepared items** deduct ingredients from `recipe_lines` (variant + chosen modifiers) when the order is
@@ -85,7 +86,7 @@ includes cost when `catalog.cost.read`):
 Metadata the frontend needs from the server:
 
 | Need | Field(s) |
-|------|----------|
+| ------ | ---------- |
 | Layout & navigation | category order, featured flag, tags |
 | Image performance | 3 WebP sizes, blurhash placeholder, `alt` text (a11y) |
 | Price display | variant price, promo label + price after promo (display only; server recomputes) |
@@ -110,7 +111,7 @@ Metadata the frontend needs from the server:
 ## 5. Delivery order
 
 | Step | Content | Depends on |
-|------|---------|------------|
+| ------ | --------- | ------------ |
 | C1 | Catalog read API (current schema) + ETag, staff/guest views | ✅ iteration 3 |
 | C2 | Variants + SKU + product type + prep station (migration 000008, backfill one default variant per product) | ✅ iteration 3 |
 | C3 | Catalog management API (CRUD, availability toggles per station permission) | ✅ categories/products/variants; modifiers C3b in iteration 4 |

@@ -7,7 +7,7 @@ Earlier decisions live in [decisions-before-code.md](decisions-before-code.md) a
 ## Approved
 
 | ID | Decision | Approved option | Implementation notes | Blocks |
-|----|----------|-----------------|----------------------|--------|
+| ---- | ---------- | ----------------- | ---------------------- | -------- |
 | D1 | Staff login identity | `store_slug + email + PIN` | ADR-003 D1 | 02.01-B |
 | D2 | PIN policy | 6–12 digits, weak-PIN denylist, argon2id `m=19456,t=2,p=1` | ADR-003 D2 | 02.01-B |
 | D3 | Throttling & lockout | 5 consecutive failures → locked 15 min; generic `401` | ADR-003 D3 | 02.01-B |
@@ -24,7 +24,7 @@ Earlier decisions live in [decisions-before-code.md](decisions-before-code.md) a
 ## Infrastructure & Phase 02.01-B (recorded 2026-10-31, second interview)
 
 | ID | Decision | Approved option | Notes |
-|----|----------|-----------------|-------|
+| ---- | ---------- | ----------------- | ------- |
 | I1 | Role of the Windows laptop before a VPS exists | **Dev + demo only**, no real cafe transactions | Production waits for Hostinger KVM 2 + domain |
 | I2 | How devices reach the demo | **Cloudflare Tunnel HTTPS only**; zero inbound ports, no LAN exposure | All compose ports bound to `127.0.0.1` |
 | I3 | Origin layout in the demo | **One origin**: Nginx routes `/api`, `/ws`, `/health` to Go and everything else to Next.js on the host | Makes the `SameSite=Strict` refresh cookie (O2) testable without a domain |
@@ -38,7 +38,7 @@ Setup details: [docs/setup/windows-dev-environment.md](../setup/windows-dev-envi
 ## Email, operations & hardware (recorded 2026-10-31, third interview)
 
 | ID | Decision | Approved option |
-|----|----------|-----------------|
+| ---- | ---------- | ----------------- |
 | E1 | Login identity | **PIN only** for every role (D1 kept); **PIN is exactly 6 digits**; no passwords |
 | E2 | Staff onboarding | Owner invites → staff sets own PIN via email link (48 h); "lupa PIN" link (30 min); owner temporary PIN (must change) for staff without email |
 | E3 | Marketing email | Transactional/notification email only; marketing = consent capture + export, no campaigns via the Hostinger mailbox |
@@ -59,7 +59,7 @@ Full evaluation and ordered backlog: [pos-operations-evaluation.md](pos-operatio
 ## Catalog, owner self-service & finance (recorded 2026-10-31, fourth interview)
 
 | ID | Decision | Approved option |
-|----|----------|-----------------|
+| ---- | ---------- | ----------------- |
 | K1 | Menu variants | `product_variants` with own SKU, price and recipe (Regular/Large, Hot/Iced); modifiers stay for add-ons |
 | K2 | Inventory depth | Ready-to-serve items counted in units; prepared items use recipes/BOM of ingredients (g/ml/pcs) deducted on payment, minimum stock alerts, moving-average cost for HPP, stock opname, append-only movements |
 | K3 | Self-service configuration | All business settings editable by the owner in the app; infrastructure secrets (Midtrans keys, SMTP, DB, DNS) stay in the server `.env` and only their status is shown |
@@ -77,7 +77,7 @@ Designs: [catalog-inventory-design.md](catalog-inventory-design.md), requirement
 ## Cleanup, single tenant & iteration 3 (recorded 2026-10-31, fifth interview)
 
 | ID | Decision | Approved option |
-|----|----------|-----------------|
+| ---- | ---------- | ----------------- |
 | M1 | Docker cleanup | MyCaffe + safe garbage only (stopped containers, unused anonymous volumes, unused images, build cache); other projects' volumes and the MyCaffe demo/dev volumes kept |
 | M2 | Supabase | Removed from the repo, local `.env`, local MCP config, global CLI and `~/.supabase`; the Claude account connector is disconnected by the owner |
 | M3 | Single-tenant MVP | Multi-tenant schema kept for future branches; optional `DEFAULT_STORE_SLUG` so staff log in with email + PIN only; demo seed keeps two stores for isolation tests; demo owner email `abdulaziz543333@gmail.com` |
@@ -92,7 +92,7 @@ window, one shift per drawer, drawer kick + no-sale, local cart + quote, plan ap
 ### Iteration 4c-2: Split Bill, Tab Settlement & Shift Decoupling (recorded 2026-11-01)
 
 | ID | Topic | Decision & Technical Specification |
-|----|-------|------------------------------------|
+| ---- | ------- | ------------------------------------ |
 | **P10** | **Tab Lifecycle & Split State Machine** | 1. `POST /pos/tabs/:id/close` mengunci pesanan/ronde, mengubah status tab `open` $\to$ `pending_payment` (bukan `closed`; status tersebut tidak ada di `chk_orders_status`). Ronde baru setelah ditutup ditolak dengan `409 TAB_CLOSED`.<br>2. `POST /pos/tabs/:id/reopen` mengembalikan status `pending_payment` $\to$ `open` dan membatalkan semua split (`status = 'cancelled'`, baris audit tetap di database). Reopen hanya diizinkan jika belum ada split berstatus `paid` dan tidak ada payment berstatus `pending`; jika sudah ada $\to$ `409 SPLIT_ALREADY_PAID`.<br>3. Tab tanpa permintaan split spesifik: `/close` otomatis menghasilkan 1 split bertipe `full` senilai total pesanan.<br>4. Tab bertransisi ke `status = 'completed'` dan `payment_status = 'paid'` jika dan hanya jika seluruh split non-cancelled telah lunas (`status = 'paid'`). |
 | **P11** | **Split Strategies & Remainder Precision** | 1. **Scope 4c-2 dibatasi hanya untuk Equal Split ($N$) dan Split by Item**. Strategi *Custom Amount* dipindahkan ke backlog kandidat masa depan.<br>2. **Equal $N$**: Nilai $N$ antara 2 hingga 20. Sisa pembagian bulat integer Rupiah dialokasikan secara deterministik ke **Split #1**. Setiap split wajib bernilai total $> 0$.<br>3. **Split by Item**: Alokasi kuantitas utuh (1 unit tidak boleh dipecah). Seluruh kuantitas setiap item pada pesanan wajib teralokasi tepat sekali ($\sum \text{qty per item} = \text{item.quantity}$). Alokasi kurang atau berlebih ditolak `422 UNPROCESSABLE_ENTITY`. Service charge dan pajak dialokasikan proporsional terhadap subtotal split, dengan sisa pembulatan Rupiah dialokasikan ke **Split Terakhir** (*last split*). Jumlah total seluruh split wajib sama persis dengan `orders.total_amount`. |
 | **P12** | **Payment Route Reuse & Concurrency Protection** | 1. Dilarang membuat endpoint pembayaran baru `/splits/:id/pay`. Menggunakan kembali rute pembayaran teruji `POST /pos/orders/:id/payments` yang diperluas dengan field opsional `split_id` (wajib untuk `billing_mode = 'open_tab'`, ditolak untuk `pay_first`).<br>2. Tender tunai menggunakan tipe pergerakan kas `sale` yang sudah ada (tidak ada tipe `SHIFT_TENDER`).<br>3. Baris split dikunci atomik (`SELECT ... FOR UPDATE`) saat inisiasi pembayaran. Maksimal satu transaksi pembayaran berstatus `pending` per split; jika ada transaksi QRIS pending lalu kasir menekan tunai/EDC pada split yang sama $\to$ ditolak `409 SPLIT_PAYMENT_PENDING` hingga QRIS expired/dibatalkan.<br>4. Webhook Midtrans melunasi tepat satu split; `gross_amount` wajib identik dengan total split bersangkutan. `commitPaidOrderTx` melunasi split terkait; pesanan utama baru ditandai lunas saat seluruh split non-cancelled selesai dibayar. |
@@ -102,14 +102,14 @@ window, one shift per drawer, drawer kick + no-sale, local cart + quote, plan ap
 ## Resolved from existing sources (not re-asked)
 
 | Topic | Resolution | Source |
-|-------|-----------|--------|
+| ------- | ----------- | -------- |
 | Split bill semantics | Approved in Iteration 4 (P3, P10–P14): equal N (remainder to split 1) and by item (proportional tax/service, remainder to last split); locked after first split payment; payments use POST /pos/orders/:id/payments with split_id; payments.shift_id attribution. Scheduled for Iteration 4c-2. | `docs/architecture/iteration-4-design.md#6-decisions-recorded` (P3), `decision-register.md` (P10–P14) |
 | Roles | Exactly `owner`, `cashier`, `barista`, `kitchen`; no new roles. | `AGENTS.md`, migration `000001` |
 
 ## Still open
 
 | Topic | Needed for | Default until decided |
-|-------|-----------|-----------------------|
+| ------- | ----------- | ----------------------- |
 | Production domain name & DNS | Named Cloudflare Tunnel / TLS, cookie domain (O2) | Quick Tunnel URL for demo only |
 | Midtrans production credentials & VPS provisioning | Production cutover | Sandbox only |
 | WebSocket ticket lifecycle (TTL, single use) | Phase 03 realtime | `/ws` stays `503` in staging/production |

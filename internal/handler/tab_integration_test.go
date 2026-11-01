@@ -649,8 +649,10 @@ func TestTabLifecycleIntegration(t *testing.T) {
 		fractionalProdID := uuid.New()
 		err := database.WithTenantTx(context.Background(), db, centralStoreID, func(tx *sqlx.Tx) error {
 			_, err := tx.ExecContext(context.Background(), `
-				INSERT INTO products (id, store_id, name, base_price, is_available, track_stock, stock_quantity)
+				WITH p AS (INSERT INTO products (id, store_id, name, base_price, is_available, track_stock, stock_quantity)
 				VALUES ($1, $2, 'Proof Fractional Item', 10010, true, false, 0)
+				RETURNING store_id, id, base_price)
+				INSERT INTO product_variants (store_id, product_id, name, price, is_default) SELECT store_id, id, 'Reguler', base_price, true FROM p
 			`, fractionalProdID, centralStoreID)
 			return err
 		})

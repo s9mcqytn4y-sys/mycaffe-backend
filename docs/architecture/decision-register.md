@@ -110,6 +110,12 @@ window, one shift per drawer, drawer kick + no-sale, local cart + quote, plan ap
 | HF5 | PINs re-entered for void, refund, stock override and shift variance use the login counter (5 wrong → locked 15 min, which also ends running sessions). Wrong owner PINs advance every unlocked owner's counter (the targeted owner is unknown) and are audited `OWNER_PIN_FAILED`; 5 of them by one actor in 15 min → 429 `PIN_ATTEMPTS_EXCEEDED`. Accepted risk: a cashier can lock the owner out for 15 min with 5 guesses (same as guessing the owner's login) |
 | HF6 | Stock override no longer turns tracking on silently: untracked product → 422 `PRODUCT_NOT_TRACKED` unless `enable_tracking: true`; unknown product → 404 |
 
+## Catalog cleanup (recorded 2026-11-01)
+
+| ID | Decision |
+|----|----------|
+| ADR4 | Catalog cleanup done now, before Iteration 5: pricing reads only the variant price, `products.base_price` kept as a deprecated mirror, unit stock stays on products (variants share it), DB CHECK single-choice groups `max_select = 1`. See [ADR-004](adr-004-catalog-schema-modernization.md) |
+
 ## Awaiting owner approval
 
 | ID | Proposal | Until approved |

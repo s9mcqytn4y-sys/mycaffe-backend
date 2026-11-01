@@ -236,8 +236,10 @@ func TestOrderServiceIntegration_EndToEnd(t *testing.T) {
 		unavailProdID := uuid.New()
 		err := database.WithTenantTx(ctx, db, storeAID, func(tx *sqlx.Tx) error {
 			_, err := tx.ExecContext(ctx, `
-				INSERT INTO products (id, store_id, name, base_price, is_available, track_stock, stock_quantity)
+				WITH p AS (INSERT INTO products (id, store_id, name, base_price, is_available, track_stock, stock_quantity)
 				VALUES ($1, $2, 'Seasonal Sold Out Drink', 30000, false, false, 0)
+				RETURNING store_id, id, base_price)
+				INSERT INTO product_variants (store_id, product_id, name, price, is_default) SELECT store_id, id, 'Reguler', base_price, true FROM p
 			`, unavailProdID, storeAID)
 			return err
 		})
@@ -275,8 +277,10 @@ func TestOrderServiceIntegration_EndToEnd(t *testing.T) {
 		raceProdID := uuid.New()
 		err := database.WithTenantTx(ctx, db, storeAID, func(tx *sqlx.Tx) error {
 			_, err := tx.ExecContext(ctx, `
-				INSERT INTO products (id, store_id, name, base_price, is_available, track_stock, stock_quantity)
+				WITH p AS (INSERT INTO products (id, store_id, name, base_price, is_available, track_stock, stock_quantity)
 				VALUES ($1, $2, 'Limited Geisha Pour Over', 45000, true, true, 3)
+				RETURNING store_id, id, base_price)
+				INSERT INTO product_variants (store_id, product_id, name, price, is_default) SELECT store_id, id, 'Reguler', base_price, true FROM p
 			`, raceProdID, storeAID)
 			return err
 		})
@@ -404,8 +408,10 @@ func TestOrderServiceIntegration_EndToEnd(t *testing.T) {
 		rollbackProdID := uuid.New()
 		err := database.WithTenantTx(ctx, db, storeAID, func(tx *sqlx.Tx) error {
 			_, err := tx.ExecContext(ctx, `
-				INSERT INTO products (id, store_id, name, base_price, is_available, track_stock, stock_quantity)
+				WITH p AS (INSERT INTO products (id, store_id, name, base_price, is_available, track_stock, stock_quantity)
 				VALUES ($1, $2, 'Rollback Test Croissant', 25000, true, true, 10)
+				RETURNING store_id, id, base_price)
+				INSERT INTO product_variants (store_id, product_id, name, price, is_default) SELECT store_id, id, 'Reguler', base_price, true FROM p
 			`, rollbackProdID, storeAID)
 			return err
 		})
@@ -503,8 +509,10 @@ func TestOrderServiceIntegration_EndToEnd(t *testing.T) {
 		resvProdID := uuid.New()
 		err := database.WithTenantTx(ctx, db, storeAID, func(tx *sqlx.Tx) error {
 			_, err := tx.ExecContext(ctx, `
-				INSERT INTO products (id, store_id, name, base_price, is_available, track_stock, stock_quantity)
+				WITH p AS (INSERT INTO products (id, store_id, name, base_price, is_available, track_stock, stock_quantity)
 				VALUES ($1, $2, 'Limited Matcha Ceremonial', 35000, true, true, 5)
+				RETURNING store_id, id, base_price)
+				INSERT INTO product_variants (store_id, product_id, name, price, is_default) SELECT store_id, id, 'Reguler', base_price, true FROM p
 			`, resvProdID, storeAID)
 			return err
 		})

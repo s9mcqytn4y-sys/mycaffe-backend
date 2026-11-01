@@ -1,91 +1,48 @@
-# ADR-004: Catalog Schema Modernization & Variant-Driven Pricing
+# ADR-004: Catalog Cleanup — Variant-Only Pricing, Modifier Bounds, Product-Level Stock
 
-- **Status**: Proposed (Scheduled for Iteration 5 Catalog Refactor)
-- **Deciders**: Principal Backend Engineer, PostgreSQL Architect, Product Owner
-- **Date**: 2026-11-01
+- **Status**: Accepted (owner, 2026-11-01) — implemented in migration 000015, before Iteration 5
+- **Deciders**: Product owner, backend
+- **Supersedes**: the earlier draft of this ADR (drop `base_price`, per-variant stock)
 
----
+## 1. Context
 
-## 1. Context & Problem Statement
+Iteration 3 added `product_variants` (decision K1) but pricing still fell back to `products.base_price`
+when a product had no default variant, so two columns could disagree about the price. Modifier groups
+enforced `min_select <= max_select` in the database, while "a single-choice group allows at most one
+option" lived only in the service. Iteration 4d (void/refund, hotfix v0.4.3) restores stock at product
+level, and Iteration 5 (QR guest orders) prices through the same engine, so both depend on these rules
+being settled first. The cleanup was agreed before 4d and skipped; this ADR records doing it now.
 
-Pada arsitektur awal MyCaffe (Iteration 1–3), tabel `products` memiliki kolom `base_price` dan melacak stok (`track_stock`, `stock_quantity`) langsung pada level produk utama. Seiring diperkenalkannya multi-variant (`product_variants`) pada Iteration 3 dan nested modifier groups pada Iteration 4a:
+## 2. Decisions
 
-1. **Dual Source of Truth Harga**: Terjadi duplikasi antara `products.base_price` dan `product_variants.price`. Jika suatu produk memiliki varian (misal Reguler / Large), `base_price` produk seringkali menjadi nilai dummy atau fallback yang rawan desinkronisasi.
-2. **Keterbatasan Pelacakan Stok**: Pada kafe riil, stok bahan atau item sering kali terikat pada varian spesifik (misal cup 12oz vs 16oz, atau beans Single Origin tertentu). Melacak stok hanya di `products` tidak memungkinkan isolasi stok per varian.
-3. **Inkonsistensi Naming Constraint Modifier**: Pengecekan bounds modifier selection sempat menggunakan nama kolom `min_selections` vs `min_select` pada beberapa dokumen perancangan awal.
-4. **Semantik Status Katalog**: Perlunya pemisahan yang tegas antara produk yang sementara habis di kasir (`is_available = false`) dengan produk yang dipensiunkan dari menu (`archived_at IS NOT NULL`).
+| ID | Decision | Rationale |
+|----|----------|-----------|
+| D1 | **Pricing reads only `product_variants.price`.** A product without an available default variant cannot be sold (`ErrProductUnavailable`, fail closed). | One price source; the catalog API already creates every product with at least one variant. |
+| D2 | **`products.base_price` is kept as a deprecated mirror** of the default variant price (catalog service keeps it in sync; column comment marks it deprecated). It is not dropped. | Dropping a column is a destructive migration and breaks legacy readers; nothing reads it for money any more. Drop later in its own approved migration. |
+| D3 | **Unit stock stays on `products`** (`track_stock`, `stock_quantity`); all variants of a product share it. | Owner decision. Prepared drinks will consume ingredients through per-variant recipes/BOM (K2, inventory iteration), so unit stock only matters for ready-to-serve items. The void/refund stock helper fixed in v0.4.3 stays unchanged. |
+| D4 | **Database CHECK `chk_modifier_groups_single_max`**: `selection_type <> 'single' OR max_select = 1`, next to the existing `chk_modifier_groups_bounds` (`min_select >= 0 AND max_select >= 1 AND min_select <= max_select`). | The service rule now also holds for rows written outside the API. |
+| D5 | **Status semantics unchanged**: `is_available` = temporarily sold out (shown with a badge); `archived_at` = retired from the menu, kept for order history. | Already implemented in iteration 3. |
 
----
+## 3. Migration 000015
 
-## 2. Decision Drivers
+1. Products with active variants but no default: the first variant (by `display_order`, `created_at`) becomes default.
+2. Products with no active variant: a default `Reguler` variant at the legacy `base_price` is created.
+3. `COMMENT ON COLUMN products.base_price` marks it deprecated.
+4. Refuses to run while a single-choice group has `max_select <> 1`; then adds the CHECK.
 
-- **Zero Receipt Mutation**: Snapshot transaksi lama di `order_items` dan `order_item_options` tidak boleh terpengaruh oleh restrukturisasi katalog.
-- **Single Source of Truth**: Satu produk harus selalu memiliki minimal satu varian default (`is_default = true`), dan harga dasar selalu dibaca dari varian yang dipilih.
-- **Fail-Closed Financial Correctness**: Setiap perhitungan harga, diskon, dan pajak harus tetap berbasis integer Rupiah (`int64`/`BIGINT`) murni.
-- **Multi-Tenant RLS Non-Owner Role**: Semua mutasi dan query wajib terisolasi per `store_id` di bawah runtime role `mycaffe_app` (`NOBYPASSRLS`).
+Down removes the CHECK and the comment; backfilled variants are kept (valid catalog data that orders may
+reference).
 
----
+## 4. Consequences
 
-## 3. Considered Options
+- Positive: one price path in `pricing.go`; quote, POS order, tab round and (Iteration 5) QR order all
+  price the same way; modifier bounds hold at the database.
+- Negative: rows inserted directly with SQL must also insert a default variant (tests updated).
+- Open for later: per-variant recipe consumption (K2/C5); dropping `products.base_price` once no reader
+  remains.
 
-### Opsi 1: Mempertahankan `products.base_price` sebagai fallback jika varian kosong
+## 5. Verification
 
-- *Kelebihan*: Kompatibilitas mundur dengan schema Iteration 1.
-- *Kekurangan*: Kompleksitas logika di `pricing.go` (dua jalur kalkulasi harga), rawan bug inkonsistensi saat sinkronisasi frontend POS, dan mempersulit audit harga.
-
-### Opsi 2 (Dipilih): Variant-Driven Pricing Murni (Menghapus `products.base_price`)
-
-- *Kelebihan*:
-  - Setiap produk otomatis memiliki minimal 1 default variant (`"Regular"` / `"Standar"`).
-  - Harga item selalu `variant.price + sum(modifier_options.price_delta)`.
-  - Struktur data bersih, deterministik, dan menyederhanakan validasi harga di `pricing.go`.
-  - Memungkinkan pelacakan stok per varian (`product_variants.stock_quantity`, `product_variants.track_stock`).
-- *Kekurangan*:
-  - Membutuhkan migrasi data additive: backfill default variant untuk produk warisan sebelum mendrop kolom `base_price`.
-
----
-
-## 4. Architectural Decision & Technical Design
-
-### A. Catalog Schema Evolution (Additive Migration Plan)
-
-1. **Backfill Default Variant**:
-   Untuk setiap produk yang belum memiliki entri di `product_variants`, buat satu varian default:
-
-   ```sql
-   INSERT INTO product_variants (id, store_id, product_id, name, sku, price, is_default, track_stock, stock_quantity)
-   SELECT uuid_generate_v4(), store_id, id, 'Regular', 'REG-' || SUBSTRING(id::text, 1, 8), base_price, true, track_stock, stock_quantity
-   FROM products p
-   WHERE NOT EXISTS (SELECT 1 FROM product_variants pv WHERE pv.product_id = p.id);
-   ```
-
-2. **Deprecate & Drop `products.base_price`**:
-   Kolom `base_price` pada `products` di-drop setelah seluruh consumer kode diarahkan ke `product_variants.price`.
-3. **Stock Delegation to Variants**:
-   Pengecekan dan pengurangan stok atomik dialihkan dari `DeductProductStock` ke `DeductVariantStock(ctx, tx, storeID, variantID, qty)`.
-
-### B. Modifier Constraint Standardization
-
-Bounds constraint pada `modifier_groups` dikonsolidasikan secara universal:
-
-```sql
-ALTER TABLE modifier_groups 
-ADD CONSTRAINT chk_modifier_groups_bounds 
-CHECK (min_select >= 0 AND max_select >= 1 AND min_select <= max_select);
-```
-
-### C. Catalog Status Semantics
-
-- **`is_available (BOOLEAN)`**: Status dinamis operasional kasir (misal susu oat habis hari ini -> di-toggle false oleh staff). Produk tetap tampil di menu dengan badge "Habis".
-- **`archived_at (TIMESTAMPTZ)`**: Soft-delete administratif oleh store owner. Produk disembunyikan dari menu POS & QR customer, namun historical orders tetap merujuk UUID produk tanpa melanggar FK RESTRICT.
-
----
-
-## 5. Consequences & Rollout
-
-- **Positif**:
-  - Model domain katalog menjadi sangat rapi dan konsisten dengan praktik terbaik POS modern.
-  - Perhitungan quote dan order creation terpadu 100% pada varian.
-  - POS dan QR table ordering mendapatkan pengalaman UI yang seragam untuk pemilihan varian dan modifier.
-- **Mitigasi Risiko**:
-  - Refactor ini dijadwalkan pada Iteration 5 setelah Milestone POS Core (Shift, Open Tab, dan Split Bill di Iteration 4c) selesai dan teruji secara penuh.
+- `pricing_test.go`: product without default variant is rejected even with a `base_price`.
+- `internal/handler/catalog_adr004_integration_test.go`: order subtotal follows the variant when
+  `base_price` differs; the CHECK rejects a single-choice group with `max_select = 2`.

@@ -96,7 +96,7 @@ refused (refund flow); tab with zero items cannot close; tab older than the busi
 | -- | ------ | -------- |
 | When | before payment (line or whole order) | after payment (line, partial qty, or whole) |
 | Stock | ticket not started ⇒ restock; preparing/ready ⇒ `waste` movement | optional restock flag |
-| Money | none | cash from the open drawer (needs open shift); non-cash refused (409) until decision RF1 is approved |
+| Money | none | cash from the open drawer (needs open shift); non-cash refused (409) until decision RF1 (approved 2026-11-02, see decision register RF1-a…f) is implemented |
 | Authority | own PIN + reason; above `void_refund_owner_threshold` ⇒ owner PIN | same, plus time window: cashier same business day; owner ≤ 7 days |
 | Limits | — | total refunds ≤ paid amount; refund method defaults to the original |
 | Audit | `VOID_ORDER` | `REFUND` |

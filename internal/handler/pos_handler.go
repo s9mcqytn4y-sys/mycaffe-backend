@@ -176,6 +176,7 @@ type POSInitiatePaymentRequest struct {
 	CashTenderedAmount int64                `json:"cash_tendered_amount,omitempty"`
 	ReconciliationRef  string               `json:"reconciliation_ref,omitempty" binding:"max=100"`
 	CallbackURL        string               `json:"callback_url,omitempty" binding:"max=500"`
+	DrawerID           *uuid.UUID           `json:"drawer_id,omitempty"`
 }
 
 // InitiatePayment handles POST /api/v1/pos/orders/:id/payments. Direct tender (cash, static QRIS,
@@ -206,6 +207,7 @@ func (h *POSHandler) InitiatePayment(c *gin.Context) {
 		OrderID: orderID, SplitID: req.SplitID, IdempotencyKey: req.IdempotencyKey, Method: req.Method, Bank: req.Bank,
 		CashTenderedAmount: req.CashTenderedAmount, ReconciliationRef: req.ReconciliationRef, CallbackURL: req.CallbackURL,
 		ActorUserID: &actorID,
+		DrawerID:    req.DrawerID,
 	})
 	if err != nil {
 		paymentError(c, err)
@@ -224,6 +226,8 @@ func paymentError(c *gin.Context, err error) {
 		authError(c, http.StatusForbidden, "FORBIDDEN", err.Error())
 	case errors.Is(err, postgres.ErrOrderNotFound), errors.Is(err, postgres.ErrStoreNotFound):
 		authError(c, http.StatusNotFound, "NOT_FOUND", err.Error())
+	case errors.Is(err, service.ErrNoOpenShift):
+		authError(c, http.StatusConflict, "NO_OPEN_SHIFT", err.Error())
 	case errors.Is(err, service.ErrPaymentIdempotencyConflict), errors.Is(err, service.ErrSplitAlreadyPaid),
 		errors.Is(err, service.ErrOrderNotPayable):
 		authError(c, http.StatusConflict, "PAYMENT_CONFLICT", err.Error())

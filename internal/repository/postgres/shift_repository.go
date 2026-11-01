@@ -165,6 +165,46 @@ func (r *ShiftRepository) GetOpenShiftByDrawer(ctx context.Context, tx *sqlx.Tx,
 	return &s, err
 }
 
+// GetActiveShiftForStaff resolves an active ('open') shift for a cashier or default drawer.
+// If drawerID is specified, it strictly retrieves the open shift on that drawer.
+// If drawerID is nil, it first looks for any open shift opened by the user,
+// and falls back to an open shift on the store's default drawer.
+func (r *ShiftRepository) GetActiveShiftForStaff(ctx context.Context, tx *sqlx.Tx, storeID, userID uuid.UUID, drawerID *uuid.UUID) (*domain.Shift, error) {
+	if drawerID != nil && *drawerID != uuid.Nil {
+		return r.GetOpenShiftByDrawer(ctx, tx, storeID, *drawerID)
+	}
+
+	// 1. Look for an open shift explicitly opened by this user
+	var s domain.Shift
+	queryByUser := `
+		SELECT id, store_id, drawer_id, opened_by, opening_float, opened_at,
+		       closed_by, closed_at, status, expected_cash, counted_cash, variance,
+		       variance_reason, owner_override_by, notes, created_at, updated_at
+		FROM shifts
+		WHERE store_id = $1 AND opened_by = $2 AND status = 'open'
+		ORDER BY opened_at DESC
+		LIMIT 1
+	`
+	err := tx.GetContext(ctx, &s, queryByUser, storeID, userID)
+	if err == nil {
+		return &s, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+
+	// 2. Fallback: check if the default drawer has an open shift
+	defaultDrawer, errDefault := r.GetDefaultCashDrawer(ctx, tx, storeID)
+	if errDefault == nil && defaultDrawer != nil {
+		sDefault, errShift := r.GetOpenShiftByDrawer(ctx, tx, storeID, defaultDrawer.ID)
+		if errShift == nil {
+			return sDefault, nil
+		}
+	}
+
+	return nil, ErrNoOpenShift
+}
+
 func (r *ShiftRepository) UpdateShift(ctx context.Context, tx *sqlx.Tx, s *domain.Shift) error {
 	query := `
 		UPDATE shifts

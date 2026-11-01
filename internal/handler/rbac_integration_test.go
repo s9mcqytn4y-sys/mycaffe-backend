@@ -2,6 +2,7 @@ package handler_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -13,7 +14,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/config"
+	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/domain"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/handler"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/database"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/rbac"
@@ -141,6 +144,44 @@ func TestRBACRoutesIntegration(t *testing.T) {
 	})
 
 	t.Run("CashTenderRecordedAgainstTokenActor", func(t *testing.T) {
+		// Ensure an open shift exists on the store for the cashier
+		shiftRepo := postgres.NewShiftRepository()
+		storeAUID := uuid.MustParse(storeA)
+		cashierUID := uuid.MustParse("a0000003-0000-4000-8000-000000000003")
+		now := time.Now().UTC()
+		_ = database.WithTenantTx(context.Background(), db, storeAUID, func(tx *sqlx.Tx) error {
+			drawer, err := shiftRepo.GetDefaultCashDrawer(context.Background(), tx, storeAUID)
+			var drawerID uuid.UUID
+			if err != nil || drawer == nil {
+				drawerID = uuid.New()
+				_ = shiftRepo.InsertCashDrawer(context.Background(), tx, &domain.CashDrawer{
+					ID:        drawerID,
+					StoreID:   storeAUID,
+					Name:      "Laci Utama RBAC",
+					IsActive:  true,
+					CreatedAt: now,
+					UpdatedAt: now,
+				})
+			} else {
+				drawerID = drawer.ID
+			}
+			existing, err := shiftRepo.GetOpenShiftByDrawer(context.Background(), tx, storeAUID, drawerID)
+			if err != nil || existing == nil {
+				_ = shiftRepo.InsertShift(context.Background(), tx, &domain.Shift{
+					ID:           uuid.New(),
+					StoreID:      storeAUID,
+					DrawerID:     drawerID,
+					OpenedBy:     cashierUID,
+					OpeningFloat: 100000,
+					OpenedAt:     now,
+					Status:       domain.ShiftStatusOpen,
+					CreatedAt:    now,
+					UpdatedAt:    now,
+				})
+			}
+			return nil
+		})
+
 		pay := map[string]any{"idempotency_key": "rbac-cash-" + uuid.NewString()[:8], "method": "cash", "cash_tendered_amount": 50000, "actor_user_id": uuid.NewString()}
 		if w := call(http.MethodPost, "/api/v1/pos/orders/"+orderID+"/payments", barista, pay); w.Code != http.StatusForbidden {
 			t.Fatalf("barista cash tender: %d", w.Code)
@@ -150,11 +191,15 @@ func TestRBACRoutesIntegration(t *testing.T) {
 			t.Fatalf("cashier cash tender: %d %s", w.Code, w.Body.String())
 		}
 		var res struct {
-			Payment struct {
+			OpenDrawer bool `json:"open_drawer"`
+			Payment    struct {
 				VerifiedBy string `json:"verified_by_user_id"`
 			} `json:"payment"`
 		}
 		_ = json.Unmarshal(w.Body.Bytes(), &res)
+		if !res.OpenDrawer {
+			t.Error("expected open_drawer=true on cash tender")
+		}
 		if res.Payment.VerifiedBy != "a0000003-0000-4000-8000-000000000003" {
 			t.Fatalf("payment must be verified by the signed-in cashier, got %q", res.Payment.VerifiedBy)
 		}

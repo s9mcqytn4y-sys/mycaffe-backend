@@ -115,6 +115,7 @@ func (s *PaymentService) initiateDirectCashierPayment(
 				Order:              order,
 				Split:              split,
 				IsIdempotentReplay: true,
+				OpenDrawer:         existing.Method == domain.PaymentMethodCash,
 			}
 			return nil
 		}
@@ -125,6 +126,15 @@ func (s *PaymentService) initiateDirectCashierPayment(
 		}
 		if actor == nil {
 			return ErrUnauthorizedCashierTender
+		}
+
+		// 1. Verify that cashier has an open shift (Strict Fail-Closed for direct cashier tender)
+		activeShift, err := s.shiftRepo.GetActiveShiftForStaff(ctx, tx, trustedStoreID, actor.ID, input.DrawerID)
+		if err != nil {
+			if errors.Is(err, postgres.ErrNoOpenShift) || errors.Is(err, postgres.ErrDrawerNotFound) {
+				return ErrNoOpenShift
+			}
+			return fmt.Errorf("failed to verify active cashier shift: %w", err)
 		}
 
 		order, splits, err := s.orderRepo.GetOrderByIDForUpdate(ctx, tx, trustedStoreID, input.OrderID)
@@ -194,6 +204,36 @@ func (s *PaymentService) initiateDirectCashierPayment(
 			return err
 		}
 
+		// Bind order to active shift
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE orders
+			SET shift_id = $1
+			WHERE store_id = $2 AND id = $3
+		`, activeShift.ID, trustedStoreID, order.ID); err != nil {
+			return fmt.Errorf("failed to bind order to active shift: %w", err)
+		}
+		order.ShiftID = &activeShift.ID
+
+		// If method is cash, record cash movement in the drawer ledger
+		if input.Method == domain.PaymentMethodCash {
+			saleReason := fmt.Sprintf("Penjualan tunai pesanan #%s", order.OrderNumber)
+			cashMovement := &domain.CashMovement{
+				ID:           uuid.New(),
+				StoreID:      trustedStoreID,
+				ShiftID:      activeShift.ID,
+				MovementType: domain.CashMovementSale,
+				Amount:       split.TotalAmount,
+				ActorID:      actor.ID,
+				Reason:       &saleReason,
+				OrderID:      &order.ID,
+				PaymentID:    &payment.ID,
+				CreatedAt:    now,
+			}
+			if err := s.shiftRepo.InsertCashMovement(ctx, tx, cashMovement); err != nil {
+				return fmt.Errorf("failed to record cash movement for cash payment: %w", err)
+			}
+		}
+
 		if _, err := tx.ExecContext(ctx, `
 			UPDATE payment_splits
 			SET status = 'paid', paid_amount = total_amount
@@ -238,6 +278,7 @@ func (s *PaymentService) initiateDirectCashierPayment(
 			Order:              order,
 			Split:              split,
 			IsIdempotentReplay: false,
+			OpenDrawer:         input.Method == domain.PaymentMethodCash,
 		}
 		return nil
 	})
@@ -391,6 +432,13 @@ func (s *PaymentService) initiateMidtransGatewayPayment(
 			order.PaymentStatus = domain.OrderPaymentStatusPending
 			if err := s.orderRepo.UpdateOrderStatusAndStock(ctx, tx, order); err != nil {
 				return err
+			}
+		}
+
+		if input.ActorUserID != nil && order.ShiftID == nil {
+			if activeShift, err := s.shiftRepo.GetActiveShiftForStaff(ctx, tx, trustedStoreID, *input.ActorUserID, input.DrawerID); err == nil && activeShift != nil {
+				_, _ = tx.ExecContext(ctx, `UPDATE orders SET shift_id = $1 WHERE store_id = $2 AND id = $3`, activeShift.ID, trustedStoreID, order.ID)
+				order.ShiftID = &activeShift.ID
 			}
 		}
 

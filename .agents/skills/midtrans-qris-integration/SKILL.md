@@ -12,6 +12,6 @@ description: "Implements or reviews Midtrans QRIS checkout, payment notification
 5. Create a pending payment/order record safely, then call the gateway with a stable unique transaction identity. Avoid duplicate charges on retry.
 6. Verify provider notifications according to the current official signature/authentication specification. Reconcile transaction identity, expected amount, currency, and final provider status.
 7. Make webhook processing idempotent and safe for repeated/out-of-order events. Only a confirmed valid payment may create a kitchen queue event.
-8. Keep sandbox and production credentials separate. Automated tests must use mocks/fixtures or sandbox—not real-money calls.
+8. Keep sandbox and production credentials separate. Automated tests must use mocks/fixtures or sandbox, never real-money calls.
 9. Add tests for invalid signatures, amount mismatch, duplicate notification, timeout, expired payment, cancelled/denied status, and success.
 10. Document what the browser can and cannot guarantee when the customer uses one phone for both the menu and mobile banking.

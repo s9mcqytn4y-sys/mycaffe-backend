@@ -1,0 +1,14 @@
+Halo {{.RecipientName}},
+
+Ada permintaan untuk mengatur ulang PIN akun Anda di {{.StoreName}}{{if .ActorName}} (diminta oleh {{.ActorName}}){{end}}.
+Buat PIN 6 digit yang baru melalui tautan berikut:
+
+{{.ActionURL}}
+
+Tautan berlaku sampai {{.ExpiresAt}} dan hanya bisa dipakai sekali.
+Setelah PIN baru dibuat, semua perangkat yang sedang masuk akan dikeluarkan.
+
+Tidak meminta reset? Abaikan email ini. PIN lama Anda tetap berlaku.
+
+--
+{{.StoreName}} (MyCaffe). Email otomatis, mohon tidak dibalas.

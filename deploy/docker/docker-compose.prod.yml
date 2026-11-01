@@ -36,7 +36,7 @@ services:
       - pgdata:/var/lib/postgresql
       - ../postgres/00-init-roles.sh:/docker-entrypoint-initdb.d/00-init-roles.sh:ro
     networks:
-      - mycaffe-internal
+      - mycaffe-data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_MIGRATOR_USER} -d ${DB_NAME}"]
       interval: 10s
@@ -61,20 +61,12 @@ services:
         condition: service_healthy
     environment:
       APP_ENV: "production"
-      DATABASE_URL: ${COMPOSE_DATABASE_URL:?COMPOSE_DATABASE_URL must be set}
       DATABASE_MIGRATION_URL: ${COMPOSE_DATABASE_MIGRATION_URL:?COMPOSE_DATABASE_MIGRATION_URL must be set}
       DB_APP_USER: ${DB_APP_USER:-mycaffe_app}
       DB_APP_PASSWORD: ${DB_APP_PASSWORD:?DB_APP_PASSWORD must be set}
-      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?JWT_SECRET_KEY must be set}
-      JWT_EXPIRED_HOURS: ${JWT_EXPIRED_HOURS:-24}
-      MIDTRANS_MERCHANT_ID: ${MIDTRANS_MERCHANT_ID:?MIDTRANS_MERCHANT_ID must be set}
-      MIDTRANS_SERVER_KEY: ${MIDTRANS_SERVER_KEY:?MIDTRANS_SERVER_KEY must be set}
-      MIDTRANS_CLIENT_KEY: ${MIDTRANS_CLIENT_KEY:?MIDTRANS_CLIENT_KEY must be set}
-      MIDTRANS_IS_PRODUCTION: "true"
-      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:?ALLOWED_ORIGINS must be set}
     entrypoint: ["/app/mycaffe-migrate", "-action=up", "-dir=/app/db/migrations"]
     networks:
-      - mycaffe-internal
+      - mycaffe-data
 
   api:
     image: ghcr.io/s9mcqytn4y-sys/mycaffe-api:${API_IMAGE_TAG:?API_IMAGE_TAG must be pinned}
@@ -90,6 +82,8 @@ services:
       APP_ENV: "production"
       FRONTEND_URL: ${FRONTEND_URL:?FRONTEND_URL must be set}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:?ALLOWED_ORIGINS must be set}
+      # Only the edge network (Nginx) may set X-Forwarded-For; keeps ClientIP() unspoofable.
+      TRUSTED_PROXIES: ${EDGE_SUBNET:-172.30.0.0/24}
       DATABASE_URL: ${COMPOSE_DATABASE_URL:?COMPOSE_DATABASE_URL must be set}
       DB_APP_USER: ${DB_APP_USER:-mycaffe_app}
       DB_APP_PASSWORD: ${DB_APP_PASSWORD:?DB_APP_PASSWORD must be set}
@@ -99,16 +93,29 @@ services:
       MIDTRANS_SERVER_KEY: ${MIDTRANS_SERVER_KEY:?MIDTRANS_SERVER_KEY must be set}
       MIDTRANS_CLIENT_KEY: ${MIDTRANS_CLIENT_KEY:?MIDTRANS_CLIENT_KEY must be set}
       MIDTRANS_IS_PRODUCTION: "true"
+      # Hostinger mailbox (smtp.hostinger.com:465, implicit TLS). The API refuses to start without it.
+      EMAIL_DRIVER: smtp
+      SMTP_HOST: ${SMTP_HOST:-smtp.hostinger.com}
+      SMTP_PORT: ${SMTP_PORT:-465}
+      SMTP_USERNAME: ${SMTP_USERNAME:?SMTP_USERNAME must be set}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:?SMTP_PASSWORD must be set}
+      EMAIL_FROM_ADDRESS: ${EMAIL_FROM_ADDRESS:?EMAIL_FROM_ADDRESS must be set}
+      EMAIL_FROM_NAME: ${EMAIL_FROM_NAME:-MyCaffe}
+      APP_PUBLIC_URL: ${APP_PUBLIC_URL:?APP_PUBLIC_URL must be set}
+      # Slug created by cmd/migrate -action=bootstrap-store; empty for multi-branch.
+      DEFAULT_STORE_SLUG: ${DEFAULT_STORE_SLUG:-}
       STORAGE_DRIVER: ${STORAGE_DRIVER:-r2}
       R2_ACCOUNT_ID: ${R2_ACCOUNT_ID:-}
       R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:-}
       R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:-}
       R2_BUCKET_NAME: ${R2_BUCKET_NAME:-mycaffe-media}
+      R2_PRIVATE_BUCKET_NAME: ${R2_PRIVATE_BUCKET_NAME:-mycaffe-private-media}
       R2_PUBLIC_URL: ${R2_PUBLIC_URL:-}
       SENTRY_DSN: ${SENTRY_DSN:-}
       SENTRY_ENVIRONMENT: "production"
     networks:
-      - mycaffe-internal
+      - mycaffe-edge
+      - mycaffe-data
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health/ready"]
       interval: 15s
@@ -135,7 +142,7 @@ services:
       NODE_ENV: "production"
       PORT: "3000"
     networks:
-      - mycaffe-internal
+      - mycaffe-edge
     deploy:
       resources:
         limits:
@@ -165,7 +172,7 @@ services:
       web:
         condition: service_started
     networks:
-      - mycaffe-internal
+      - mycaffe-edge
     deploy:
       resources:
         limits:
@@ -180,6 +187,8 @@ services:
       - certbot-etc:/etc/letsencrypt
       - certbot-var:/var/lib/letsencrypt
       - web-root:/var/www/certbot
+    networks:
+      - mycaffe-edge
     entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot --quiet; sleep 12h & wait $${!}; done;'"
 
 volumes:
@@ -190,5 +199,13 @@ volumes:
   web-root:
 
 networks:
-  mycaffe-internal:
+  mycaffe-edge:
     driver: bridge
+    # Fixed subnet so the API can trust exactly this proxy hop (TRUSTED_PROXIES).
+    # Changing it on an existing host requires `docker compose down` to recreate the network.
+    ipam:
+      config:
+        - subnet: ${EDGE_SUBNET:-172.30.0.0/24}
+  mycaffe-data:
+    driver: bridge
+    internal: true

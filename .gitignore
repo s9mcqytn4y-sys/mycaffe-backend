@@ -6,6 +6,8 @@
 
 # Antigravity local MCP config can contain project identifiers/auth config
 .agents/mcp_config.json
+.agents/skills/
+skills-lock.json
 
 # Frontend/build outputs (useful if any tooling runs in this repo)
 node_modules/
@@ -25,6 +27,8 @@ coverage/
 # Local/editor/OS noise
 .DS_Store
 Thumbs.db
+.wrangler/
+.claude/
 .vscode/*
 !.vscode/settings.json
 !.vscode/extensions.json

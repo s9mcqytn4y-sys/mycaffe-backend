@@ -2,6 +2,7 @@ package config_test
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/config"
@@ -97,11 +98,19 @@ func TestValidateConfigProductionFailClosed(t *testing.T) {
 		t.Errorf("expected ValidateConfig to fail for placeholder MidtransServerKey in production, got nil")
 	}
 
-	// Valid production configuration must pass
+	// Valid production configuration must pass (with a full SMTP mailer)
+	cfg.EmailDriver, cfg.SMTPHost, cfg.SMTPUsername, cfg.SMTPPassword = "smtp", "smtp.hostinger.com", "noreply@mycaffe.com", "smtp-mailbox-secret"
+	cfg.EmailFromEmail, cfg.SMTPTLSMode, cfg.AppPublicURL = "noreply@mycaffe.com", "implicit", "https://pos.mycaffe.com"
 	cfg.MidtransServerKey = "Mid-server-production-valid-key-999"
 	cfg.AllowedOrigins = []string{"https://app.mycaffe.com", "https://pos.mycaffe.com"}
 	if err := config.ValidateConfig(cfg); err != nil {
 		t.Errorf("expected valid production config to pass, got error: %v", err)
+	}
+
+	// The log mailer prints link secrets and must be rejected in an otherwise valid production config.
+	cfg.EmailDriver = "log"
+	if err := config.ValidateConfig(cfg); err == nil || !strings.Contains(err.Error(), "EMAIL_DRIVER") {
+		t.Errorf("expected EMAIL_DRIVER=log to fail closed in production, got %v", err)
 	}
 }
 
@@ -183,4 +192,80 @@ func TestIsOriginAllowed(t *testing.T) {
 	if cfg.IsOriginAllowed("") {
 		t.Errorf("expected empty origin to be blocked")
 	}
+}
+
+func TestValidateMigrateConfigLeastPrivilege(t *testing.T) {
+	// Migrate config in production must succeed WITHOUT JWT_SECRET_KEY or MIDTRANS_SERVER_KEY
+	cfg := &config.Config{
+		AppEnv:               "production",
+		DatabaseMigrationURL: "postgres://mycaffe_migrator:strong_prod_mig_pass_99@postgres:5432/mycaffe_pos?sslmode=disable",
+		DBAppUser:            "mycaffe_app",
+		DBAppPassword:        "strong_prod_app_pass_99",
+	}
+	if err := config.ValidateMigrateConfig(cfg); err != nil {
+		t.Fatalf("expected ValidateMigrateConfig to succeed without JWT/Midtrans secrets, got: %v", err)
+	}
+
+	// Placeholder migration password in production must fail
+	cfgPlaceholder := &config.Config{
+		AppEnv:               "production",
+		DatabaseMigrationURL: "postgres://mycaffe_migrator:change_me_in_production@postgres:5432/mycaffe_pos",
+	}
+	if err := config.ValidateMigrateConfig(cfgPlaceholder); err == nil {
+		t.Fatal("expected ValidateMigrateConfig to reject placeholder DSN in production")
+	}
+}
+
+func TestLoadConfigTrustedProxies(t *testing.T) {
+	t.Setenv("APP_ENV", "development")
+	t.Setenv("TRUSTED_PROXIES", " 172.18.0.0/16 , ,10.0.0.5")
+
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig failed: %v", err)
+	}
+	if len(cfg.TrustedProxies) != 2 || cfg.TrustedProxies[0] != "172.18.0.0/16" || cfg.TrustedProxies[1] != "10.0.0.5" {
+		t.Fatalf("unexpected TrustedProxies: %q", cfg.TrustedProxies)
+	}
+
+	t.Setenv("TRUSTED_PROXIES", "")
+	cfg, err = config.LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig failed: %v", err)
+	}
+	if len(cfg.TrustedProxies) != 0 {
+		t.Fatalf("expected no trusted proxies by default, got %q", cfg.TrustedProxies)
+	}
+}
+
+func TestLoadConfigEmailDriver(t *testing.T) {
+	t.Setenv("APP_ENV", "development")
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if cfg.EmailDriver != "log" {
+		t.Fatalf("development must default to the log driver, got %q", cfg.EmailDriver)
+	}
+
+	// Hostinger: port 465 implies implicit TLS.
+	t.Setenv("EMAIL_DRIVER", "smtp")
+	t.Setenv("SMTP_HOST", "smtp.hostinger.com")
+	t.Setenv("SMTP_PORT", "465")
+	t.Setenv("SMTP_USERNAME", "noreply@kafe.test")
+	t.Setenv("SMTP_PASSWORD", "mailbox-secret")
+	t.Setenv("APP_PUBLIC_URL", "https://pos.kafe.test/")
+	cfg, err = config.LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig smtp: %v", err)
+	}
+	if cfg.SMTPTLSMode != "implicit" || cfg.EmailFromEmail != "noreply@kafe.test" || cfg.AppPublicURL != "https://pos.kafe.test" {
+		t.Fatalf("unexpected smtp config: mode=%s from=%s url=%s", cfg.SMTPTLSMode, cfg.EmailFromEmail, cfg.AppPublicURL)
+	}
+
+	t.Setenv("SMTP_PASSWORD", "")
+	if _, err := config.LoadConfig(); err == nil {
+		t.Fatal("smtp driver without a password must fail closed")
+	}
+
 }

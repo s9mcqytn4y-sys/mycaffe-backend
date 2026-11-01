@@ -59,6 +59,13 @@
         "-race"
     ],
     "go.testTimeout": "60s",
+    "claudeCode.preferredLocation": "sidebar",
+    "claudeCode.initialPermissionMode": "default",
+    "claudeCode.allowDangerouslySkipPermissions": false,
+    "claudeCode.autosave": true,
+    "claudeCode.respectGitIgnore": true,
+    "claudeCode.useCtrlEnterToSend": true,
+    "claudeCode.enableNewConversationShortcut": true,
     "errorlens.enabled": true,
     "errorlens.fontSize": "12px",
     "terminal.integrated.defaultProfile.windows": "PowerShell",
@@ -71,6 +78,10 @@
     },
     "terminal.integrated.fontFamily": "Cascadia Code, Consolas",
     "terminal.integrated.fontSize": 13,
+    "powershell.startAutomatically": false,
+    "powershell.integratedConsole.showOnStartup": false,
+    "powershell.developer.editorServicesLogLevel": "Normal",
+    "powershell.codeFormatting.preset": "OTBS",
     "files.associations": {
         ".env*": "dotenv",
         "*.sql": "sql",
@@ -87,8 +98,12 @@
         "**/.git/subtree-cache/**": true,
         "**/node_modules/**": true,
         "**/bin/**": true,
-        "**/.gemini/**": true
+        "**/.gemini/**": true,
+        "**/.wrangler/**": true,
+        "**/.agents/**": true,
+        "**/.claude/**": true
     },
     "files.trimTrailingWhitespace": true,
-    "files.insertFinalNewline": true
+    "files.insertFinalNewline": true,
+    "files.eol": "\n"
 }

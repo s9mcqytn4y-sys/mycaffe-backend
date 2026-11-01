@@ -1,0 +1,7 @@
+b72e71ed59e93be68dd08ad75062a89867b4c1ce:.agents/skills/integrate-midtrans-payments/assets/fixtures/snap-notification-expire.json:generic-api-key:8
+b72e71ed59e93be68dd08ad75062a89867b4c1ce:.agents/skills/integrate-midtrans-payments/assets/fixtures/snap-notification-pending.json:generic-api-key:8
+b72e71ed59e93be68dd08ad75062a89867b4c1ce:.agents/skills/integrate-midtrans-payments/assets/fixtures/snap-notification-settlement.json:generic-api-key:8
+b72e71ed59e93be68dd08ad75062a89867b4c1ce:.agents/skills/integrate-midtrans-payments/assets/fixtures/snap-notification-refund.json:generic-api-key:8
+b72e71ed59e93be68dd08ad75062a89867b4c1ce:.agents/skills/integrate-midtrans-payments/assets/fixtures/payment-link-notification.json:generic-api-key:8
+b72e71ed59e93be68dd08ad75062a89867b4c1ce:.agents/skills/integrate-midtrans-payments/assets/fixtures/snap-notification-partial-refund.json:generic-api-key:8
+b72e71ed59e93be68dd08ad75062a89867b4c1ce:.agents/skills/integrate-midtrans-payments/assets/fixtures/recurring-notification-card.json:generic-api-key:9

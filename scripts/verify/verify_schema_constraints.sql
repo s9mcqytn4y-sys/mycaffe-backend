@@ -73,11 +73,11 @@ BEGIN
     RAISE NOTICE 'SUCCESS: store_daily_sequences atomic increment verified (seq: % -> %).', v_seq_1, v_seq_2;
 
     -- 5. Insert Order, Order Item, Order Item Option (with 1-level Sub-Addon), Split & Payment in Store A and Store B
-    INSERT INTO orders (store_id, idempotency_key, order_number, queue_number, customer_name, status, payment_status, subtotal_amount, total_amount) 
-    VALUES (v_store_a, 'idem-order-a-001', 'ORD-TEST-001', 'A01', 'Customer Alpha', 'pending_payment', 'pending', 33000, 33000) RETURNING id INTO v_order_a;
+    INSERT INTO orders (store_id, idempotency_key, request_hash, order_number, queue_number, customer_name, status, payment_status, subtotal_amount, total_amount) 
+    VALUES (v_store_a, 'idem-order-a-001', 'req-hash-a-001', 'ORD-TEST-001', 'A01', 'Customer Alpha', 'pending_payment', 'pending', 33000, 33000) RETURNING id INTO v_order_a;
 
-    INSERT INTO orders (store_id, idempotency_key, order_number, queue_number, customer_name, status, payment_status, subtotal_amount, total_amount) 
-    VALUES (v_store_b, 'idem-order-b-001', 'EXP-TEST-001', 'B01', 'Customer Beta', 'pending_payment', 'pending', 25000, 25000) RETURNING id INTO v_order_b;
+    INSERT INTO orders (store_id, idempotency_key, request_hash, order_number, queue_number, customer_name, status, payment_status, subtotal_amount, total_amount) 
+    VALUES (v_store_b, 'idem-order-b-001', 'req-hash-b-001', 'EXP-TEST-001', 'B01', 'Customer Beta', 'pending_payment', 'pending', 25000, 25000) RETURNING id INTO v_order_b;
 
     INSERT INTO order_items (store_id, order_id, product_id, unit_base_price, modifier_total_price, snapshot_name, snapshot_price, quantity, subtotal_amount)
     VALUES (v_store_a, v_order_a, v_prod_a, 25000, 8000, 'Classic Iced Latte', 33000, 1, 33000) RETURNING id INTO v_item_a;
@@ -92,13 +92,14 @@ BEGIN
     INSERT INTO payment_splits (store_id, order_id, split_number, label, split_mode, subtotal_amount, total_amount, status)
     VALUES (v_store_a, v_order_a, 1, 'Split 1', 'full', 33000, 33000, 'pending') RETURNING id INTO v_split_a;
 
-    INSERT INTO payments (store_id, order_id, split_id, attempt_no, idempotency_key, provider_order_id, amount, method, status, transaction_id)
-    VALUES (v_store_a, v_order_a, v_split_a, 1, 'idem-test-001', 'ORD-TEST-001-S1-A1', 33000, 'qris', 'pending', 'tx-unique-001') RETURNING id INTO v_payment_a;
+    v_payment_a := uuid_generate_v4();
+    INSERT INTO payments (id, store_id, order_id, split_id, attempt_no, idempotency_key, provider_order_id, amount, method, status, transaction_id)
+    VALUES (v_payment_a, v_store_a, v_order_a, v_split_a, 1, 'idem-test-001', v_payment_a::text, 33000, 'qris', 'pending', 'tx-unique-001');
 
     -- 5B. Verify Payment Attempt Idempotency Constraint (uq_payments_store_idempotency_key)
     BEGIN
         INSERT INTO payments (store_id, order_id, split_id, attempt_no, idempotency_key, provider_order_id, amount, method, status)
-        VALUES (v_store_a, v_order_a, v_split_a, 2, 'idem-test-001', 'ORD-TEST-001-S1-A2', 33000, 'qris', 'pending');
+        VALUES (v_store_a, v_order_a, v_split_a, 2, 'idem-test-001', uuid_generate_v4()::text, 33000, 'qris', 'pending');
         RAISE EXCEPTION 'Duplicate payment idempotency_key was permitted!';
     EXCEPTION WHEN unique_violation THEN
         RAISE NOTICE 'SUCCESS: Duplicate payment idempotency_key rejected by uq_payments_store_idempotency_key.';
@@ -158,22 +159,28 @@ BEGIN
     END IF;
     RAISE NOTICE 'SUCCESS: Product deletion set product_id to NULL while preserving historical order_item.';
 
-    -- 9. Test Webhook Idempotency (Unique constraint on provider, order_number, transaction_status, status_code, transaction_id)
+    -- 9. Test webhook idempotency using the durable (store_id, event_hash) inbox key.
     INSERT INTO payment_notification_logs (
-        store_id, order_id, provider, transaction_id, order_number, status_code, transaction_status, gross_amount, raw_payload
+        store_id, order_id, provider, provider_order_id, event_hash, transaction_id,
+        order_number, status_code, transaction_status, gross_amount, raw_payload
     ) VALUES (
-        v_store_a, v_order_a, 'midtrans', 'trx-test-12345', 'ORD-TEST-001-S1-A1', '200', 'settlement', 33000, '{"status": "settlement"}'::jsonb
+        v_store_a, v_order_a, 'midtrans', v_payment_a::text, repeat('a', 64),
+        'trx-test-12345', 'ORD-TEST-001-S1-A1', '200', 'settlement', 33000,
+        '{"status": "settlement"}'::jsonb
     );
 
     BEGIN
         INSERT INTO payment_notification_logs (
-            store_id, order_id, provider, transaction_id, order_number, status_code, transaction_status, gross_amount, raw_payload
+            store_id, order_id, provider, provider_order_id, event_hash, transaction_id,
+            order_number, status_code, transaction_status, gross_amount, raw_payload
         ) VALUES (
-            v_store_a, v_order_a, 'midtrans', 'trx-test-12345', 'ORD-TEST-001-S1-A1', '200', 'settlement', 33000, '{"status": "settlement"}'::jsonb
+            v_store_a, v_order_a, 'midtrans', v_payment_a::text, repeat('a', 64),
+            'trx-test-12345', 'ORD-TEST-001-S1-A1', '200', 'settlement', 33000,
+            '{"status": "settlement"}'::jsonb
         );
         RAISE EXCEPTION 'Duplicate webhook insert was permitted!';
     EXCEPTION WHEN unique_violation THEN
-        RAISE NOTICE 'SUCCESS: Duplicate webhook notification was safely rejected by unique constraint.';
+        RAISE NOTICE 'SUCCESS: Duplicate webhook event rejected by uq_payment_notification_logs_event_hash.';
     END;
 END $$;
 
@@ -183,6 +190,7 @@ DECLARE
     v_store_a UUID;
     v_store_b UUID;
     v_resolved_store UUID;
+    v_provider_order_id VARCHAR(100);
     v_visible_stores INT;
     v_visible_orders INT;
     v_visible_notifs INT;
@@ -194,11 +202,17 @@ BEGIN
     SELECT id INTO v_store_a FROM stores WHERE slug = 'demo-store-a';
     SELECT id INTO v_store_b FROM stores WHERE slug = 'demo-store-b';
 
+    -- Resolve the provider ID before switching to the app role; RLS intentionally hides
+    -- payment rows until a tenant context is set.
+    SELECT provider_order_id INTO v_provider_order_id
+    FROM payments
+    WHERE store_id = v_store_a AND idempotency_key = 'idem-test-001';
+
     -- Switch to runtime application role (NOBYPASSRLS)
     EXECUTE 'SET LOCAL ROLE mycaffe_app';
 
     -- 10A. Verify controlled SECURITY DEFINER webhook context resolver works before setting tenant context
-    SELECT store_id INTO v_resolved_store FROM resolve_payment_webhook_context('ORD-TEST-001-S1-A1');
+    SELECT store_id INTO v_resolved_store FROM resolve_payment_webhook_context(v_provider_order_id);
     IF v_resolved_store IS DISTINCT FROM v_store_a THEN
         RAISE EXCEPTION 'resolve_payment_webhook_context failed: expected %, got %', v_store_a, v_resolved_store;
     END IF;
@@ -262,6 +276,45 @@ BEGIN
     END IF;
 
     EXECUTE 'RESET ROLE';
+
+    -- 10F. Staff auth sessions (migration 000005): RLS enabled, runtime role cannot DELETE,
+    --      and the pre-auth resolver is not executable by PUBLIC.
+    IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.auth_sessions'::regclass) THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: auth_sessions does not have row-level security enabled!';
+    END IF;
+    IF has_table_privilege('mycaffe_app', 'public.auth_sessions', 'DELETE') THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may DELETE auth_sessions (sessions must be revoked, not deleted)!';
+    END IF;
+    IF NOT has_function_privilege('mycaffe_app', 'public.resolve_store_for_login(character varying)', 'EXECUTE') THEN
+        RAISE EXCEPTION 'resolve_store_for_login is not executable by mycaffe_app';
+    END IF;
+    IF EXISTS (
+        SELECT 1 FROM pg_proc p, aclexplode(p.proacl) a
+        WHERE p.proname = 'resolve_store_for_login' AND a.grantee = 0 AND a.privilege_type = 'EXECUTE'
+    ) THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: resolve_store_for_login is executable by PUBLIC!';
+    END IF;
+
+    -- 10G. Account tokens and email outbox (migration 000006): RLS on, no DELETE, discovery
+    --      function not executable by PUBLIC.
+    IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.account_tokens'::regclass)
+       OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.email_outbox'::regclass)
+       OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.store_settings'::regclass)
+       OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.product_variants'::regclass) THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: account_tokens/email_outbox/store_settings must have row-level security enabled!';
+    END IF;
+    IF has_table_privilege('mycaffe_app', 'public.account_tokens', 'DELETE')
+       OR has_table_privilege('mycaffe_app', 'public.email_outbox', 'DELETE')
+       OR has_table_privilege('mycaffe_app', 'public.product_variants', 'DELETE') THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may DELETE account_tokens/email_outbox!';
+    END IF;
+    IF EXISTS (
+        SELECT 1 FROM pg_proc p, aclexplode(p.proacl) a
+        WHERE p.proname = 'list_stores_with_due_email' AND a.grantee = 0 AND a.privilege_type = 'EXECUTE'
+    ) THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: list_stores_with_due_email is executable by PUBLIC!';
+    END IF;
+
     RAISE NOTICE 'SUCCESS: Row-Level Security (RLS) on stores/orders/payments/notifications and DELETE privilege revocation verified.';
     RAISE NOTICE 'ALL CONSTRAINTS, RLS POLICIES, AND BEHAVIORAL VERIFICATIONS PASSED SUCCESSFULLY.';
 END $$;

@@ -9,14 +9,49 @@ import (
 type OrderStatus string
 
 const (
-	OrderStatusPendingPayment OrderStatus = "pending_payment" // Menunggu konfirmasi pembayaran
-	OrderStatusQueued         OrderStatus = "queued"          // Terkonfirmasi masuk antrean KDS
-	OrderStatusPreparing      OrderStatus = "preparing"       // Sedang dimasak/dibuat
-	OrderStatusReady          OrderStatus = "ready"           // Siap diambil / diantar
-	OrderStatusServed         OrderStatus = "served"          // Sudah diantar ke meja pelanggan
-	OrderStatusCompleted      OrderStatus = "completed"       // Selesai (dikonfirmasi diterima/auto-complete)
-	OrderStatusCancelled      OrderStatus = "cancelled"       // Dibatalkan
+	OrderStatusPendingPayment OrderStatus = "pending_payment"
+	OrderStatusOpen           OrderStatus = "open"
+	OrderStatusQueued         OrderStatus = "queued"
+	OrderStatusPreparing      OrderStatus = "preparing"
+	OrderStatusReady          OrderStatus = "ready"
+	OrderStatusServed         OrderStatus = "served"
+	OrderStatusCompleted      OrderStatus = "completed"
+	OrderStatusCancelled      OrderStatus = "cancelled"
 )
+
+func ValidOrderStatuses() []OrderStatus {
+	return []OrderStatus{
+		OrderStatusPendingPayment,
+		OrderStatusOpen,
+		OrderStatusQueued,
+		OrderStatusPreparing,
+		OrderStatusReady,
+		OrderStatusServed,
+		OrderStatusCompleted,
+		OrderStatusCancelled,
+	}
+}
+
+func CanTransitionOrderStatus(from, to OrderStatus) bool {
+	if from == to {
+		return true
+	}
+	switch from {
+	case OrderStatusPendingPayment:
+		return to == OrderStatusQueued || to == OrderStatusCancelled
+	case OrderStatusOpen:
+		return to == OrderStatusQueued || to == OrderStatusPreparing || to == OrderStatusReady || to == OrderStatusServed || to == OrderStatusCompleted || to == OrderStatusCancelled
+	case OrderStatusQueued:
+		return to == OrderStatusPreparing || to == OrderStatusCancelled
+	case OrderStatusPreparing:
+		return to == OrderStatusReady
+	case OrderStatusReady:
+		return to == OrderStatusServed || to == OrderStatusCompleted
+	case OrderStatusServed:
+		return to == OrderStatusCompleted
+	}
+	return false
+}
 
 type OrderType string
 
@@ -24,6 +59,10 @@ const (
 	OrderTypeDineIn   OrderType = "dine_in"
 	OrderTypeTakeaway OrderType = "takeaway"
 )
+
+func ValidOrderTypes() []OrderType {
+	return []OrderType{OrderTypeDineIn, OrderTypeTakeaway}
+}
 
 type BillingMode string
 
@@ -33,24 +72,51 @@ const (
 	BillingModeSplitBill BillingMode = "split_bill"
 )
 
-type Order struct {
-	ID             uuid.UUID          `json:"id" db:"id"`
-	StoreID        uuid.UUID          `json:"store_id" db:"store_id"`
-	OrderNumber    string             `json:"order_number" db:"order_number"` // Display/Business ID: e.g. ORD-20261028-0001
-	QueueNumber    string             `json:"queue_number" db:"queue_number"` // Display Queue: e.g. A001
-	TableNumber    string             `json:"table_number" db:"table_number"`
-	CustomerName   string             `json:"customer_name" db:"customer_name"`
-	CustomerPhone  string             `json:"customer_phone" db:"customer_phone"`
-	OrderType      OrderType          `json:"order_type" db:"order_type"`
-	BillingMode    BillingMode        `json:"billing_mode" db:"billing_mode"`
-	Status         OrderStatus        `json:"status" db:"status"`
-	PaymentStatus  OrderPaymentStatus `json:"payment_status" db:"payment_status"`
-	IdempotencyKey *string            `json:"idempotency_key,omitempty" db:"idempotency_key"`
+func ValidBillingModes() []BillingMode {
+	return []BillingMode{BillingModePayFirst, BillingModeOpenTab, BillingModeSplitBill}
+}
 
-	// Financials in Integer Rupiah (no float!)
+type OrderStockStatus string
+
+const (
+	OrderStockStatusNotTracked OrderStockStatus = "not_tracked"
+	OrderStockStatusReserved   OrderStockStatus = "reserved"
+	OrderStockStatusCommitted  OrderStockStatus = "committed"
+	OrderStockStatusReleased   OrderStockStatus = "released"
+)
+
+func ValidOrderStockStatuses() []OrderStockStatus {
+	return []OrderStockStatus{
+		OrderStockStatusNotTracked,
+		OrderStockStatusReserved,
+		OrderStockStatusCommitted,
+		OrderStockStatusReleased,
+	}
+}
+
+type Order struct {
+	ID              uuid.UUID          `json:"id" db:"id"`
+	StoreID         uuid.UUID          `json:"store_id" db:"store_id"`
+	IdempotencyKey  string             `json:"idempotency_key,omitempty" db:"idempotency_key"`
+	RequestHash     string             `json:"request_hash,omitempty" db:"request_hash"`
+	OrderNumber     string             `json:"order_number" db:"order_number"`
+	QueueNumber     string             `json:"queue_number" db:"queue_number"`
+	TableNumber     string             `json:"table_number" db:"table_number"`
+	CustomerName    string             `json:"customer_name" db:"customer_name"`
+	CustomerPhone   string             `json:"customer_phone" db:"customer_phone"`
+	OrderType       OrderType          `json:"order_type" db:"order_type"`
+	BillingMode     BillingMode        `json:"billing_mode" db:"billing_mode"`
+	Status          OrderStatus        `json:"status" db:"status"`
+	PaymentStatus   OrderPaymentStatus `json:"payment_status" db:"payment_status"`
+	StockStatus     OrderStockStatus   `json:"stock_status" db:"stock_status"`
+	ExpiresAt       *time.Time         `json:"expires_at,omitempty" db:"expires_at"`
+	CreatedByUserID *uuid.UUID         `json:"created_by_user_id,omitempty" db:"created_by_user_id"`
+	ShiftID         *uuid.UUID         `json:"shift_id,omitempty" db:"shift_id"`
+	TableID         *uuid.UUID         `json:"table_id,omitempty" db:"table_id"`
+
 	SubtotalAmount      int64 `json:"subtotal_amount" db:"subtotal_amount"`
 	DiscountAmount      int64 `json:"discount_amount" db:"discount_amount"`
-	TaxAmount           int64 `json:"tax_amount" db:"tax_amount"` // PB1 / Pajak Restoran
+	TaxAmount           int64 `json:"tax_amount" db:"tax_amount"`
 	ServiceChargeAmount int64 `json:"service_charge_amount" db:"service_charge_amount"`
 	TotalAmount         int64 `json:"total_amount" db:"total_amount"`
 	PaidAmount          int64 `json:"paid_amount" db:"paid_amount"`
@@ -66,7 +132,10 @@ type OrderItem struct {
 	ID                 uuid.UUID         `json:"id" db:"id"`
 	StoreID            uuid.UUID         `json:"store_id" db:"store_id"`
 	OrderID            uuid.UUID         `json:"order_id" db:"order_id"`
-	ProductID          uuid.UUID         `json:"product_id" db:"product_id"`
+	ProductID          *uuid.UUID        `json:"product_id,omitempty" db:"product_id"`
+	VariantID          *uuid.UUID        `json:"variant_id,omitempty" db:"variant_id"`
+	SnapshotVariant    string            `json:"snapshot_variant_name,omitempty" db:"snapshot_variant_name"`
+	SnapshotSKU        string            `json:"snapshot_sku,omitempty" db:"snapshot_sku"`
 	ConfigHash         string            `json:"config_hash" db:"config_hash"`
 	SnapshotName       string            `json:"snapshot_name" db:"snapshot_name"`
 	UnitBasePrice      int64             `json:"unit_base_price" db:"unit_base_price"`
@@ -74,13 +143,13 @@ type OrderItem struct {
 	SnapshotPrice      int64             `json:"snapshot_price" db:"snapshot_price"`
 	Quantity           int               `json:"quantity" db:"quantity"`
 	SubtotalAmount     int64             `json:"subtotal_amount" db:"subtotal_amount"`
-	SelectedOptions    string            `json:"selected_options" db:"selected_options"` // JSON array string
+	RoundID            *uuid.UUID        `json:"round_id,omitempty" db:"round_id"`
+	SelectedOptions    string            `json:"selected_options" db:"selected_options"`
 	Options            []OrderItemOption `json:"options,omitempty"`
 	Notes              string            `json:"notes,omitempty" db:"notes"`
 	CreatedAt          time.Time         `json:"created_at" db:"created_at"`
 }
 
-// OrderItemOption stores the immutable relational snapshot of a selected modifier or 1-level sub-addon.
 type OrderItemOption struct {
 	ID                      uuid.UUID  `json:"id" db:"id"`
 	StoreID                 uuid.UUID  `json:"store_id" db:"store_id"`
@@ -96,34 +165,34 @@ type OrderItemOption struct {
 	CreatedAt               time.Time  `json:"created_at" db:"created_at"`
 }
 
-// ModifierGroup represents a reusable customization group (e.g., Sugar Level, Milk Type, Toppings).
 type ModifierGroup struct {
 	ID            uuid.UUID        `json:"id" db:"id"`
 	StoreID       uuid.UUID        `json:"store_id" db:"store_id"`
 	Name          string           `json:"name" db:"name"`
-	SelectionType string           `json:"selection_type" db:"selection_type"` // single | multiple
+	SelectionType string           `json:"selection_type" db:"selection_type"`
 	IsRequired    bool             `json:"is_required" db:"is_required"`
 	MinSelect     int              `json:"min_select" db:"min_select"`
 	MaxSelect     int              `json:"max_select" db:"max_select"`
 	DisplayOrder  int              `json:"display_order" db:"display_order"`
 	IsActive      bool             `json:"is_active" db:"is_active"`
+	ArchivedAt    *time.Time       `json:"archived_at,omitempty" db:"archived_at"`
 	Options       []ModifierOption `json:"options,omitempty"`
 	CreatedAt     time.Time        `json:"created_at" db:"created_at"`
 	UpdatedAt     time.Time        `json:"updated_at" db:"updated_at"`
 }
 
-// ModifierOption represents a selectable choice within a ModifierGroup.
 type ModifierOption struct {
-	ID            uuid.UUID `json:"id" db:"id"`
-	StoreID       uuid.UUID `json:"store_id" db:"store_id"`
-	GroupID       uuid.UUID `json:"group_id" db:"group_id"`
-	Name          string    `json:"name" db:"name"`
-	PriceDelta    int64     `json:"price_delta" db:"price_delta"`
-	IsAvailable   bool      `json:"is_available" db:"is_available"`
-	TrackStock    bool      `json:"track_stock" db:"track_stock"`
-	StockQuantity int       `json:"stock_quantity" db:"stock_quantity"`
-	MaxQuantity   int       `json:"max_quantity" db:"max_quantity"`
-	DisplayOrder  int       `json:"display_order" db:"display_order"`
-	CreatedAt     time.Time `json:"created_at" db:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at" db:"updated_at"`
+	ID            uuid.UUID  `json:"id" db:"id"`
+	StoreID       uuid.UUID  `json:"store_id" db:"store_id"`
+	GroupID       uuid.UUID  `json:"group_id" db:"group_id"`
+	Name          string     `json:"name" db:"name"`
+	PriceDelta    int64      `json:"price_delta" db:"price_delta"`
+	IsAvailable   bool       `json:"is_available" db:"is_available"`
+	TrackStock    bool       `json:"track_stock" db:"track_stock"`
+	StockQuantity int        `json:"stock_quantity" db:"stock_quantity"`
+	MaxQuantity   int        `json:"max_quantity" db:"max_quantity"`
+	DisplayOrder  int        `json:"display_order" db:"display_order"`
+	ArchivedAt    *time.Time `json:"archived_at,omitempty" db:"archived_at"`
+	CreatedAt     time.Time  `json:"created_at" db:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at" db:"updated_at"`
 }

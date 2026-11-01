@@ -1,0 +1,3266 @@
+openapi: 3.1.0
+info:
+  title: MyCaffe Core POS API
+  version: 0.4.0
+  summary: Multi-tenant QR Table Ordering, POS Cashier, Kitchen Display System (KDS), and Payment Reconciliation API
+  description: |
+    Official OpenAPI 3.1 contract for **MyCaffe Core POS** backend (`mycaffe-backend`).
+    All monetary values are represented as whole integer Indonesian Rupiah (`int64`, e.g. `24000` = Rp 24.000) without floating-point numbers.
+    Percentage rates (PB1 tax, service charge, QRIS MDR) are represented in Basis Points (`1% = 100 bps`).
+  contact:
+    name: MyCaffe Platform Engineering
+servers:
+  - url: http://localhost:8080
+    description: Local Development API Server
+  - url: https://api.example.com
+    description: Production Single-VPS Hostinger KVM 2 Reverse Proxy (Nginx TLS)
+tags:
+  - name: Health
+    description: Liveness and readiness probes for Docker Compose and Nginx
+  - name: Catalog
+    description: Public and staff menu catalog, modifier groups, and 1-level sub-addons
+  - name: Orders
+    description: Transactional order creation, stock reservation lifecycle, and real-time order tracking
+  - name: Payments
+    description: Payment initiation (QRIS, VA, E-Wallet, Cash, Static QRIS, EDC) and Midtrans webhook reconciliation
+  - name: Auth
+    description: "Staff authentication and session lifecycle (ADR-003). Implemented in Phase 02.01-B (login, refresh, logout, me)."
+  - name: Staff
+    description: Owner staff management - invitation, PIN reset link, temporary PIN (owner decision E2)
+  - name: KDS
+    description: Kitchen Display System and Barista preparation queue transitions
+
+paths:
+  /health:
+    get:
+      security: []
+      tags: [Health]
+      operationId: getLiveness
+      summary: Liveness probe
+      responses:
+        "200":
+          description: Process is alive
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatusResponse"
+
+  /health/ready:
+    get:
+      security: []
+      tags: [Health]
+      operationId: getReadiness
+      summary: Readiness probe (verifies PostgreSQL 18 connection pool)
+      responses:
+        "200":
+          description: Database connection pool is healthy and ready
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatusResponse"
+        "503":
+          description: Database connection is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/public/stores/{store_slug}/catalog:
+    get:
+      security: []
+      tags: [Catalog]
+      operationId: getPublicStoreCatalog
+      summary: Guest menu of a store (categories, products, variants, modifier groups)
+      x-implementation-status: implemented
+      description: |
+        Inactive categories and archived products are hidden; unavailable items stay listed with
+        `available=false` and `sold_out_reason`. Stock counts are not exposed. Responses carry a content
+        `ETag` (excluding `generated_at`) and `Cache-Control: public, max-age=30`; send `If-None-Match`
+        to get `304`.
+      parameters:
+        - name: store_slug
+          in: path
+          required: true
+          schema:
+            type: string
+            example: central-cafe
+        - $ref: "#/components/parameters/IfNoneMatch"
+      responses:
+        "200":
+          description: Menu
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CatalogView"
+        "304":
+          description: Not modified
+        "404":
+          description: Store not found or inactive (`NOT_FOUND`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/public/stores/{store_slug}/orders/quote:
+    parameters:
+      - name: store_slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: URL slug identifier of the cafe store
+    post:
+      tags: [Orders]
+      operationId: getPublicOrderQuote
+      summary: Lock-free calculation of subtotal, discounts, PB1 tax, and service charge for guest order
+      x-implementation-status: implemented
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/QuoteOrderRequest"
+      responses:
+        "200":
+          description: Calculated quote summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuoteOrderResponse"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Order quote total changed compared to client expected total
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuoteChangedErrorResponse"
+
+  /api/v1/pos/catalog:
+    get:
+      tags: [Catalog]
+      operationId: getStaffCatalog
+      summary: POS menu for signed-in staff (includes inactive categories and stock counts)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - $ref: "#/components/parameters/IfNoneMatch"
+      responses:
+        "200":
+          description: Menu
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CatalogView"
+        "304":
+          description: Not modified
+
+  /api/v1/catalog/categories:
+    post:
+      tags: [Catalog]
+      operationId: createCategory
+      summary: Create a category (owner, catalog.manage)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CategoryInput"
+      responses:
+        "201":
+          description: Created
+        "400":
+          $ref: "#/components/responses/InvalidJSON"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+
+  /api/v1/catalog/categories/{id}:
+    parameters:
+      - $ref: "#/components/parameters/ResourceID"
+    patch:
+      tags: [Catalog]
+      operationId: updateCategory
+      summary: Update a category (partial)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CategoryInput"
+      responses:
+        "200":
+          description: Updated
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+    delete:
+      tags: [Catalog]
+      operationId: deleteCategory
+      summary: Delete a category (its products remain, uncategorized)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "204":
+          description: Deleted
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/catalog/products:
+    post:
+      tags: [Catalog]
+      operationId: createProduct
+      summary: Create a product with its variants (owner)
+      x-implementation-status: implemented
+      description: At least one variant; exactly one default when there are several (a single variant becomes the default). `base_price` follows the default variant. SKUs are normalized to upper case.
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProductInput"
+      responses:
+        "201":
+          description: Created product with variants
+        "400":
+          $ref: "#/components/responses/InvalidJSON"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+
+  /api/v1/catalog/products/{id}:
+    parameters:
+      - $ref: "#/components/parameters/ResourceID"
+    patch:
+      tags: [Catalog]
+      operationId: updateProduct
+      summary: Update product fields (partial; variants have their own endpoints)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProductInput"
+      responses:
+        "200":
+          description: Updated
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+    delete:
+      tags: [Catalog]
+      operationId: archiveProduct
+      summary: Archive a product and its variants (order history keeps its snapshots)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "204":
+          description: Archived
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/catalog/products/{id}/availability:
+    parameters:
+      - $ref: "#/components/parameters/ResourceID"
+    patch:
+      tags: [Catalog]
+      operationId: setProductAvailability
+      summary: Mark a product available or sold out
+      x-implementation-status: implemented
+      description: Bar items need `item.availability.toggle.beverage` (barista, owner, cashier with `cashier_handles_bar`); kitchen items need `item.availability.toggle.food`.
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [is_available]
+              properties:
+                is_available:
+                  type: boolean
+      responses:
+        "204":
+          description: Updated
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/catalog/products/{id}/variants:
+    parameters:
+      - $ref: "#/components/parameters/ResourceID"
+    post:
+      tags: [Catalog]
+      operationId: createVariant
+      summary: Add a variant to a product (owner)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VariantInput"
+      responses:
+        "201":
+          description: Created
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+
+  /api/v1/catalog/variants/{id}:
+    parameters:
+      - $ref: "#/components/parameters/ResourceID"
+    patch:
+      tags: [Catalog]
+      operationId: updateVariant
+      summary: Update a variant (partial); price changes are audited (PRICE_CHANGE)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VariantInput"
+      responses:
+        "200":
+          description: Updated
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+    delete:
+      tags: [Catalog]
+      operationId: archiveVariant
+      summary: Archive a non-default variant
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "204":
+          description: Archived
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /api/v1/catalog/modifier-groups:
+    get:
+      tags: [Catalog]
+      operationId: listModifierGroups
+      summary: List all active modifier groups for the tenant
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: List of modifier groups
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  modifier_groups:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ModifierGroup"
+    post:
+      tags: [Catalog]
+      operationId: createModifierGroup
+      summary: Create a new modifier group
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ModifierGroupInput"
+      responses:
+        "201":
+          description: Created
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+
+  /api/v1/catalog/modifier-groups/{id}:
+    parameters:
+      - $ref: "#/components/parameters/ResourceID"
+    get:
+      tags: [Catalog]
+      operationId: getModifierGroup
+      summary: Get modifier group details with options and child groups
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: Modifier group details
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      tags: [Catalog]
+      operationId: updateModifierGroup
+      summary: Update a modifier group (partial)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ModifierGroupInput"
+      responses:
+        "200":
+          description: Updated
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [Catalog]
+      operationId: archiveModifierGroup
+      summary: Archive a modifier group (soft delete and optional force unlink)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: force
+          in: query
+          required: false
+          schema:
+            type: boolean
+          description: Force archive by unlinking from products and parent options
+      responses:
+        "204":
+          description: Archived
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /api/v1/catalog/modifier-groups/{id}/options:
+    parameters:
+      - $ref: "#/components/parameters/ResourceID"
+    post:
+      tags: [Catalog]
+      operationId: createModifierOption
+      summary: Add an option to a modifier group (supports negative delta P1)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ModifierOptionInput"
+      responses:
+        "201":
+          description: Option created
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/catalog/modifier-groups/{id}/options/{option_id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: option_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    patch:
+      tags: [Catalog]
+      operationId: updateModifierOption
+      summary: Update a modifier option (partial; price changes are audited)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ModifierOptionInput"
+      responses:
+        "200":
+          description: Updated
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [Catalog]
+      operationId: archiveModifierOption
+      summary: Archive a modifier option
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "204":
+          description: Archived
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/catalog/products/{id}/modifier-groups:
+    parameters:
+      - $ref: "#/components/parameters/ResourceID"
+    post:
+      tags: [Catalog]
+      operationId: attachModifierGroupToProduct
+      summary: Link a modifier group to a product
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AttachModifierGroupInput"
+      responses:
+        "204":
+          description: Linked
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /api/v1/catalog/products/{id}/modifier-groups/{group_id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: group_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    delete:
+      tags: [Catalog]
+      operationId: detachModifierGroupFromProduct
+      summary: Unlink a modifier group from a product
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "204":
+          description: Unlinked
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/catalog/modifier-options/{id}/child-groups:
+    parameters:
+      - $ref: "#/components/parameters/ResourceID"
+    post:
+      tags: [Catalog]
+      operationId: attachChildGroupToOption
+      summary: Attach a modifier group as a child sub-addon to an option (max depth 1, cycle protected)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AttachChildGroupInput"
+      responses:
+        "204":
+          description: Attached
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /api/v1/catalog/modifier-options/{id}/child-groups/{group_id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: group_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    delete:
+      tags: [Catalog]
+      operationId: detachChildGroupFromOption
+      summary: Detach a child modifier group from an option
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "204":
+          description: Detached
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/orders:
+    post:
+      tags: [Orders]
+      operationId: createOrder
+      summary: Create an order with server-side pricing, modifier validation, and atomic stock reservation
+      description: |
+        In `staging` and `production`, the public HTTP route fails closed (`503 Service Unavailable`) until signed table QR token or staff JWT tenant binding middleware is attached in Phase 02.
+        The underlying `OrderService.CreateOrder` is **Implemented & Tested** against PostgreSQL 18.
+      security:
+        - BearerStaffJWT: []
+        - TableQRToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateOrderRequest"
+      responses:
+        "201":
+          description: Order created (or idempotent replay returned)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateOrderResponse"
+        "400":
+          description: Validation error (invalid modifiers, sub-addons, or missing idempotency_key)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Unauthorized billing_mode (e.g. open_tab requested without active cashier/owner token)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Idempotency key conflict (reused with different payload) or insufficient stock
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Endpoint fail-closed in staging/production while tenant binding is being completed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/pos/orders:
+    post:
+      tags: [Orders]
+      operationId: createPosOrder
+      summary: Create a POS order (cashier/owner)
+      x-implementation-status: implemented
+      description: |
+        Permission `order.pos.create`. The store and the acting user come only from the access token;
+        any `store_id` or `actor_user_id` in the body is ignored. Prices, taxes, service charge, stock and
+        modifiers are recomputed server-side. Replaying the same `idempotency_key` with the same payload
+        returns the original order (200); a different payload returns 409.
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateOrderRequest"
+      responses:
+        "201":
+          description: Order created
+        "200":
+          description: Idempotent replay of an existing order
+        "400":
+          description: Invalid order or modifier selection (`INVALID_ORDER`, `INVALID_REQUEST`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Missing `order.pos.create` (`FORBIDDEN`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Unavailable item, insufficient stock, or idempotency conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/pos/orders/quote:
+    post:
+      tags: [Orders]
+      operationId: getPosOrderQuote
+      summary: Lock-free calculation of subtotal, discounts, PB1 tax, and service charge for POS order
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/QuoteOrderRequest"
+      responses:
+        "200":
+          description: Calculated quote summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuoteOrderResponse"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "403":
+          description: Missing `order.pos.create` (`FORBIDDEN`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Order quote total changed compared to client expected total
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuoteChangedErrorResponse"
+
+  /api/v1/pos/orders/{order_id}/payments:
+    post:
+      tags: [Payments]
+      operationId: initiatePosPayment
+      summary: Take or initiate a payment for an order split (cashier/owner)
+      x-implementation-status: implemented
+      description: |
+        Direct tender (`cash`, `static_qris`, `edc`) needs `payment.tender.direct` and settles in one audited
+        transaction recorded against the signed-in user. Gateway methods (`qris`, `gopay`, `shopeepay`,
+        `bank_transfer`) need `payment.initiate.gateway` and run a two-phase Midtrans Core API charge.
+        Replaces the removed `POST /api/v1/orders/{order_id}/payments/initiate`.
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: order_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InitiatePaymentRequest"
+      responses:
+        "200":
+          description: Payment attempt recorded (gateway charge details or settled cashier tender)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InitiatePaymentResponse"
+        "400":
+          description: Invalid method, method not enabled, insufficient cash, or missing reconciliation_ref (`INVALID_PAYMENT`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Role may not take this payment method (`FORBIDDEN`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Order not found in the caller's store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Split already paid, order not payable, or idempotency conflict (`PAYMENT_CONFLICT`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/pos/drawers:
+    get:
+      tags: [POS Shifts]
+      operationId: listCashDrawers
+      summary: List all cash drawers in the store (staff)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: List of cash drawers
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  drawers:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/CashDrawer"
+    post:
+      tags: [POS Shifts]
+      operationId: createCashDrawer
+      summary: Create a new physical cash drawer (owner only)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  example: "Kasir Bar"
+                is_active:
+                  type: boolean
+                  default: true
+      responses:
+        "201":
+          description: Cash drawer created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CashDrawer"
+
+  /api/v1/pos/drawers/{drawer_id}:
+    patch:
+      tags: [POS Shifts]
+      operationId: updateCashDrawer
+      summary: Update cash drawer details or status (owner only)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: drawer_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                is_active:
+                  type: boolean
+      responses:
+        "200":
+          description: Cash drawer updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CashDrawer"
+
+  /api/v1/pos/shifts:
+    post:
+      tags: [POS Shifts]
+      operationId: openShift
+      summary: Open a new cashier shift session (cashier/owner)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [opening_float]
+              properties:
+                drawer_id:
+                  type: string
+                  format: uuid
+                opening_float:
+                  type: integer
+                  format: int64
+                  example: 200000
+                notes:
+                  type: string
+      responses:
+        "201":
+          description: Shift opened successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  shift:
+                    $ref: "#/components/schemas/Shift"
+                  open_drawer:
+                    type: boolean
+                    example: true
+        "409":
+          description: Drawer already has an open shift
+
+  /api/v1/pos/shifts/current:
+    get:
+      tags: [POS Shifts]
+      operationId: getCurrentShift
+      summary: Get the current active open shift for a drawer (staff)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: drawer_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Active shift session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Shift"
+        "409":
+          description: No active open shift
+
+  /api/v1/pos/shifts/movements:
+    post:
+      tags: [POS Shifts]
+      operationId: createCashMovement
+      summary: Record a cash movement (paid_out, cash_in, tip, staff_meal, no_sale)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [movement_type, reason]
+              properties:
+                shift_id:
+                  type: string
+                  format: uuid
+                drawer_id:
+                  type: string
+                  format: uuid
+                movement_type:
+                  type: string
+                  enum: [paid_out, cash_in, tip, staff_meal, no_sale]
+                amount:
+                  type: integer
+                  format: int64
+                reason:
+                  type: string
+                  example: "Beli es batu kristal"
+      responses:
+        "201":
+          description: Cash movement recorded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  movement:
+                    $ref: "#/components/schemas/CashMovement"
+                  open_drawer:
+                    type: boolean
+                    example: true
+        "422":
+          description: Insufficient cash or validation failure
+
+  /api/v1/pos/shifts/{shift_id}/close:
+    post:
+      tags: [POS Shifts]
+      operationId: closeShift
+      summary: Close shift with blind cash count and optional owner PIN override (cashier/owner)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: shift_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [counted_cash]
+              properties:
+                counted_cash:
+                  type: integer
+                  format: int64
+                  example: 350000
+                variance_reason:
+                  type: string
+                owner_pin:
+                  type: string
+                  example: "482913"
+                notes:
+                  type: string
+      responses:
+        "200":
+          description: Shift closed, immutable Z Report returned
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  report:
+                    $ref: "#/components/schemas/ZReport"
+                  open_drawer:
+                    type: boolean
+                    example: true
+        "422":
+          description: Variance exceeds tolerance and owner PIN / reason missing
+
+  /api/v1/pos/shifts/{shift_id}/force-close:
+    post:
+      tags: [POS Shifts]
+      operationId: forceCloseShift
+      summary: Force close an abandoned shift with required reason (owner only)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: shift_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                counted_cash:
+                  type: integer
+                  format: int64
+                notes:
+                  type: string
+      responses:
+        "200":
+          description: Shift force closed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ZReport"
+
+  /api/v1/pos/shifts/{shift_id}/x-report:
+    get:
+      tags: [POS Shifts]
+      operationId: getXReport
+      summary: Get interim X Report (expected_cash redacted for cashier during open shift)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: shift_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Interim X Report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/XReport"
+
+  /api/v1/pos/shifts/{shift_id}/z-report:
+    get:
+      tags: [POS Shifts]
+      operationId: getZReport
+      summary: Get permanent Z Report for a closed shift
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: shift_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Final Z Report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ZReport"
+
+  /api/v1/pos/tabs:
+    post:
+      tags: [POS Tabs]
+      operationId: openTab
+      summary: Open a new dining tab for a table or customer
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [idempotency_key]
+              properties:
+                idempotency_key:
+                  type: string
+                table_number:
+                  type: string
+                  example: "Meja 12"
+                customer_name:
+                  type: string
+                  example: "Budi"
+                customer_phone:
+                  type: string
+                allow_duplicate_label:
+                  type: boolean
+                  default: false
+                notes:
+                  type: string
+                initial_items:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/OrderItemInput"
+      responses:
+        "201":
+          description: Tab opened successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  order:
+                    $ref: "#/components/schemas/Order"
+                  first_round:
+                    $ref: "#/components/schemas/OrderRound"
+        "409":
+          description: Table label conflict
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+                    example: "TAB_LABEL_IN_USE"
+                  error:
+                    type: string
+                  existing_order_id:
+                    type: string
+                    format: uuid
+
+  /api/v1/pos/tabs/{id}/rounds:
+    post:
+      tags: [POS Tabs]
+      operationId: submitRound
+      summary: Submit a new order round to an open tab
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [idempotency_key, items]
+              properties:
+                idempotency_key:
+                  type: string
+                notes:
+                  type: string
+                items:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/OrderItemInput"
+      responses:
+        "201":
+          description: Round submitted and queued to KDS
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  round:
+                    $ref: "#/components/schemas/OrderRound"
+                  order:
+                    $ref: "#/components/schemas/Order"
+
+  /api/v1/pos/tabs/{id}:
+    get:
+      tags: [POS Tabs]
+      operationId: getTab
+      summary: Get open tab details and submitted rounds
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Tab detail with rounds
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  order:
+                    $ref: "#/components/schemas/Order"
+                  rounds:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/OrderRound"
+
+  /api/v1/store/settings:
+    get:
+      tags: [Staff]
+      operationId: getStoreSettings
+      summary: Read the store's operating policies (any signed-in staff)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: Current settings (defaults when never changed)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StoreSettings"
+    patch:
+      tags: [Staff]
+      operationId: updateStoreSettings
+      summary: Change operating policies (owner)
+      x-implementation-status: implemented
+      description: Partial update; omitted fields keep their value. Permission `store.settings.manage`. Every change is audited (`STORE_SETTINGS_CHANGED`) with before/after values. Permission changes such as `cashier_handles_bar` apply to the next request without re-login.
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StoreSettings"
+      responses:
+        "200":
+          description: Updated settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StoreSettings"
+        "400":
+          description: Out-of-range value (`INVALID_SETTINGS`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Not an owner (`FORBIDDEN`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/payments/midtrans/webhook:
+    post:
+      security: []
+      tags: [Payments]
+      operationId: handleMidtransWebhook
+      summary: Midtrans HTTP Notification Webhook
+      description: |
+        Status in Roadmap - Implemented & Tested (Phase 01 Sub-task 04).
+        Verifies `SHA512(order_id + status_code + gross_amount + server_key)`, validates `IDR` currency and whole-integer `gross_amount`, resolves tenant context via `resolve_payment_webhook_context`, and durably commits the notification inbox, payment status, split, order state, stock reservation, and outbox event in one tenant-scoped PostgreSQL 18 transaction.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MidtransWebhookPayload"
+      responses:
+        "200":
+          description: Webhook verified and durably committed to payment_notification_logs, payments, payment_splits, orders, and outbox_events
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    example: ok
+        "400":
+          description: Malformed JSON, missing fields, non-IDR currency, or fractional gross_amount
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Invalid SHA-512 signature key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "413":
+          description: Webhook body exceeds 64 KB limit
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Signature verified, deferred for retry while durable payment transaction is uncommitted
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+                example: 60
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+
+  /api/v1/auth/staff/login:
+    post:
+      tags: [Auth]
+      operationId: staffLogin
+      summary: Staff login with store slug, email, and PIN
+      x-implementation-status: implemented
+      x-adr: ADR-003 D1-D5
+      description: |
+        Verifies `store_slug + email + PIN`. Every failure (unknown store, unknown email, inactive or locked
+        account, wrong PIN) returns the same generic `401 INVALID_CREDENTIALS`. On success returns a 15-minute
+        access token in the body and sets the rotating refresh token as an HttpOnly cookie.
+        Responses carry `Cache-Control: no-store`.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StaffLoginRequest"
+      responses:
+        "200":
+          description: Authenticated
+          headers:
+            Set-Cookie:
+              description: "`__Secure-mc_staff_rt=<opaque>; HttpOnly; Secure; SameSite=Strict; Path=/api/v1/auth/staff`"
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+                example: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StaffSessionResponse"
+        "400":
+          description: Malformed request body (missing field, non-numeric PIN, PIN length outside 6-12)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Generic authentication failure (`code=INVALID_CREDENTIALS`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: Rate limited by IP or hashing concurrency cap (`code=RATE_LIMITED`)
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/auth/staff/refresh:
+    post:
+      tags: [Auth]
+      operationId: staffRefresh
+      summary: Rotate refresh token and issue a new access token
+      x-implementation-status: implemented
+      x-adr: ADR-003 D4
+      description: |
+        Consumes the refresh cookie, rotates it, and returns a new access token. Presenting an already-rotated
+        refresh token revokes the whole session (reuse detection). The session never outlives its 12-hour
+        absolute lifetime.
+      security:
+        - StaffRefreshCookie: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfProtectionHeader"
+      responses:
+        "200":
+          description: Rotated
+          headers:
+            Set-Cookie:
+              description: Replacement refresh cookie
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StaffSessionResponse"
+        "401":
+          description: Missing, expired, revoked, or reused refresh token (`code=SESSION_INVALID`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: The previous refresh generation arrived within 30 s of a rotation (concurrent tabs). Session kept; retry with the current cookie (`code=REFRESH_RACE`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Missing `X-CSRF-Protection` header (`code=CSRF_HEADER_REQUIRED`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/auth/staff/logout:
+    post:
+      tags: [Auth]
+      operationId: staffLogout
+      summary: Revoke the current staff session
+      x-implementation-status: implemented
+      x-adr: ADR-003 D4
+      description: Revokes the session bound to the refresh cookie and clears the cookie. Idempotent.
+      security:
+        - StaffRefreshCookie: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfProtectionHeader"
+      responses:
+        "204":
+          description: Session revoked (or already revoked); cookie cleared
+        "403":
+          description: Missing `X-CSRF-Protection` header (`code=CSRF_HEADER_REQUIRED`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/auth/staff/me:
+    get:
+      tags: [Auth]
+      operationId: staffMe
+      summary: Current staff profile and effective permissions
+      x-implementation-status: implemented
+      x-adr: ADR-003 D4, D7
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: Current staff identity derived from the verified session (database role is authoritative)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StaffMeResponse"
+        "401":
+          description: Invalid/expired token, revoked session, inactive or locked user (`code=SESSION_INVALID`), or role changed since issuance (`code=SESSION_STALE`, refresh to pick up the new role)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/auth/staff/pin/forgot:
+    post:
+      tags: [Auth]
+      operationId: staffForgotPin
+      summary: Request a PIN-reset link by email
+      x-implementation-status: implemented
+      description: |
+        Always answers 202, whether or not the store or email exists (no account enumeration). For an
+        active, activated staff member a single-use link valid for 30 minutes is queued in the email outbox.
+        Strict Nginx limit (10 req/min/IP).
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [store_slug, email]
+              properties:
+                store_slug:
+                  type: string
+                  maxLength: 100
+                email:
+                  type: string
+                  format: email
+                  maxLength: 255
+      responses:
+        "202":
+          description: Accepted (an email may or may not have been sent)
+        "400":
+          description: Missing fields (`INVALID_REQUEST`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/auth/staff/pin/setup:
+    post:
+      tags: [Auth]
+      operationId: staffSetupPin
+      summary: Set a PIN from an activation or reset link
+      x-implementation-status: implemented
+      description: |
+        `token` is the value after `#token=` in the emailed link (`<store_id>.<token_id>.<secret>`). The URL
+        fragment is never sent to servers, so the secret stays out of access logs. Single use. On success
+        all existing sessions of the user are revoked; after a reset a security notice email is queued.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, pin]
+              properties:
+                token:
+                  type: string
+                pin:
+                  type: string
+                  pattern: "^[0-9]{6}$"
+                  writeOnly: true
+      responses:
+        "200":
+          description: PIN set; the client can prefill the login form
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  store_slug:
+                    type: string
+                  email:
+                    type: string
+                    format: email
+        "400":
+          description: "`PIN_REJECTED` (format or weak PIN) or `LINK_INVALID` (unknown, used, or expired link)"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/auth/staff/pin/change:
+    post:
+      tags: [Auth]
+      operationId: staffChangePin
+      summary: Change own PIN (required after a temporary PIN)
+      x-implementation-status: implemented
+      description: A wrong `current_pin` counts toward the lockout. Other sessions are revoked; the current one stays signed in.
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [current_pin, new_pin]
+              properties:
+                current_pin:
+                  type: string
+                  writeOnly: true
+                new_pin:
+                  type: string
+                  pattern: "^[0-9]{6}$"
+                  writeOnly: true
+      responses:
+        "204":
+          description: PIN changed
+        "400":
+          description: "`PIN_REJECTED`"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Wrong current PIN (`INVALID_CREDENTIALS`) or invalid session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/staff:
+    get:
+      tags: [Staff]
+      operationId: listStaff
+      summary: List staff of the caller's store (owner)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: Staff list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  staff:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/StaffSummary"
+        "403":
+          description: Not an owner (`FORBIDDEN`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      tags: [Staff]
+      operationId: inviteStaff
+      summary: Invite a staff member (owner)
+      x-implementation-status: implemented
+      description: Creates the account without a PIN and queues an activation email (link valid 48 hours). The store comes from the owner's token, never from the body.
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [full_name, email, role]
+              properties:
+                full_name:
+                  type: string
+                  maxLength: 255
+                email:
+                  type: string
+                  format: email
+                  maxLength: 255
+                  description: Stored trimmed and lower-case; unique per store regardless of case.
+                role:
+                  $ref: "#/components/schemas/StaffRole"
+      responses:
+        "201":
+          description: Invited
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StaffSummary"
+        "400":
+          description: Invalid name, email, or role (`INVALID_REQUEST`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Not an owner (`FORBIDDEN`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Email already used in this store (`EMAIL_TAKEN`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/staff/{id}/pin-reset:
+    post:
+      tags: [Staff]
+      operationId: sendStaffPinReset
+      summary: Email a PIN-reset link to a staff member (owner)
+      x-implementation-status: implemented
+      description: For a staff member who never activated, the invitation is re-sent instead.
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "202":
+          description: Link queued
+        "403":
+          description: Not an owner (`FORBIDDEN`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Unknown or inactive staff (`STAFF_NOT_FOUND`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/staff/{id}/temporary-pin:
+    post:
+      tags: [Staff]
+      operationId: issueStaffTemporaryPin
+      summary: Set a temporary PIN for staff without email (owner)
+      x-implementation-status: implemented
+      description: The staff member must change it after login (`pin_change_required=true`). Not allowed on the owner's own account. Revokes all sessions of that staff member.
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pin]
+              properties:
+                pin:
+                  type: string
+                  pattern: "^[0-9]{6}$"
+                  writeOnly: true
+      responses:
+        "204":
+          description: Temporary PIN set
+        "400":
+          description: "`PIN_REJECTED`"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Not an owner, or the owner's own account (`FORBIDDEN`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Unknown staff (`STAFF_NOT_FOUND`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+components:
+  securitySchemes:
+    BearerStaffJWT:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        Staff access token (HS256 JWT, 15-minute TTL per ADR-003 D4). Claims: `iss=mycaffe-backend`, `aud=mycaffe-pos`,
+        `typ=staff_access`, `sub` (user id), `store_id`, `role` (`owner`, `cashier`, `barista`, `kitchen`), `sid` (session id),
+        `jti`, `iat`, `exp`; header `kid`. Not stateless: every request is revalidated against the server-side session and
+        current user role. Never sent in a query string.
+    StaffRefreshCookie:
+      type: apiKey
+      in: cookie
+      name: __Secure-mc_staff_rt
+      description: Opaque rotating refresh token (HttpOnly, Secure, SameSite=Strict, Path=/api/v1/auth/staff). Planned, ADR-003 D4.
+    TableQRToken:
+      type: apiKey
+      in: header
+      name: X-Table-QR-Token
+      description: Signed HMAC token binding a public dine-in/takeaway session to a specific `store_id` and `table_number`.
+
+  parameters:
+    IfNoneMatch:
+      name: If-None-Match
+      in: header
+      required: false
+      schema:
+        type: string
+      description: ETag from a previous response; the server answers 304 when unchanged.
+    ResourceID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+    CsrfProtectionHeader:
+      name: X-CSRF-Protection
+      in: header
+      required: true
+      description: Must be `1`. Forces a CORS preflight so cross-site forms cannot use the refresh cookie.
+      schema:
+        type: string
+        enum: ["1"]
+
+  responses:
+    InvalidJSON:
+      description: Malformed JSON body (`INVALID_JSON`)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Forbidden:
+      description: Missing permission (`FORBIDDEN`)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    NotFound:
+      description: Not found in the caller's store (`NOT_FOUND`)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Conflict:
+      description: Uniqueness clash (`CONFLICT`) on `field`
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ConflictResponse"
+    ValidationFailed:
+      description: Field-level validation errors (`VALIDATION_FAILED`)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ValidationErrorResponse"
+
+  schemas:
+    CashDrawer:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        store_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    Shift:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        store_id:
+          type: string
+          format: uuid
+        drawer_id:
+          type: string
+          format: uuid
+        opened_by:
+          type: string
+          format: uuid
+        opening_float:
+          type: integer
+          format: int64
+        opened_at:
+          type: string
+          format: date-time
+        closed_by:
+          type: string
+          format: uuid
+        closed_at:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [open, closed, force_closed]
+        expected_cash:
+          type: integer
+          format: int64
+        counted_cash:
+          type: integer
+          format: int64
+        variance:
+          type: integer
+          format: int64
+        variance_reason:
+          type: string
+        owner_override_by:
+          type: string
+          format: uuid
+        notes:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CashMovement:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        store_id:
+          type: string
+          format: uuid
+        shift_id:
+          type: string
+          format: uuid
+        movement_type:
+          type: string
+          enum: [opening_float, sale, refund, paid_out, cash_in, no_sale, tip, staff_meal]
+        amount:
+          type: integer
+          format: int64
+        actor_id:
+          type: string
+          format: uuid
+        reason:
+          type: string
+        order_id:
+          type: string
+          format: uuid
+        payment_id:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+
+    XReport:
+      type: object
+      properties:
+        shift_id:
+          type: string
+          format: uuid
+        store_id:
+          type: string
+          format: uuid
+        drawer_id:
+          type: string
+          format: uuid
+        drawer_name:
+          type: string
+        opened_by:
+          type: string
+          format: uuid
+        opened_by_name:
+          type: string
+        opened_at:
+          type: string
+          format: date-time
+        generated_at:
+          type: string
+          format: date-time
+        status:
+          type: string
+        summary:
+          type: object
+        expected_cash:
+          type: integer
+          format: int64
+        expected_redacted:
+          type: boolean
+
+    ZReport:
+      type: object
+      properties:
+        shift_id:
+          type: string
+          format: uuid
+        store_id:
+          type: string
+          format: uuid
+        drawer_id:
+          type: string
+          format: uuid
+        drawer_name:
+          type: string
+        opened_by:
+          type: string
+          format: uuid
+        opened_by_name:
+          type: string
+        opened_at:
+          type: string
+          format: date-time
+        closed_by:
+          type: string
+          format: uuid
+        closed_by_name:
+          type: string
+        closed_at:
+          type: string
+          format: date-time
+        status:
+          type: string
+        summary:
+          type: object
+        expected_cash:
+          type: integer
+          format: int64
+        counted_cash:
+          type: integer
+          format: int64
+        variance:
+          type: integer
+          format: int64
+        variance_reason:
+          type: string
+        owner_override_by:
+          type: string
+          format: uuid
+        override_by_name:
+          type: string
+        notes:
+          type: string
+    ValidationErrorResponse:
+      type: object
+      required: [code, error, fields]
+      properties:
+        code:
+          type: string
+          enum: [VALIDATION_FAILED]
+        error:
+          type: string
+        fields:
+          type: object
+          additionalProperties:
+            type: string
+          description: "JSON field path to message, e.g. variants[0].price: harus antara 0 dan 100000000"
+    ConflictResponse:
+      type: object
+      required: [code, error, field]
+      properties:
+        code:
+          type: string
+          enum: [CONFLICT]
+        error:
+          type: string
+        field:
+          type: string
+    CategoryInput:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 100
+          description: Required on create.
+        display_order:
+          type: integer
+          minimum: 0
+          maximum: 10000
+        is_active:
+          type: boolean
+    VariantInput:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 60
+          description: Required on create.
+        sku:
+          type: string
+          maxLength: 64
+          pattern: "^[A-Za-z0-9._-]*$"
+          description: Optional; stored upper case; unique per store among active variants.
+        price:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 100000000
+          description: Integer Rupiah. Required on create.
+        is_default:
+          type: boolean
+        is_available:
+          type: boolean
+        display_order:
+          type: integer
+          minimum: 0
+          maximum: 10000
+    ProductInput:
+      type: object
+      properties:
+        category_id:
+          type: string
+          format: uuid
+        clear_category:
+          type: boolean
+          description: PATCH only; set true to remove the category.
+        name:
+          type: string
+          maxLength: 120
+          description: Required on create; unique per store (case-insensitive) among active products.
+        description:
+          type: string
+          maxLength: 1000
+        product_type:
+          type: string
+          enum: [prepared, ready_to_serve]
+        prep_station:
+          type: string
+          enum: [bar, kitchen, none]
+        display_order:
+          type: integer
+          minimum: 0
+          maximum: 10000
+        is_available:
+          type: boolean
+        track_stock:
+          type: boolean
+        stock_quantity:
+          type: integer
+          minimum: 0
+          maximum: 1000000
+        variants:
+          type: array
+          maxItems: 20
+          items:
+            $ref: "#/components/schemas/VariantInput"
+          description: Create only (at least one).
+    CatalogView:
+      type: object
+      required: [store, categories, products, generated_at]
+      properties:
+        store:
+          type: object
+          properties:
+            id:
+              type: string
+              format: uuid
+            slug:
+              type: string
+            name:
+              type: string
+            currency:
+              type: string
+            tax_bps:
+              type: integer
+            service_bps:
+              type: integer
+            qr_ordering_paused:
+              type: boolean
+        categories:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+                format: uuid
+              name:
+                type: string
+              display_order:
+                type: integer
+              is_active:
+                type: boolean
+        products:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+                format: uuid
+              category_id:
+                type: ["string", "null"]
+                format: uuid
+              name:
+                type: string
+              description:
+                type: string
+              type:
+                type: string
+                enum: [prepared, ready_to_serve]
+              prep_station:
+                type: string
+                enum: [bar, kitchen, none]
+              image_url:
+                type: ["string", "null"]
+              available:
+                type: boolean
+              sold_out_reason:
+                type: ["string", "null"]
+              stock_quantity:
+                type: integer
+                description: Staff view only.
+              variants:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: string
+                      format: uuid
+                    name:
+                      type: string
+                    sku:
+                      type: string
+                    price:
+                      type: integer
+                      format: int64
+                    is_default:
+                      type: boolean
+                    available:
+                      type: boolean
+              modifier_groups:
+                type: array
+                items:
+                  type: object
+                  description: "{id, name, selection, required, min, max, options[{id, name, price_delta, available, max_quantity, sub_groups[]}]}"
+        generated_at:
+          type: string
+          format: date-time
+
+    HealthStatusResponse:
+      type: object
+      required: [status, service]
+      properties:
+        status:
+          type: string
+          example: ok
+        service:
+          type: string
+          example: mycaffe-api
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          example: Layanan pemesanan sedang dalam pemeliharaan. Silakan hubungi kasir untuk bantuan pemesanan.
+        code:
+          type: string
+          example: SERVICE_TEMPORARILY_UNAVAILABLE
+        request_id:
+          type: string
+          format: uuid
+          example: 8f9d2a1c-4b3e-4d5a-9c1b-2e3f4a5b6c7d
+
+    StaffRole:
+      type: string
+      enum: [owner, cashier, barista, kitchen]
+
+    StaffLoginRequest:
+      type: object
+      additionalProperties: false
+      required: [store_slug, email, pin]
+      properties:
+        store_slug:
+          type: string
+          minLength: 1
+          maxLength: 100
+          example: kopi-senja
+        email:
+          type: string
+          format: email
+          maxLength: 255
+          description: Normalized server-side to lower(trim(email)).
+          example: kasir1@kopisenja.id
+        pin:
+          type: string
+          pattern: "^[0-9]{6}$"
+          writeOnly: true
+          description: Exactly 6 digits (owner decision E1). Never logged.
+
+    StaffProfile:
+      type: object
+      required: [id, full_name, role, store]
+      properties:
+        id:
+          type: string
+          format: uuid
+        full_name:
+          type: string
+        role:
+          $ref: "#/components/schemas/StaffRole"
+        store:
+          type: object
+          required: [id, slug, name]
+          properties:
+            id:
+              type: string
+              format: uuid
+            slug:
+              type: string
+            name:
+              type: string
+
+    StaffSummary:
+      type: object
+      required: [id, full_name, email, role, is_active, activated, pin_change_required, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        full_name:
+          type: string
+        email:
+          type: string
+          format: email
+        role:
+          $ref: "#/components/schemas/StaffRole"
+        is_active:
+          type: boolean
+        activated:
+          type: boolean
+          description: The staff member has set a PIN.
+        pin_change_required:
+          type: boolean
+          description: Signed in with a temporary PIN that must be changed.
+        locked_until:
+          type: string
+          format: date-time
+          description: Present while the account is locked.
+        created_at:
+          type: string
+          format: date-time
+
+    StaffSessionResponse:
+      type: object
+      required: [access_token, token_type, access_token_expires_at, session_expires_at, staff]
+      properties:
+        access_token:
+          type: string
+          description: Keep in memory only; never persist to localStorage.
+        token_type:
+          type: string
+          enum: [Bearer]
+        access_token_expires_at:
+          type: string
+          format: date-time
+        session_expires_at:
+          type: string
+          format: date-time
+          description: Absolute session end (login time + 12 h); refresh cannot extend it.
+        staff:
+          $ref: "#/components/schemas/StaffProfile"
+
+    StaffMeResponse:
+      type: object
+      required: [staff, permissions, session_expires_at]
+      properties:
+        staff:
+          $ref: "#/components/schemas/StaffProfile"
+        permissions:
+          type: array
+          description: Effective permission constants from the backend RBAC policy (ADR-003 D7). UI hints only; the backend re-checks every request. Includes store-dependent grants such as `cashier_handles_bar`.
+          items:
+            type: string
+          example: [order.pos.create, payment.tender.direct, shift.open]
+        session_expires_at:
+          type: string
+          format: date-time
+
+    OrderType:
+      type: string
+      enum: [dine_in, takeaway, delivery]
+
+    BillingMode:
+      type: string
+      enum: [pay_first, open_tab, split_bill]
+
+    OrderStatus:
+      type: string
+      enum: [pending_payment, queued, preparing, ready, served, completed, cancelled]
+
+    OrderPaymentStatus:
+      type: string
+      enum: [unpaid, pending, partially_paid, paid, failed, cancelled, expired, partially_refunded, refunded, chargeback, partial_chargeback]
+
+    OrderStockStatus:
+      type: string
+      enum: [not_tracked, reserved, committed, released]
+
+    PaymentMethod:
+      type: string
+      enum: [qris, gopay, shopeepay, bank_transfer, cash, static_qris, edc]
+
+    PaymentStatus:
+      type: string
+      enum: [pending, authorized, paid, failed, cancelled, expired, partially_refunded, refunded, chargeback, partial_chargeback]
+
+    PaymentSplitStatus:
+      type: string
+      enum: [unpaid, pending, partially_paid, paid, cancelled, refunded]
+
+    SelectedSubAddonInput:
+      type: object
+      required: [option_id, quantity]
+      properties:
+        option_id:
+          type: string
+          format: uuid
+        quantity:
+          type: integer
+          minimum: 1
+          example: 1
+
+    SelectedModifierInput:
+      type: object
+      required: [option_id, quantity]
+      properties:
+        option_id:
+          type: string
+          format: uuid
+        quantity:
+          type: integer
+          minimum: 1
+          example: 1
+        sub_addons:
+          type: array
+          items:
+            $ref: "#/components/schemas/SelectedSubAddonInput"
+
+    OrderItemInput:
+      type: object
+      required: [product_id, quantity]
+      properties:
+        product_id:
+          type: string
+          format: uuid
+        quantity:
+          type: integer
+          minimum: 1
+          example: 2
+        modifiers:
+          type: array
+          items:
+            $ref: "#/components/schemas/SelectedModifierInput"
+        notes:
+          type: string
+          maxLength: 250
+          example: Less ice
+
+    CreateOrderRequest:
+      type: object
+      required: [idempotency_key, customer_name, order_type, items]
+      properties:
+        idempotency_key:
+          type: string
+          minLength: 1
+          maxLength: 100
+          example: idem-20261030-table04-001
+        table_number:
+          type: string
+          maxLength: 50
+          example: Meja 04
+        customer_name:
+          type: string
+          minLength: 1
+          maxLength: 120
+          example: Rina Kartika
+        customer_phone:
+          type: string
+          maxLength: 30
+          example: "081234567890"
+        order_type:
+          $ref: "#/components/schemas/OrderType"
+        billing_mode:
+          $ref: "#/components/schemas/BillingMode"
+        expected_total:
+          type: integer
+          format: int64
+          description: Optional expected total for optimistic price verification
+        expected_quote_fingerprint:
+          type: string
+          description: Optional deterministic hash fingerprint of quote lines to prevent compensating price change conflicts
+        notes:
+          type: string
+          maxLength: 500
+        items:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/OrderItemInput"
+
+    OrderItemOptionSnapshot:
+      type: object
+      required: [id, store_id, order_item_id, snapshot_group_name, snapshot_option_name, snapshot_price_delta, quantity]
+      properties:
+        id:
+          type: string
+          format: uuid
+        store_id:
+          type: string
+          format: uuid
+        order_item_id:
+          type: string
+          format: uuid
+        parent_order_item_option_id:
+          type: ["string", "null"]
+          format: uuid
+        modifier_group_id:
+          type: ["string", "null"]
+          format: uuid
+        modifier_option_id:
+          type: ["string", "null"]
+          format: uuid
+        parent_option_id:
+          type: ["string", "null"]
+          format: uuid
+        snapshot_group_name:
+          type: string
+          example: Milk Selection
+        snapshot_option_name:
+          type: string
+          example: Oat Milk Barista Blend
+        snapshot_price_delta:
+          type: integer
+          format: int64
+          example: 8000
+        quantity:
+          type: integer
+          example: 1
+
+    OrderItemSnapshot:
+      type: object
+      required: [id, store_id, order_id, config_hash, snapshot_name, unit_base_price, modifier_total_price, snapshot_price, quantity, subtotal_amount]
+      properties:
+        id:
+          type: string
+          format: uuid
+        store_id:
+          type: string
+          format: uuid
+        order_id:
+          type: string
+          format: uuid
+        product_id:
+          type: ["string", "null"]
+          format: uuid
+        config_hash:
+          type: string
+        snapshot_name:
+          type: string
+          example: Classic Iced Latte
+        unit_base_price:
+          type: integer
+          format: int64
+          example: 24000
+        modifier_total_price:
+          type: integer
+          format: int64
+          example: 12000
+        snapshot_price:
+          type: integer
+          format: int64
+          example: 36000
+        quantity:
+          type: integer
+          example: 2
+        subtotal_amount:
+          type: integer
+          format: int64
+          example: 72000
+        options:
+          type: array
+          items:
+            $ref: "#/components/schemas/OrderItemOptionSnapshot"
+        notes:
+          type: string
+
+    PaymentSplit:
+      type: object
+      required: [id, store_id, order_id, split_number, label, split_mode, subtotal_amount, tax_amount, service_charge_amount, total_amount, paid_amount, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        store_id:
+          type: string
+          format: uuid
+        order_id:
+          type: string
+          format: uuid
+        split_number:
+          type: integer
+          example: 1
+        label:
+          type: string
+          example: Main Bill
+        split_mode:
+          type: string
+          enum: [full, equal, by_item, custom]
+        subtotal_amount:
+          type: integer
+          format: int64
+          example: 72000
+        tax_amount:
+          type: integer
+          format: int64
+          example: 7560
+        service_charge_amount:
+          type: integer
+          format: int64
+          example: 3600
+        total_amount:
+          type: integer
+          format: int64
+          example: 83160
+        paid_amount:
+          type: integer
+          format: int64
+          example: 0
+        status:
+          $ref: "#/components/schemas/PaymentSplitStatus"
+
+    Order:
+      type: object
+      required:
+        - id
+        - store_id
+        - idempotency_key
+        - order_number
+        - queue_number
+        - customer_name
+        - order_type
+        - billing_mode
+        - status
+        - payment_status
+        - stock_status
+        - subtotal_amount
+        - discount_amount
+        - tax_amount
+        - service_charge_amount
+        - total_amount
+        - paid_amount
+        - refunded_amount
+      properties:
+        id:
+          type: string
+          format: uuid
+        store_id:
+          type: string
+          format: uuid
+        idempotency_key:
+          type: string
+        request_hash:
+          type: string
+        order_number:
+          type: string
+          example: ORD-20261030-0001
+        queue_number:
+          type: string
+          example: A001
+        table_number:
+          type: string
+          example: Meja 04
+        customer_name:
+          type: string
+          example: Rina Kartika
+        customer_phone:
+          type: string
+        order_type:
+          $ref: "#/components/schemas/OrderType"
+        billing_mode:
+          $ref: "#/components/schemas/BillingMode"
+        status:
+          $ref: "#/components/schemas/OrderStatus"
+        payment_status:
+          $ref: "#/components/schemas/OrderPaymentStatus"
+        stock_status:
+          $ref: "#/components/schemas/OrderStockStatus"
+        expires_at:
+          type: ["string", "null"]
+          format: date-time
+        created_by_user_id:
+          type: ["string", "null"]
+          format: uuid
+        subtotal_amount:
+          type: integer
+          format: int64
+          example: 72000
+        discount_amount:
+          type: integer
+          format: int64
+          example: 0
+        service_charge_amount:
+          type: integer
+          format: int64
+          example: 3600
+        tax_amount:
+          type: integer
+          format: int64
+          example: 7560
+        total_amount:
+          type: integer
+          format: int64
+          example: 83160
+        paid_amount:
+          type: integer
+          format: int64
+          example: 0
+        refunded_amount:
+          type: integer
+          format: int64
+          example: 0
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/OrderItemSnapshot"
+        notes:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateOrderResponse:
+      type: object
+      required: [order, splits, is_idempotent_replay]
+      properties:
+        order:
+          $ref: "#/components/schemas/Order"
+        splits:
+          type: array
+          items:
+            $ref: "#/components/schemas/PaymentSplit"
+        outbox_event_id:
+          type: string
+          format: uuid
+        is_idempotent_replay:
+          type: boolean
+
+    OrderRound:
+      type: object
+      required: [id, store_id, order_id, round_number, status, submitted_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        store_id:
+          type: string
+          format: uuid
+        order_id:
+          type: string
+          format: uuid
+        round_number:
+          type: integer
+          example: 1
+        status:
+          type: string
+          enum: [queued, preparing, ready, served, cancelled]
+        submitted_by_user_id:
+          type: string
+          format: uuid
+        submitted_at:
+          type: string
+          format: date-time
+        notes:
+          type: string
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/OrderItemSnapshot"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        splits:
+          type: array
+          items:
+            $ref: "#/components/schemas/PaymentSplit"
+        outbox_event_id:
+          type: string
+          format: uuid
+        is_idempotent_replay:
+          type: boolean
+
+    InitiatePaymentRequest:
+      type: object
+      required: [idempotency_key, method]
+      properties:
+        idempotency_key:
+          type: string
+          minLength: 1
+          maxLength: 100
+        split_id:
+          type: string
+          format: uuid
+          description: Required only when the order has more than one payment split.
+        method:
+          $ref: "#/components/schemas/PaymentMethod"
+        bank:
+          type: string
+          enum: [bca, bni, bri, mandiri, permata]
+          description: Required only when `method` is `bank_transfer`
+        cash_tendered_amount:
+          type: integer
+          format: int64
+          description: Required when `method` is `cash`; must be `>= split.total_amount` (integer Rupiah)
+        reconciliation_ref:
+          type: string
+          maxLength: 100
+          description: Required for `static_qris` and `edc` (bank/terminal reference)
+        callback_url:
+          type: string
+          maxLength: 500
+          description: Optional e-wallet deeplink return URL
+        drawer_id:
+          type: string
+          format: uuid
+          description: Optional target cash drawer; defaults to active cashier shift or store default drawer.
+
+    StoreSettings:
+      type: object
+      properties:
+        void_refund_owner_threshold:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Void/refund above this amount (Rupiah) needs the owner PIN (O1). Default 100000.
+        cashier_max_discount_bps:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 10000
+          description: Largest discount a cashier may give without owner PIN, in basis points (O4). Default 1000 (10%).
+        cash_variance_tolerance:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Shift-close cash difference (Rupiah) above which a reason + owner PIN is required (C1). Default 5000.
+        cashier_handles_bar:
+          type: boolean
+          description: Cashier also gets barista KDS and beverage availability permissions (C3). Default false.
+        table_idle_close_minutes:
+          type: integer
+          minimum: 5
+          maximum: 240
+          description: Auto-close a table visit this long after all orders are paid and served (T1). Default 30.
+        qr_ordering_paused:
+          type: boolean
+          description: Emergency pause for QR table ordering. Default false.
+        static_qris_fallback_mode:
+          type: string
+          enum: ["off", auto, forced]
+          description: Static QRIS fallback when Midtrans fails (K8). Default auto.
+
+    InitiatePaymentResponse:
+      type: object
+      required: [payment, order, split, is_idempotent_replay]
+      description: Mirrors `service.InitiatePaymentResult`.
+      properties:
+        is_idempotent_replay:
+          type: boolean
+        open_drawer:
+          type: boolean
+          description: True when cash drawer kick-pin solenoid signal should be triggered (for cash payment).
+        payment:
+          type: object
+          required: [id, provider_order_id, method, status, amount]
+          properties:
+            id:
+              type: string
+              format: uuid
+            provider_order_id:
+              type: string
+            method:
+              $ref: "#/components/schemas/PaymentMethod"
+            status:
+              $ref: "#/components/schemas/PaymentStatus"
+            amount:
+              type: integer
+              format: int64
+            cash_tendered_amount:
+              type: integer
+              format: int64
+            change_given_amount:
+              type: integer
+              format: int64
+            qr_string:
+              type: string
+            deeplink_url:
+              type: string
+            va_number:
+              type: string
+            verified_by_user_id:
+              type: string
+              format: uuid
+              description: Signed-in staff member who settled a direct tender.
+            expires_at:
+              type: ["string", "null"]
+              format: date-time
+        order:
+          type: object
+          description: The order after the payment (status, payment_status, totals).
+        split:
+          type: object
+          description: The payment split that was paid or charged.
+
+    MidtransWebhookPayload:
+      type: object
+      required: [order_id, status_code, gross_amount, signature_key, transaction_status]
+      properties:
+        transaction_time:
+          type: string
+          example: "2026-10-30 14:35:10"
+        transaction_status:
+          type: string
+          example: settlement
+        transaction_id:
+          type: string
+          example: 9b8a7c6d-1234-4321-8888-abcdef012345
+        status_message:
+          type: string
+          example: midtrans payment notification
+        status_code:
+          type: string
+          example: "200"
+        signature_key:
+          type: string
+          description: Lowercase hex SHA-512 of `order_id + status_code + gross_amount + server_key`
+        payment_type:
+          type: string
+          example: qris
+        order_id:
+          type: string
+          example: ORD-20261030-0001-S1-A1
+        gross_amount:
+          type: string
+          example: "83160.00"
+        fraud_status:
+          type: string
+          example: accept
+        currency:
+          type: string
+          example: IDR
+
+    PublicCatalogResponse:
+      type: object
+      required: [store_id, slug, name, currency, tax_bps, service_bps, categories]
+      properties:
+        store_id:
+          type: string
+          format: uuid
+        slug:
+          type: string
+        name:
+          type: string
+        currency:
+          type: string
+          example: IDR
+        tax_bps:
+          type: integer
+          example: 1000
+        service_bps:
+          type: integer
+          example: 500
+        categories:
+          type: array
+          items:
+            type: object
+            required: [id, name, products]
+            properties:
+              id:
+                type: string
+                format: uuid
+              name:
+                type: string
+              products:
+                type: array
+                items:
+                  type: object
+                  required: [id, name, base_price, is_available]
+                  properties:
+                    id:
+                      type: string
+                      format: uuid
+                    name:
+                      type: string
+                    description:
+                      type: string
+                    base_price:
+                      type: integer
+                      format: int64
+                    image_url:
+                      type: string
+                    is_available:
+                      type: boolean
+                    stock_quantity:
+                      type: integer
+
+    ModifierGroupInput:
+      type: object
+      required: [name, selection_type, min_selection, max_selection]
+      properties:
+        name:
+          type: string
+          maxLength: 120
+        description:
+          type: string
+          maxLength: 500
+        selection_type:
+          type: string
+          enum: [single, multiple]
+        min_selection:
+          type: integer
+          minimum: 0
+        max_selection:
+          type: integer
+          minimum: 1
+        display_order:
+          type: integer
+          minimum: 0
+
+    ModifierOptionInput:
+      type: object
+      required: [name, price_delta]
+      properties:
+        name:
+          type: string
+          maxLength: 120
+        price_delta:
+          type: integer
+          format: int64
+          description: Price adjustment in IDR (can be negative, e.g. -2000 per decision P1)
+        is_available:
+          type: boolean
+        max_quantity:
+          type: integer
+          minimum: 1
+        display_order:
+          type: integer
+          minimum: 0
+
+    AttachModifierGroupInput:
+      type: object
+      required: [group_id]
+      properties:
+        group_id:
+          type: string
+          format: uuid
+        display_order:
+          type: integer
+          minimum: 0
+        override_required:
+          type: boolean
+
+    AttachChildGroupInput:
+      type: object
+      required: [child_group_id]
+      properties:
+        child_group_id:
+          type: string
+          format: uuid
+        display_order:
+          type: integer
+          minimum: 0
+
+    QuoteOrderRequest:
+      type: object
+      required: [order_type, items]
+      properties:
+        order_type:
+          type: string
+          enum: [dine_in, takeaway, delivery]
+        billing_mode:
+          type: string
+          enum: [pay_first, open_tab, split_bill]
+        table_number:
+          type: string
+        notes:
+          type: string
+        expected_total:
+          type: integer
+          format: int64
+          description: Optional expected total for optimistic concurrency conflict check
+        expected_quote_fingerprint:
+          type: string
+          description: Optional deterministic hash fingerprint of quote lines to prevent compensating price change conflicts
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/CreateOrderItem"
+
+    QuoteOrderResponse:
+      type: object
+      required: [quote]
+      properties:
+        quote:
+          $ref: "#/components/schemas/QuoteSummary"
+
+    QuoteSummary:
+      type: object
+      required: [subtotal, discount_amount, service_charge_amount, service_charge_rate_bps, tax_amount, tax_rate_bps, total_amount, quote_fingerprint, items]
+      properties:
+        subtotal:
+          type: integer
+          format: int64
+        discount_amount:
+          type: integer
+          format: int64
+        service_charge_amount:
+          type: integer
+          format: int64
+        service_charge_rate_bps:
+          type: integer
+        tax_amount:
+          type: integer
+          format: int64
+        tax_rate_bps:
+          type: integer
+        total_amount:
+          type: integer
+          format: int64
+        quote_fingerprint:
+          type: string
+          description: Deterministic SHA-256 fingerprint hash of lines, snapshot prices, tax, and service fees
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              variant_id:
+                type: string
+                format: uuid
+              product_id:
+                type: string
+                format: uuid
+              product_name:
+                type: string
+              variant_name:
+                type: string
+              unit_price:
+                type: integer
+                format: int64
+              quantity:
+                type: integer
+              subtotal:
+                type: integer
+                format: int64
+
+    QuoteChangedErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, expected_total, actual_total, quote]
+          properties:
+            code:
+              type: string
+              enum: [QUOTE_CHANGED]
+            message:
+              type: string
+            expected_total:
+              type: integer
+              format: int64
+            actual_total:
+              type: integer
+              format: int64
+            expected_fingerprint:
+              type: string
+            actual_fingerprint:
+              type: string
+            quote:
+              $ref: "#/components/schemas/QuoteSummary"

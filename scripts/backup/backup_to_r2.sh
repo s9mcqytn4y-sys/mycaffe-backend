@@ -19,6 +19,7 @@ DB_CONTAINER="${DB_CONTAINER:-mycaffe-postgres}"
 DB_USER="${DB_USER:-mycaffe_migrator}"
 DB_NAME="${DB_NAME:-mycaffe_prod}"
 R2_BACKUP_BUCKET="${R2_BACKUP_BUCKET:-${R2_BUCKET:-mycaffe-backups}}"
+R2_BACKUP_PREFIX="${R2_BACKUP_PREFIX:-backups}"
 TIMESTAMP="$(date -u +%Y%m%d_%H%M%SZ)"
 BACKUP_DIR="/tmp/mycaffe-backups"
 BACKUP_FILE="${BACKUP_DIR}/backup_${DB_NAME}_${TIMESTAMP}.dump.gpg"
@@ -58,11 +59,14 @@ if [ "${FILESIZE}" -le 64 ]; then
     exit 1
 fi
 
-sha256sum "${BACKUP_FILE}" > "${CHECKSUM_FILE}"
+(
+    cd "${BACKUP_DIR}"
+    sha256sum "$(basename "${BACKUP_FILE}")" > "$(basename "${CHECKSUM_FILE}")"
+)
 echo "[BACKUP] Authenticated GPG encryption completed. File size: ${FILESIZE} bytes."
 
-echo "[BACKUP] Uploading encrypted archive and SHA-256 manifest to Cloudflare R2 bucket: ${R2_BACKUP_BUCKET}..."
-aws --endpoint-url "${R2_ENDPOINT}" s3 cp "${BACKUP_FILE}" "s3://${R2_BACKUP_BUCKET}/backups/$(basename "${BACKUP_FILE}")"
-aws --endpoint-url "${R2_ENDPOINT}" s3 cp "${CHECKSUM_FILE}" "s3://${R2_BACKUP_BUCKET}/backups/$(basename "${CHECKSUM_FILE}")"
+echo "[BACKUP] Uploading encrypted archive and SHA-256 manifest to Cloudflare R2 bucket: ${R2_BACKUP_BUCKET}/${R2_BACKUP_PREFIX}..."
+aws --endpoint-url "${R2_ENDPOINT}" s3 cp "${BACKUP_FILE}" "s3://${R2_BACKUP_BUCKET}/${R2_BACKUP_PREFIX}/$(basename "${BACKUP_FILE}")"
+aws --endpoint-url "${R2_ENDPOINT}" s3 cp "${CHECKSUM_FILE}" "s3://${R2_BACKUP_BUCKET}/${R2_BACKUP_PREFIX}/$(basename "${CHECKSUM_FILE}")"
 
 echo "[BACKUP] Backup and integrity manifest uploaded successfully at $(date -u +%Y%m%d_%H%M%SZ)."

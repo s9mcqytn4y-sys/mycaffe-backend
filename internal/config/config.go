@@ -7,6 +7,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/joho/godotenv"
 )
@@ -16,12 +17,38 @@ type Config struct {
 	Port                 string
 	FrontendURL          string
 	AllowedOrigins       []string
+	TrustedProxies       []string
 	DatabaseURL          string
 	DatabaseMigrationURL string
 	DBAppUser            string
 	DBAppPassword        string
 	JWTSecret            string
 	JWTExpiryHours       int
+
+	// Staff authentication (ADR-003 D3/D4, owner decision O3)
+	StaffAccessTokenTTL     time.Duration
+	StaffRefreshTokenTTL    time.Duration
+	StaffSessionIdleTimeout time.Duration
+	StaffMaxSessions        int
+	StaffPINMaxFailures     int
+	StaffPINLockout         time.Duration
+
+	// Email (owner decision E5): "log" writes emails to the server log (dev/test only),
+	// "smtp" delivers through SMTP (Gmail app password for dev/demo, Hostinger for production).
+	EmailDriver    string
+	SMTPHost       string
+	SMTPPort       int
+	SMTPUsername   string
+	SMTPPassword   string
+	SMTPTLSMode    string // "starttls" (587) or "implicit" (465)
+	EmailFromEmail string
+	EmailFromName  string
+	// AppPublicURL is the frontend origin used in links inside emails.
+	AppPublicURL string
+
+	// DefaultStoreSlug lets a single-cafe deployment omit the store code on login and forgot-PIN
+	// (owner decision Q3, single-tenant MVP). Multi-branch deployments leave it empty.
+	DefaultStoreSlug string
 
 	// Midtrans Core API
 	MidtransMerchantID   string
@@ -30,12 +57,13 @@ type Config struct {
 	MidtransIsProduction bool
 
 	// Cloudflare R2 / Storage
-	StorageDriver     string
-	R2AccountID       string
-	R2AccessKeyID     string
-	R2SecretAccessKey string
-	R2BucketName      string
-	R2PublicURL       string
+	StorageDriver       string
+	R2AccountID         string
+	R2AccessKeyID       string
+	R2SecretAccessKey   string
+	R2BucketName        string
+	R2PrivateBucketName string
+	R2PublicURL         string
 
 	// Sentry
 	SentryDSN         string
@@ -70,45 +98,93 @@ func LoadConfig() (*Config, error) {
 		return nil, errors.New("APP_ENV cannot be empty: environment must be explicitly defined (development, test, staging, production)")
 	}
 
+	var parseErrs []error
+	duration := func(key, def string) time.Duration {
+		d, err := time.ParseDuration(getEnv(key, def))
+		if err != nil || d <= 0 {
+			parseErrs = append(parseErrs, fmt.Errorf("invalid positive duration for %s", key))
+		}
+		return d
+	}
+	positiveInt := func(key, def string) int {
+		n, err := strconv.Atoi(getEnv(key, def))
+		if err != nil || n <= 0 {
+			parseErrs = append(parseErrs, fmt.Errorf("invalid positive integer for %s", key))
+		}
+		return n
+	}
+	staffAccessTTL := duration("STAFF_ACCESS_TOKEN_TTL", "15m")
+	staffRefreshTTL := duration("STAFF_REFRESH_TOKEN_TTL", "12h")
+	staffIdle := duration("STAFF_SESSION_IDLE_TIMEOUT", "2h")
+	staffMaxSessions := positiveInt("STAFF_MAX_SESSIONS_PER_USER", "3")
+	staffPINMaxFailures := positiveInt("STAFF_PIN_MAX_FAILURES", "5")
+	staffPINLockout := duration("STAFF_PIN_LOCKOUT", "15m")
+	smtpPort := positiveInt("SMTP_PORT", "587")
+	defaultEmailDriver := "smtp"
+	if appEnv == "development" || appEnv == "test" {
+		defaultEmailDriver = "log"
+	}
+	emailDriver := strings.ToLower(strings.TrimSpace(getEnv("EMAIL_DRIVER", defaultEmailDriver)))
+	smtpTLSMode := strings.ToLower(strings.TrimSpace(getEnv("SMTP_TLS_MODE", "")))
+	if smtpTLSMode == "" {
+		smtpTLSMode = "starttls"
+		if smtpPort == 465 {
+			smtpTLSMode = "implicit"
+		}
+	}
+	if err := errors.Join(parseErrs...); err != nil {
+		return nil, err
+	}
+
 	frontendURL := getEnv("FRONTEND_URL", "http://localhost:3000")
 
 	// Strict origin parsing
-	allowedOriginsRaw := getEnv("ALLOWED_ORIGINS", "")
-	var allowedOrigins []string
-	if allowedOriginsRaw != "" {
-		for _, o := range strings.Split(allowedOriginsRaw, ",") {
-			trimmed := strings.TrimSpace(o)
-			if trimmed != "" {
-				allowedOrigins = append(allowedOrigins, trimmed)
-			}
-		}
-	} else if appEnv != "production" {
+	allowedOrigins := splitCSV(getEnv("ALLOWED_ORIGINS", ""))
+	if len(allowedOrigins) == 0 && appEnv != "production" {
 		allowedOrigins = append(allowedOrigins, frontendURL)
 	}
 
 	cfg := &Config{
-		AppEnv:               appEnv,
-		Port:                 getEnv("PORT", "8080"),
-		FrontendURL:          frontendURL,
-		AllowedOrigins:       allowedOrigins,
-		DatabaseURL:          getEnv("DATABASE_URL", ""),
-		DatabaseMigrationURL: getEnv("DATABASE_MIGRATION_URL", getEnv("DATABASE_URL", "")),
-		DBAppUser:            getEnv("DB_APP_USER", "mycaffe_app"),
-		DBAppPassword:        getEnv("DB_APP_PASSWORD", ""),
-		JWTSecret:            getEnv("JWT_SECRET_KEY", ""),
-		JWTExpiryHours:       jwtHours,
-		MidtransMerchantID:   getEnv("MIDTRANS_MERCHANT_ID", ""),
-		MidtransServerKey:    getEnv("MIDTRANS_SERVER_KEY", ""),
-		MidtransClientKey:    getEnv("MIDTRANS_CLIENT_KEY", ""),
-		MidtransIsProduction: isProd,
-		StorageDriver:        getEnv("STORAGE_DRIVER", "local"),
-		R2AccountID:          getEnv("R2_ACCOUNT_ID", ""),
-		R2AccessKeyID:        getEnv("R2_ACCESS_KEY_ID", ""),
-		R2SecretAccessKey:    getEnv("R2_SECRET_ACCESS_KEY", ""),
-		R2BucketName:         getEnv("R2_BUCKET_NAME", ""),
-		R2PublicURL:          getEnv("R2_PUBLIC_URL", ""),
-		SentryDSN:            getEnv("SENTRY_DSN", ""),
-		SentryEnvironment:    getEnv("SENTRY_ENVIRONMENT", "development"),
+		AppEnv:                  appEnv,
+		Port:                    getEnv("PORT", "8080"),
+		FrontendURL:             frontendURL,
+		AllowedOrigins:          allowedOrigins,
+		TrustedProxies:          splitCSV(getEnv("TRUSTED_PROXIES", "")),
+		DatabaseURL:             getEnv("DATABASE_URL", ""),
+		DatabaseMigrationURL:    getEnv("DATABASE_MIGRATION_URL", getEnv("DATABASE_URL", "")),
+		DBAppUser:               getEnv("DB_APP_USER", "mycaffe_app"),
+		DBAppPassword:           getEnv("DB_APP_PASSWORD", ""),
+		JWTSecret:               getEnv("JWT_SECRET_KEY", ""),
+		JWTExpiryHours:          jwtHours,
+		StaffAccessTokenTTL:     staffAccessTTL,
+		StaffRefreshTokenTTL:    staffRefreshTTL,
+		StaffSessionIdleTimeout: staffIdle,
+		StaffMaxSessions:        staffMaxSessions,
+		StaffPINMaxFailures:     staffPINMaxFailures,
+		StaffPINLockout:         staffPINLockout,
+		EmailDriver:             emailDriver,
+		SMTPHost:                getEnv("SMTP_HOST", ""),
+		SMTPPort:                smtpPort,
+		SMTPUsername:            getEnv("SMTP_USERNAME", ""),
+		SMTPPassword:            getEnv("SMTP_PASSWORD", ""),
+		SMTPTLSMode:             smtpTLSMode,
+		EmailFromEmail:          getEnv("EMAIL_FROM_ADDRESS", getEnv("SMTP_USERNAME", "")),
+		EmailFromName:           getEnv("EMAIL_FROM_NAME", "MyCaffe"),
+		AppPublicURL:            strings.TrimRight(getEnv("APP_PUBLIC_URL", frontendURL), "/"),
+		DefaultStoreSlug:        strings.ToLower(strings.TrimSpace(getEnv("DEFAULT_STORE_SLUG", ""))),
+		MidtransMerchantID:      getEnv("MIDTRANS_MERCHANT_ID", ""),
+		MidtransServerKey:       getEnv("MIDTRANS_SERVER_KEY", ""),
+		MidtransClientKey:       getEnv("MIDTRANS_CLIENT_KEY", ""),
+		MidtransIsProduction:    isProd,
+		StorageDriver:           getEnv("STORAGE_DRIVER", "local"),
+		R2AccountID:             getEnv("R2_ACCOUNT_ID", ""),
+		R2AccessKeyID:           getEnv("R2_ACCESS_KEY_ID", ""),
+		R2SecretAccessKey:       getEnv("R2_SECRET_ACCESS_KEY", ""),
+		R2BucketName:            getEnv("R2_BUCKET_NAME", ""),
+		R2PrivateBucketName:     getEnv("R2_PRIVATE_BUCKET_NAME", ""),
+		R2PublicURL:             getEnv("R2_PUBLIC_URL", ""),
+		SentryDSN:               getEnv("SENTRY_DSN", ""),
+		SentryEnvironment:       getEnv("SENTRY_ENVIRONMENT", "development"),
 	}
 
 	if err := ValidateConfig(cfg); err != nil {
@@ -116,6 +192,70 @@ func LoadConfig() (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// LoadMigrateConfig loads and validates only the database migration configuration needed by cmd/migrate.
+// This allows the migration job container to run with least privilege without requiring JWT or Midtrans runtime secrets.
+func LoadMigrateConfig() (*Config, error) {
+	_ = godotenv.Load()
+
+	rawAppEnv, exists := os.LookupEnv("APP_ENV")
+	if !exists {
+		return nil, errors.New("APP_ENV is not set: environment must be explicitly defined (development, test, staging, production)")
+	}
+	appEnv := strings.ToLower(strings.TrimSpace(rawAppEnv))
+	if appEnv == "" {
+		return nil, errors.New("APP_ENV cannot be empty: environment must be explicitly defined (development, test, staging, production)")
+	}
+
+	cfg := &Config{
+		AppEnv:               appEnv,
+		DatabaseURL:          getEnv("DATABASE_URL", ""),
+		DatabaseMigrationURL: getEnv("DATABASE_MIGRATION_URL", getEnv("DATABASE_URL", "")),
+		DBAppUser:            getEnv("DB_APP_USER", "mycaffe_app"),
+		DBAppPassword:        getEnv("DB_APP_PASSWORD", ""),
+	}
+
+	if err := ValidateMigrateConfig(cfg); err != nil {
+		return nil, err
+	}
+
+	return cfg, nil
+}
+
+// ValidateMigrateConfig enforces environment and database DSN safety rules for the database migration CLI.
+func ValidateMigrateConfig(cfg *Config) error {
+	cfg.AppEnv = strings.ToLower(strings.TrimSpace(cfg.AppEnv))
+	validEnvs := []string{"development", "test", "staging", "production"}
+	isValidEnv := false
+	for _, env := range validEnvs {
+		if cfg.AppEnv == env {
+			isValidEnv = true
+			break
+		}
+	}
+	if !isValidEnv {
+		return fmt.Errorf("[SECURITY FAIL-CLOSED] invalid APP_ENV %q: allowed values are development, test, staging, production", cfg.AppEnv)
+	}
+
+	dsn := cfg.DatabaseMigrationURL
+	if dsn == "" {
+		dsn = cfg.DatabaseURL
+	}
+	if dsn == "" {
+		return errors.New("[SECURITY FAIL-CLOSED] DATABASE_MIGRATION_URL or DATABASE_URL must be set")
+	}
+
+	if cfg.AppEnv == "production" {
+		if containsPlaceholderPattern(dsn) {
+			return errors.New("[SECURITY FAIL-CLOSED] production DATABASE_MIGRATION_URL cannot contain placeholder credentials")
+		}
+		if cfg.DBAppPassword != "" && containsPlaceholderPattern(cfg.DBAppPassword) {
+			return errors.New("[SECURITY FAIL-CLOSED] production DB_APP_PASSWORD cannot contain placeholder credentials")
+		}
+	}
+
+	return nil
 }
 
 // ValidateConfig enforces fail-closed security rules without embedding actual secrets in code
@@ -141,6 +281,9 @@ func ValidateConfig(cfg *Config) error {
 		}
 		if len(cfg.JWTSecret) < 32 {
 			return errors.New("[SECURITY FAIL-CLOSED] production requires a strong JWT_SECRET_KEY of at least 32 characters")
+		}
+		if cfg.StaffAccessTokenTTL > time.Hour || cfg.StaffRefreshTokenTTL > 24*time.Hour {
+			return errors.New("[SECURITY FAIL-CLOSED] production staff token TTLs cannot exceed 1h (access) / 24h (refresh)")
 		}
 
 		if cfg.DatabaseURL == "" || containsPlaceholderPattern(cfg.DatabaseURL) {
@@ -182,7 +325,7 @@ func ValidateConfig(cfg *Config) error {
 		}
 	}
 
-	return nil
+	return validateEmailConfig(cfg)
 }
 
 func containsPlaceholderPattern(val string) bool {
@@ -222,4 +365,42 @@ func getEnv(key, defaultVal string) string {
 		return val
 	}
 	return defaultVal
+}
+
+func splitCSV(raw string) []string {
+	var out []string
+	for _, part := range strings.Split(raw, ",") {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
+}
+
+// validateEmailConfig fails closed on an unusable mailer: the "log" driver prints link secrets
+// and is only allowed in development/test, and SMTP needs a full set of credentials.
+func validateEmailConfig(cfg *Config) error {
+	switch cfg.EmailDriver {
+	case "log":
+		if cfg.AppEnv == "production" {
+			return errors.New("[SECURITY FAIL-CLOSED] EMAIL_DRIVER=log is not allowed in production")
+		}
+		return nil
+	case "smtp":
+	default:
+		return fmt.Errorf("invalid EMAIL_DRIVER %q: allowed values are log, smtp", cfg.EmailDriver)
+	}
+	if cfg.SMTPHost == "" || cfg.SMTPUsername == "" || cfg.SMTPPassword == "" || cfg.EmailFromEmail == "" {
+		return errors.New("EMAIL_DRIVER=smtp requires SMTP_HOST, SMTP_USERNAME, SMTP_PASSWORD and EMAIL_FROM_ADDRESS (or set EMAIL_DRIVER=log outside production)")
+	}
+	if cfg.SMTPTLSMode != "starttls" && cfg.SMTPTLSMode != "implicit" {
+		return fmt.Errorf("invalid SMTP_TLS_MODE %q: allowed values are starttls, implicit", cfg.SMTPTLSMode)
+	}
+	if u, err := url.Parse(cfg.AppPublicURL); err != nil || u.Scheme == "" || u.Host == "" {
+		return errors.New("APP_PUBLIC_URL (or FRONTEND_URL) must be an absolute URL for links in emails")
+	}
+	if cfg.AppEnv == "production" && !strings.HasPrefix(cfg.AppPublicURL, "https://") {
+		return errors.New("[SECURITY FAIL-CLOSED] production APP_PUBLIC_URL must use https")
+	}
+	return nil
 }

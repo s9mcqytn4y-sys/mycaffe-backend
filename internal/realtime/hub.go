@@ -1,6 +1,7 @@
 package realtime
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log"
@@ -8,8 +9,16 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/gorilla/websocket"
+)
+
+const (
+	writeWait      = 10 * time.Second
+	pongWait       = 60 * time.Second
+	pingPeriod     = (pongWait * 9) / 10
+	maxMessageSize = 4096
 )
 
 type EventMessage struct {
@@ -31,6 +40,8 @@ type Hub struct {
 	broadcast      chan *EventMessage
 	register       chan *Client
 	unregister     chan *Client
+	stopCh         chan struct{}
+	stopOnce       sync.Once
 	mu             sync.RWMutex
 	allowedOrigins []string
 }
@@ -40,14 +51,26 @@ func NewHub(allowedOrigins []string) *Hub {
 		broadcast:      make(chan *EventMessage, 256),
 		register:       make(chan *Client),
 		unregister:     make(chan *Client),
+		stopCh:         make(chan struct{}),
 		clients:        make(map[*Client]bool),
 		allowedOrigins: allowedOrigins,
 	}
 }
 
 func (h *Hub) Run() {
+	h.RunWithContext(context.Background())
+}
+
+func (h *Hub) RunWithContext(ctx context.Context) {
 	for {
 		select {
+		case <-ctx.Done():
+			h.Shutdown() // stopCh is the single signal senders select on once the loop exits
+			h.closeAllClients()
+			return
+		case <-h.stopCh:
+			h.closeAllClients()
+			return
 		case client := <-h.register:
 			h.mu.Lock()
 			h.clients[client] = true
@@ -84,6 +107,26 @@ func (h *Hub) Run() {
 	}
 }
 
+func (h *Hub) Shutdown() {
+	h.stopOnce.Do(func() {
+		close(h.stopCh)
+	})
+}
+
+func (h *Hub) closeAllClients() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for client := range h.clients {
+		delete(h.clients, client)
+		if atomic.CompareAndSwapInt32(&client.isClosed, 0, 1) {
+			close(client.send)
+		}
+		if client.conn != nil {
+			_ = client.conn.Close()
+		}
+	}
+}
+
 func (h *Hub) removeClient(client *Client) {
 	h.mu.Lock()
 	if _, ok := h.clients[client]; ok {
@@ -101,10 +144,14 @@ func (h *Hub) BroadcastEvent(eventType, storeID string, payload interface{}) err
 		return errors.New("cannot broadcast event without explicit storeID (tenant isolation violation)")
 	}
 
-	h.broadcast <- &EventMessage{
+	select {
+	case h.broadcast <- &EventMessage{
 		Type:    eventType,
 		StoreID: storeID,
 		Payload: payload,
+	}:
+	case <-h.stopCh:
+		return errors.New("realtime hub is shut down")
 	}
 	return nil
 }
@@ -145,7 +192,12 @@ func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request, authenticatedStore
 		storeID:  authenticatedStoreID,
 		isClosed: 0,
 	}
-	client.hub.register <- client
+	select {
+	case client.hub.register <- client:
+	case <-h.stopCh:
+		_ = conn.Close()
+		return
+	}
 
 	go client.writePump()
 	go client.readPump()
@@ -153,9 +205,19 @@ func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request, authenticatedStore
 
 func (c *Client) readPump() {
 	defer func() {
-		c.hub.unregister <- c
+		select {
+		case c.hub.unregister <- c:
+		case <-c.hub.stopCh:
+		}
 		_ = c.conn.Close()
 	}()
+
+	c.conn.SetReadLimit(maxMessageSize)
+	_ = c.conn.SetReadDeadline(time.Now().Add(pongWait))
+	c.conn.SetPongHandler(func(string) error {
+		_ = c.conn.SetReadDeadline(time.Now().Add(pongWait))
+		return nil
+	})
 
 	for {
 		_, _, err := c.conn.ReadMessage()
@@ -166,26 +228,42 @@ func (c *Client) readPump() {
 }
 
 func (c *Client) writePump() {
+	ticker := time.NewTicker(pingPeriod)
 	defer func() {
+		ticker.Stop()
 		_ = c.conn.Close()
 	}()
 
-	for message := range c.send {
-		w, err := c.conn.NextWriter(websocket.TextMessage)
-		if err != nil {
-			return
-		}
-		_, _ = w.Write(message)
+	for {
+		select {
+		case message, ok := <-c.send:
+			_ = c.conn.SetWriteDeadline(time.Now().Add(writeWait))
+			if !ok {
+				_ = c.conn.WriteMessage(websocket.CloseMessage, []byte{})
+				return
+			}
 
-		// Flush queued messages to optimize frames
-		n := len(c.send)
-		for i := 0; i < n; i++ {
-			_, _ = w.Write([]byte{'\n'})
-			_, _ = w.Write(<-c.send)
-		}
+			w, err := c.conn.NextWriter(websocket.TextMessage)
+			if err != nil {
+				return
+			}
+			_, _ = w.Write(message)
 
-		if err := w.Close(); err != nil {
-			return
+			// Flush queued messages to optimize frames
+			n := len(c.send)
+			for i := 0; i < n; i++ {
+				_, _ = w.Write([]byte{'\n'})
+				_, _ = w.Write(<-c.send)
+			}
+
+			if err := w.Close(); err != nil {
+				return
+			}
+		case <-ticker.C:
+			_ = c.conn.SetWriteDeadline(time.Now().Add(writeWait))
+			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				return
+			}
 		}
 	}
 }

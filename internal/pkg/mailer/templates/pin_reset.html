@@ -1,0 +1,7 @@
+{{define "subject"}}Atur ulang PIN {{.StoreName}}{{end}}
+{{define "preheader"}}Tautan untuk membuat PIN baru berlaku {{.ExpiresIn}}.{{end}}
+{{define "html_body"}}<h1 style="margin:0 0 16px 0;font-size:22px;line-height:30px;color:#2C1810;">Halo {{.RecipientName}},</h1>
+<p style="margin:0 0 16px 0;">Ada permintaan untuk mengatur ulang PIN akun Anda di <strong>{{.StoreName}}</strong>{{if .ActorName}} (diminta oleh {{.ActorName}}){{end}}. Tekan tombol di bawah untuk membuat PIN 6 digit yang baru.</p>
+{{template "button" .}}
+<p style="margin:0 0 16px 0;font-size:14px;line-height:22px;">Tautan berlaku sampai <strong>{{.ExpiresAt}}</strong> dan hanya bisa dipakai sekali. Setelah PIN baru dibuat, semua perangkat yang sedang masuk akan dikeluarkan.</p>
+<p style="margin:0;font-size:14px;line-height:22px;color:#6B5B52;">Tidak meminta reset? Abaikan email ini. PIN lama Anda tetap berlaku.</p>{{end}}

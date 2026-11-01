@@ -79,6 +79,17 @@ Cloudflare R2 is used with two strictly separated buckets and separate IAM API t
 1. **`mycaffe-media` (`R2_BUCKET_NAME`)**: Stores public product catalog and store branding media served via Cloudflare CDN (`R2_PUBLIC_URL`), keeping the VPS disk lean.
 2. **`mycaffe-backups` (`R2_BACKUP_BUCKET`)**: Private bucket used by `scripts/backup/backup_to_r2.sh` for nightly `pg_dump` archives encrypted with GPG (`--cipher-algo AES256 --digest-algo SHA512`) and accompanied by a `.sha256` integrity manifest, paired with `scripts/backup/restore_from_r2.sh` for one-command checksum-verified disaster recovery.
 
+### 4. Zero In-Place Coding & Production Deployment Discipline
+1. **No Source Code Editing or Compilation on Production VPS**: Operators and agents are strictly prohibited from editing Go/TypeScript source files, altering SQL migration files, or running `go build` / `npm run build` directly on the Hostinger KVM 2 VPS.
+2. **Immutable Artifact Promotion**:
+   - All changes are developed on `feature/*` branches, verified via Pull Request against `staging` (passing `build-and-test`, `docker-build`, and `database-migration-test`), and promoted via Pull Request to `main`.
+   - Merging to `main` triggers `.github/workflows/release-ghcr.yml`, publishing an immutable image tagged with the Git commit SHA (`sha-<commit>`) and branch/semver tag to `ghcr.io/s9mcqytn4y-sys/mycaffe-api`.
+3. **Production Update Procedure**:
+   - Update `API_IMAGE_TAG` (and `WEB_IMAGE_TAG`) in the VPS deployment environment.
+   - Pull the verified image (`docker compose -f deploy/docker/docker-compose.prod.yml pull`), run additive schema migrations via the `migrate` service (`mycaffe_migrator`), and restart services (`docker compose -f deploy/docker/docker-compose.prod.yml up -d`).
+4. **Rollback Procedure**:
+   - Revert `API_IMAGE_TAG` to the previous verified Git SHA tag and redeploy the container. Never hot-patch files inside a running container or on the VPS host filesystem.
+
 ## Consequences
 - **Positive**:
   - Full operational independence with zero external database PaaS dependency.

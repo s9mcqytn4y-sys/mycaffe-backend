@@ -11,7 +11,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/domain"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/auth"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/database"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/rbac"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/repository/postgres"
@@ -32,10 +31,11 @@ type ShiftService struct {
 	settings *postgres.SettingsRepository
 	orderRep *postgres.OrderRepository
 	nowFunc  func() time.Time
+	pins     *pinGuard
 }
 
 func NewShiftService(db *sqlx.DB) *ShiftService {
-	return &ShiftService{
+	s := &ShiftService{
 		db:       db,
 		repo:     postgres.NewShiftRepository(),
 		authRep:  postgres.NewAuthRepository(),
@@ -43,6 +43,8 @@ func NewShiftService(db *sqlx.DB) *ShiftService {
 		orderRep: postgres.NewOrderRepository(),
 		nowFunc:  time.Now,
 	}
+	s.pins = newPINGuard(db, s.authRep, func() time.Time { return s.nowFunc() })
+	return s
 }
 
 // ---------- Drawer Inputs & Management ----------
@@ -386,7 +388,7 @@ func (s *ShiftService) CreateCashMovement(ctx context.Context, actor *Authentica
 		if err != nil {
 			return err
 		}
-		expectedCash := shift.OpeningFloat + summary.CashSales + summary.Tips + summary.CashIns - summary.CashRefunds - summary.PaidOuts - summary.StaffMeals
+		expectedCash := summary.ExpectedCash(shift.OpeningFloat)
 
 		if (in.MovementType == domain.CashMovementPaidOut || in.MovementType == domain.CashMovementStaffMeal) && in.Amount > expectedCash {
 			return ErrInsufficientDrawerCash
@@ -463,7 +465,7 @@ func (s *ShiftService) CloseShift(ctx context.Context, actor *AuthenticatedStaff
 	}
 
 	var result *CloseShiftResult
-	err := database.WithTenantTx(ctx, s.db, actor.Staff.Store.ID, func(tx *sqlx.Tx) error {
+	err := s.pins.withPINTx(ctx, actor.Staff.Store.ID, func(tx *sqlx.Tx) error {
 		shift, err := s.repo.GetShiftForUpdate(ctx, tx, actor.Staff.Store.ID, shiftID)
 		if err != nil {
 			if errors.Is(err, postgres.ErrShiftNotFound) {
@@ -479,7 +481,7 @@ func (s *ShiftService) CloseShift(ctx context.Context, actor *AuthenticatedStaff
 		if err != nil {
 			return err
 		}
-		expectedCash := shift.OpeningFloat + summary.CashSales + summary.Tips + summary.CashIns - summary.CashRefunds - summary.PaidOuts - summary.StaffMeals
+		expectedCash := summary.ExpectedCash(shift.OpeningFloat)
 		variance := in.CountedCash - expectedCash
 
 		// Ambil store settings untuk toleransi selisih kas
@@ -511,7 +513,7 @@ func (s *ShiftService) CloseShift(ctx context.Context, actor *AuthenticatedStaff
 			}
 
 			// Verifikasi PIN Owner terhadap akun aktif pemilik toko
-			verifiedOwnerID, err := s.verifyOwnerPIN(ctx, tx, actor.Staff.Store.ID, strings.TrimSpace(*in.OwnerPIN))
+			verifiedOwnerID, err := s.pins.verifyOwner(ctx, tx, actor, strings.TrimSpace(*in.OwnerPIN))
 			if err != nil {
 				return err
 			}
@@ -642,7 +644,7 @@ func (s *ShiftService) ForceCloseShift(ctx context.Context, actor *Authenticated
 		if err != nil {
 			return err
 		}
-		expectedCash := shift.OpeningFloat + summary.CashSales + summary.Tips + summary.CashIns - summary.CashRefunds - summary.PaidOuts - summary.StaffMeals
+		expectedCash := summary.ExpectedCash(shift.OpeningFloat)
 
 		counted := expectedCash
 		if in.CountedCash != nil && *in.CountedCash >= 0 {
@@ -748,7 +750,7 @@ func (s *ShiftService) GetXReport(ctx context.Context, actor *AuthenticatedStaff
 		if err != nil {
 			return err
 		}
-		expectedCash := shift.OpeningFloat + summary.CashSales + summary.Tips + summary.CashIns - summary.CashRefunds - summary.PaidOuts - summary.StaffMeals
+		expectedCash := summary.ExpectedCash(shift.OpeningFloat)
 
 		drawer, _ := s.repo.GetCashDrawer(ctx, tx, actor.Staff.Store.ID, shift.DrawerID)
 		drawerName := "Laci Kas"
@@ -889,23 +891,4 @@ func (s *ShiftService) populateUnsettledOpenTabs(
 		total += t.TotalAmount
 	}
 	return len(unsettled), total, unsettled, nil
-}
-
-// verifyOwnerPIN iterates over active owners and returns the UUID of the owner matching the Argon2id PIN.
-func (s *ShiftService) verifyOwnerPIN(ctx context.Context, tx *sqlx.Tx, storeID uuid.UUID, pin string) (uuid.UUID, error) {
-	owners, err := s.authRep.ListActiveOwners(ctx, tx, storeID)
-	if err != nil {
-		return uuid.Nil, err
-	}
-	now := s.nowFunc().UTC()
-	for _, owner := range owners {
-		if owner.LockedUntil != nil && owner.LockedUntil.After(now) {
-			continue
-		}
-		ok, err := auth.VerifyPIN(pin, owner.PinHash)
-		if err == nil && ok {
-			return owner.ID, nil
-		}
-	}
-	return uuid.Nil, ErrInvalidOwnerPIN
 }

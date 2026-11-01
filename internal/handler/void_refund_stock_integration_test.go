@@ -30,7 +30,7 @@ import (
 // 3. Void order > threshold with owner PIN -> 200 OK, audit log includes owner_override_by.
 // 4. Cash refund <= threshold with active cashier shift -> 200 OK, open_drawer: true, cash movement refund, audit log REFUND.
 // 5. Cash refund when drawer balance insufficient -> 409 INSUFFICIENT_DRAWER_CASH.
-// 6. Refund with restore_stock = false -> 200 OK, payment refunded, stock NOT restored (waste).
+// 6. Non-cash (EDC) refund -> 409 REFUND_METHOD_NOT_SUPPORTED until a non-cash policy is approved.
 // 7. Stock override with invalid owner PIN -> 401 INVALID_OWNER_PIN.
 // 8. Stock override with valid owner PIN -> 200 OK, product stock_quantity updated, audit log STOCK_OVERRIDE.
 func TestVoidRefundStockOverrideIntegration(t *testing.T) {
@@ -419,8 +419,9 @@ func TestVoidRefundStockOverrideIntegration(t *testing.T) {
 
 		// Attempt cash refund with Rp 0 in drawer
 		refundRes := call("POST", fmt.Sprintf("/pos/orders/%s/payments/%s/refund", orderID, payUUID), cashierResp.AccessToken, map[string]any{
-			"reason": "Refund kasir tanpa uang di laci",
-			"pin":    "482913",
+			"reason":        "Refund kasir tanpa uang di laci",
+			"pin":           "482913",
+			"restore_stock": false,
 		})
 		if refundRes.Code != http.StatusConflict {
 			t.Fatalf("expected 409 Conflict for insufficient drawer cash, got %d: %s", refundRes.Code, refundRes.Body.String())
@@ -436,9 +437,9 @@ func TestVoidRefundStockOverrideIntegration(t *testing.T) {
 	})
 
 	// =========================================================================
-	// Scenario 6: Refund with restore_stock = false (Waste)
+	// Scenario 6: Non-cash refund is refused (hotfix 4d-1)
 	// =========================================================================
-	t.Run("Refund with restore_stock = false does not restore stock", func(t *testing.T) {
+	t.Run("EDC refund is refused with REFUND_METHOD_NOT_SUPPORTED", func(t *testing.T) {
 		orderID, _ := createTestOrder(1)
 		payRes := call("POST", fmt.Sprintf("/pos/orders/%s/payments", orderID), cashierResp.AccessToken, map[string]any{
 			"idempotency_key":    "pay-edc-" + uuid.New().String(),
@@ -463,13 +464,11 @@ func TestVoidRefundStockOverrideIntegration(t *testing.T) {
 			"pin":           "482913",
 			"restore_stock": false,
 		})
-		if refundRes.Code != http.StatusOK {
-			t.Fatalf("expected 200 OK, got %d: %s", refundRes.Code, refundRes.Body.String())
+		if refundRes.Code != http.StatusConflict || !strings.Contains(refundRes.Body.String(), "REFUND_METHOD_NOT_SUPPORTED") {
+			t.Fatalf("expected 409 REFUND_METHOD_NOT_SUPPORTED, got %d: %s", refundRes.Code, refundRes.Body.String())
 		}
-
-		stockAfter := getProductStock(croissantProdID)
-		if stockAfter != stockBefore {
-			t.Fatalf("expected stock NOT to change when restore_stock = false, before=%d, after=%d", stockBefore, stockAfter)
+		if stockAfter := getProductStock(croissantProdID); stockAfter != stockBefore {
+			t.Fatalf("refused refund must not touch stock, before=%d, after=%d", stockBefore, stockAfter)
 		}
 	})
 

@@ -402,7 +402,8 @@ paths:
                   modifier_groups:
                     type: array
                     items:
-                      $ref: "#/components/schemas/ModifierGroup"
+                      type: object
+                      description: Modifier group with its options (see ModifierGroupInput for writable fields).
     post:
       tags: [Catalog]
       operationId: createModifierGroup
@@ -1413,7 +1414,13 @@ paths:
     post:
       tags: [POS Operational]
       operationId: voidOrder
-      summary: Cancel unpaid order, restore product stock, and audit action (Iteration 4d)
+      summary: Void an order with no money attached (Iteration 4d, hotfix v0.4.3)
+      description: >-
+        Allowed only while the order has no paid, partially refunded, refunded, pending or authorized
+        payment (on the order or any split); otherwise 409 ORDER_HAS_PAYMENTS (use refund). Returns the
+        stock the order still holds exactly once (products and modifier options, stock_status becomes
+        released), cancels every round, and writes an order.cancelled outbox event. Wrong PINs count
+        toward the same lockout as login.
       x-implementation-status: implemented
       security:
         - BearerStaffJWT: []
@@ -1453,20 +1460,30 @@ paths:
                     $ref: "#/components/schemas/Order"
                   message:
                     type: string
-        "400":
-          description: Reason missing or invalid order state
         "401":
-          description: Invalid staff or owner PIN
+          description: INVALID_STAFF_PIN or INVALID_OWNER_PIN
         "403":
           description: Forbidden - lacks order.void permission
+        "404":
+          description: Order not found
+        "409":
+          description: ORDER_HAS_PAYMENTS or ORDER_ALREADY_CANCELLED
         "422":
-          description: Order total exceeds threshold and owner_pin was not provided
+          description: VALIDATION_FAILED (reason/pin) or OWNER_PIN_REQUIRED above void_refund_owner_threshold
+        "429":
+          description: PIN_LOCKED (actor or every owner locked) or PIN_ATTEMPTS_EXCEEDED (5 wrong owner PINs by this actor in 15 min)
 
   /api/v1/pos/orders/{id}/payments/{payment_id}/refund:
     post:
       tags: [POS Operational]
       operationId: refundPayment
-      summary: Refund settled payment or split bill, adjust drawer cash ledger, and audit action (Iteration 4d)
+      summary: Refund one settled cash payment or split from the open drawer (Iteration 4d, hotfix v0.4.3)
+      description: >-
+        Full refund of one cash payment once the order is paid or partially refunded. Non-cash
+        methods answer 409 REFUND_METHOD_NOT_SUPPORTED until the non-cash refund policy (decision
+        register RF1) is approved. restore_stock is required: for a by_item split it restores only that
+        split's lines; otherwise the whole order is restored once, when this refund makes the order
+        fully refunded. Updates payments.refunded_amount, orders.refunded_amount and the split status.
       x-implementation-status: implemented
       security:
         - BearerStaffJWT: []
@@ -1489,7 +1506,7 @@ paths:
           application/json:
             schema:
               type: object
-              required: [reason]
+              required: [reason, restore_stock]
               properties:
                 reason:
                   type: string
@@ -1502,7 +1519,7 @@ paths:
                   example: "482913"
                 restore_stock:
                   type: boolean
-                  default: true
+                  description: true returns the goods to stock; false records them as waste. No default.
       responses:
         "200":
           description: Refund processed successfully
@@ -1512,19 +1529,27 @@ paths:
                 type: object
                 properties:
                   payment:
-                    $ref: "#/components/schemas/Payment"
+                    $ref: "#/components/schemas/InitiatePaymentResponse/properties/payment"
                   order:
                     $ref: "#/components/schemas/Order"
                   open_drawer:
                     type: boolean
+                  stock_restored:
+                    type: boolean
                   message:
                     type: string
         "401":
-          description: Invalid staff or owner PIN
+          description: INVALID_STAFF_PIN or INVALID_OWNER_PIN
+        "404":
+          description: Order or payment not found (or payment belongs to another order)
         "409":
-          description: No active cashier shift or insufficient drawer cash
+          description: >-
+            NO_OPEN_SHIFT, INSUFFICIENT_DRAWER_CASH, PAYMENT_ALREADY_REFUNDED, NOT_REFUNDABLE (payment not
+            paid or order not fully paid yet) or REFUND_METHOD_NOT_SUPPORTED (non-cash)
         "422":
-          description: Amount exceeds threshold and owner_pin was not provided
+          description: VALIDATION_FAILED (reason, restore_stock, pin) or OWNER_PIN_REQUIRED
+        "429":
+          description: PIN_LOCKED or PIN_ATTEMPTS_EXCEEDED
 
   /api/v1/pos/products/{id}/stock-override:
     post:
@@ -1559,6 +1584,10 @@ paths:
                 owner_pin:
                   type: string
                   example: "482913"
+                enable_tracking:
+                  type: boolean
+                  default: false
+                  description: Must be true to override a product whose stock is not tracked yet.
       responses:
         "200":
           description: Stock adjusted successfully
@@ -1581,11 +1610,15 @@ paths:
                   message:
                     type: string
         "401":
-          description: Invalid owner PIN
+          description: INVALID_OWNER_PIN
         "403":
           description: Forbidden - lacks stock.override permission
+        "404":
+          description: Product not found
         "422":
-          description: Negative quantity or missing reason/PIN
+          description: VALIDATION_FAILED (negative quantity, missing reason/PIN) or PRODUCT_NOT_TRACKED
+        "429":
+          description: PIN_LOCKED or PIN_ATTEMPTS_EXCEEDED
 
   /api/v1/store/settings:
     get:
@@ -3462,7 +3495,7 @@ components:
         items:
           type: array
           items:
-            $ref: "#/components/schemas/CreateOrderItem"
+            $ref: "#/components/schemas/OrderItemInput"
 
     QuoteOrderResponse:
       type: object

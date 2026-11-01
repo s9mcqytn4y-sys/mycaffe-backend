@@ -73,12 +73,18 @@ type ShiftCashSummary struct {
 	OpeningFloat   int64 `json:"opening_float"`
 	CashSales      int64 `json:"cash_sales"`
 	CashRefunds    int64 `json:"cash_refunds"`
+	RefundCount    int   `json:"refund_count"`
 	PaidOuts       int64 `json:"paid_outs"`
 	CashIns        int64 `json:"cash_ins"`
 	Tips           int64 `json:"tips"`
 	StaffMeals     int64 `json:"staff_meals"`
 	NoSaleCount    int   `json:"no_sale_count"`
 	TotalMovements int   `json:"total_movements"`
+}
+
+// ExpectedCash calculates current total physical cash present in the drawer.
+func (s *ShiftCashSummary) ExpectedCash(openingFloat int64) int64 {
+	return openingFloat + s.CashSales + s.Tips + s.CashIns - s.CashRefunds - s.PaidOuts - s.StaffMeals
 }
 
 type UnsettledTabSummary struct {

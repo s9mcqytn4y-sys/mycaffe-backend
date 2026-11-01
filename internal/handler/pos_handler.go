@@ -388,10 +388,30 @@ func writeOperationalError(c *gin.Context, err error) {
 			"code":  "NO_OPEN_SHIFT",
 			"error": "Kasir tidak memiliki sesi shift terbuka di laci kas untuk refund tunai.",
 		})
-	case errors.Is(err, service.ErrOrderAlreadyPaid):
+	case errors.Is(err, service.ErrOrderHasPayments):
 		c.JSON(http.StatusConflict, gin.H{
-			"code":  "ORDER_ALREADY_PAID",
-			"error": "Pesanan sudah berstatus lunas. Gunakan endpoint refund untuk pengembalian dana.",
+			"code":  "ORDER_HAS_PAYMENTS",
+			"error": "Pesanan sudah memiliki pembayaran (lunas, sebagian, atau masih diproses). Gunakan refund, bukan void.",
+		})
+	case errors.Is(err, service.ErrRefundMethodNotSupported):
+		c.JSON(http.StatusConflict, gin.H{
+			"code":  "REFUND_METHOD_NOT_SUPPORTED",
+			"error": "Refund non-tunai (QRIS/EDC) belum didukung di POS. Hubungi owner untuk penanganan manual.",
+		})
+	case errors.Is(err, service.ErrPINLocked):
+		c.JSON(http.StatusTooManyRequests, gin.H{
+			"code":  "PIN_LOCKED",
+			"error": "Akun terkunci sementara karena terlalu banyak PIN salah. Coba lagi nanti.",
+		})
+	case errors.Is(err, service.ErrPINAttemptsExceeded):
+		c.JSON(http.StatusTooManyRequests, gin.H{
+			"code":  "PIN_ATTEMPTS_EXCEEDED",
+			"error": "Terlalu banyak percobaan PIN Owner yang salah. Coba lagi dalam 15 menit.",
+		})
+	case errors.Is(err, service.ErrProductNotTracked):
+		c.JSON(http.StatusUnprocessableEntity, gin.H{
+			"code":  "PRODUCT_NOT_TRACKED",
+			"error": "Stok produk ini belum dilacak. Kirim enable_tracking: true untuk mulai melacak stoknya.",
 		})
 	case errors.Is(err, service.ErrOrderAlreadyCancelled):
 		c.JSON(http.StatusConflict, gin.H{
@@ -408,7 +428,7 @@ func writeOperationalError(c *gin.Context, err error) {
 			"code":  "NOT_REFUNDABLE",
 			"error": "Transaksi tidak dalam status yang dapat di-refund.",
 		})
-	case errors.Is(err, postgres.ErrOrderNotFound), errors.Is(err, postgres.ErrPaymentNotFound):
+	case errors.Is(err, postgres.ErrOrderNotFound), errors.Is(err, postgres.ErrPaymentNotFound), errors.Is(err, service.ErrProductNotFound):
 		c.JSON(http.StatusNotFound, gin.H{
 			"code":  "NOT_FOUND",
 			"error": "Data pesanan atau pembayaran tidak ditemukan.",

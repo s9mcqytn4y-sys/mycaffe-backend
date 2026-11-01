@@ -294,6 +294,7 @@ func (r *ShiftRepository) AggregateCashTotalsByShift(ctx context.Context, tx *sq
 			summary.CashSales = ro.TotalAmount
 		case domain.CashMovementRefund:
 			summary.CashRefunds = ro.TotalAmount
+			summary.RefundCount = ro.Count
 		case domain.CashMovementPaidOut:
 			summary.PaidOuts = ro.TotalAmount
 		case domain.CashMovementCashIn:

@@ -146,11 +146,23 @@ ADR: [adr-005-offline-cash-sync.md](adr-005-offline-cash-sync.md). Status: decid
 | OF8 | Offline static QRIS | Amount + reference required; stored `offline_unreconciled` until settlement matching |
 | OF9 | Failed sync | Never discarded: stored as `rejected` with a reason, owner accepts or rejects, both audited |
 
+## Non-cash refunds (recorded 2026-11-02, ninth interview)
+
+Status: approved, implementation planned. Until built, non-cash refunds still return 409 `REFUND_METHOD_NOT_SUPPORTED` and nothing is marked refunded.
+Midtrans facts checked against docs.midtrans.com on 2026-11-02: QRIS is charged with acquirer `gopay` (`internal/pkg/midtrans/midtrans.go`); GoPay QRIS refund window is 45 days on-us and 7 days off-us; Direct Refund returns 200 (approved) or 202 (denied by bank); the final signal is the refund notification carrying `bank_confirmed_at`; `refund_key` retries are honoured for 7 days. Partial refund support for GoPay QRIS is not stated in the docs.
+
+| ID | Decision | Approved option |
+|----|----------|-----------------|
+| RF1-a | Dynamic QRIS | Midtrans Direct Refund first, within the provider window, with a deterministic `refund_key` per refund; denied (202) or out of window → fallback RF1-c |
+| RF1-b | Partial QRIS refund | API for full refunds only; partial refunds use RF1-c until partial support is proven in sandbox (then enabled per acquirer by configuration) |
+| RF1-c | Fallback (also static QRIS, EDC, partial) | Either cash from the open drawer as a `refund` cash movement keeping the original method and reference, or a manual bank transfer by the **owner only**, recorded with bank name, last 4 account digits and transfer reference (no full account number stored); the transfer does not touch the drawer |
+| RF1-d | EDC | Void/reversal on the EDC terminal allowed when the approval code / trace number is recorded; status stays pending reconciliation until matched to the bank settlement report |
+| RF1-e | Refund time window (closes gap P5) | Cashier: same business day only. Owner: up to 7 days. Older: no refund in the system. Values in `store_settings` |
+| RF1-f | Provider confirmation | API 200 → `refund_pending`; `refunded` only after the `bank_confirmed_at` notification or a confirming status check. Existing `void_refund_owner_threshold` applies to every method |
+
 ## Awaiting owner approval
 
-| ID | Proposal | Until approved |
-|----|----------|----------------|
-| RF1 | **Non-cash refunds.** (a) Dynamic QRIS paid through Midtrans: call the Midtrans refund API when it supports that transaction, record the provider refund id, mark refunded only on the provider's success (webhook/status check). (b) Fallback for any non-cash payment, and for (a) when the API refuses: cash from the open drawer as a `refund` movement whose reason and audit metadata keep the original method and reference. (c) EDC: cash refund as in (b), or manual reversal on the EDC terminal recorded with its reference number and reconciled later. Static QRIS: (b) only (no provider API). | Non-cash refund → 409 `REFUND_METHOD_NOT_SUPPORTED`; nothing is marked refunded |
+None.
 
 ## Resolved from existing sources (not re-asked)
 

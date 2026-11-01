@@ -283,6 +283,7 @@ func TestPaymentServiceIntegration_EndToEnd(t *testing.T) {
 			Method:             domain.PaymentMethodCash,
 			CashTenderedAmount: 50000,
 			ActorUserID:        &cashierID,
+			DrawerID:           &drawerID,
 		})
 		if err != nil {
 			t.Fatalf("InitiatePayment (cash) failed: %v", err)
@@ -323,6 +324,7 @@ func TestPaymentServiceIntegration_EndToEnd(t *testing.T) {
 			Method:             domain.PaymentMethodCash,
 			CashTenderedAmount: 50000,
 			ActorUserID:        &cashierID,
+			DrawerID:           &drawerID,
 		})
 		if err != nil {
 			t.Fatalf("InitiatePayment replay failed: %v", err)

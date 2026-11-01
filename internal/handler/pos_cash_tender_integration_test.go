@@ -118,7 +118,14 @@ func TestPOSCashTenderIntegration(t *testing.T) {
 			"customer_name":   "Budi Cashier POS",
 			"order_type":      "dine_in",
 			"items": []map[string]any{
-				{"product_id": latteProdID, "quantity": 1},
+				{
+					"product_id": latteProdID,
+					"quantity":   1,
+					"modifiers": []map[string]any{
+						{"option_id": "20000001-0000-4000-8000-000000000001", "quantity": 1},
+						{"option_id": "20000003-0000-4000-8000-000000000003", "quantity": 1},
+					},
+				},
 			},
 		})
 		if wOrder.Code != http.StatusCreated {

@@ -95,6 +95,50 @@ func (s *PaymentService) commitPaidOrderTx(ctx context.Context, tx *sqlx.Tx, ord
 		order.StockStatus = domain.OrderStockStatusCommitted
 	}
 
+	// Open Tab lifecycle handling (R4 & P10/P12)
+	if order.BillingMode == domain.BillingModeOpenTab {
+		var unpaidCount int
+		if err := tx.GetContext(ctx, &unpaidCount, `
+			SELECT COUNT(*)
+			FROM payment_splits
+			WHERE store_id = $1 AND order_id = $2 AND status NOT IN ('paid', 'cancelled')
+		`, order.StoreID, order.ID); err != nil {
+			return err
+		}
+		var sumPaid int64
+		if err := tx.GetContext(ctx, &sumPaid, `
+			SELECT COALESCE(SUM(paid_amount), 0)
+			FROM payment_splits
+			WHERE store_id = $1 AND order_id = $2 AND status = 'paid'
+		`, order.StoreID, order.ID); err != nil {
+			return err
+		}
+		order.PaidAmount = sumPaid
+		if unpaidCount == 0 {
+			order.PaymentStatus = domain.OrderPaymentStatusPaid
+			order.Status = domain.OrderStatusCompleted
+			order.ExpiresAt = nil
+			if err := s.orderRepo.UpdateOrderStatusAndStock(ctx, tx, order); err != nil {
+				return fmt.Errorf("failed to update paid tab order: %w", err)
+			}
+			return s.insertPaymentOutboxTx(ctx, tx, order, "order.paid", map[string]any{
+				"paid_amount":  order.PaidAmount,
+				"status":       order.Status,
+				"stock_status": order.StockStatus,
+			})
+		}
+
+		order.PaymentStatus = domain.OrderPaymentStatusPartiallyPaid
+		order.ExpiresAt = nil
+		if err := s.orderRepo.UpdateOrderStatusAndStock(ctx, tx, order); err != nil {
+			return fmt.Errorf("failed to update partially paid tab order: %w", err)
+		}
+		return s.insertPaymentOutboxTx(ctx, tx, order, "payment.split_settled", map[string]any{
+			"paid_amount":             order.PaidAmount,
+			"remaining_unpaid_splits": unpaidCount,
+		})
+	}
+
 	if order.Status == domain.OrderStatusPendingPayment || order.Status == domain.OrderStatusCancelled {
 		order.Status = domain.OrderStatusQueued
 	}

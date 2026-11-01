@@ -220,7 +220,8 @@ func paymentError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, service.ErrPaymentIdempotencyKeyRequired), errors.Is(err, service.ErrUnsupportedPaymentMethod),
 		errors.Is(err, service.ErrPaymentMethodNotEnabled), errors.Is(err, service.ErrInsufficientCashTendered),
-		errors.Is(err, service.ErrReconciliationRefRequired):
+		errors.Is(err, service.ErrReconciliationRefRequired), errors.Is(err, service.ErrSplitIDRequired),
+		errors.Is(err, service.ErrSplitIDNotAllowed):
 		authError(c, http.StatusBadRequest, "INVALID_PAYMENT", err.Error())
 	case errors.Is(err, service.ErrUnauthorizedCashierTender):
 		authError(c, http.StatusForbidden, "FORBIDDEN", err.Error())
@@ -230,8 +231,11 @@ func paymentError(c *gin.Context, err error) {
 		authError(c, http.StatusConflict, "NO_OPEN_SHIFT", err.Error())
 	case errors.Is(err, service.ErrTabNotClosed):
 		authError(c, http.StatusConflict, "TAB_NOT_CLOSED", "Tab belum ditutup. Selesaikan dan tutup tab terlebih dahulu sebelum memproses pembayaran.")
-	case errors.Is(err, service.ErrPaymentIdempotencyConflict), errors.Is(err, service.ErrSplitAlreadyPaid),
-		errors.Is(err, service.ErrOrderNotPayable):
+	case errors.Is(err, service.ErrSplitPaymentPending):
+		authError(c, http.StatusConflict, "SPLIT_PAYMENT_PENDING", "Split bill memiliki transaksi pembayaran yang sedang gantung (pending). Batalkan atau tunggu kedaluwarsa.")
+	case errors.Is(err, service.ErrSplitAlreadyPaid):
+		authError(c, http.StatusConflict, "SPLIT_ALREADY_PAID", "Split pembayaran ini sudah lunas.")
+	case errors.Is(err, service.ErrPaymentIdempotencyConflict), errors.Is(err, service.ErrOrderNotPayable):
 		authError(c, http.StatusConflict, "PAYMENT_CONFLICT", err.Error())
 	default:
 		log.Printf("[POS] initiate payment error request_ip=%s: %v", c.ClientIP(), err)

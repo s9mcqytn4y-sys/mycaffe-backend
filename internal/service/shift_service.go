@@ -571,26 +571,31 @@ func (s *ShiftService) CloseShift(ctx context.Context, actor *AuthenticatedStaff
 			overrideByName = &name
 		}
 
+		unsettledCount, unsettledTotal, unsettledList, _ := s.populateUnsettledOpenTabs(ctx, tx, actor.Staff.Store.ID)
+
 		report := &domain.ZReport{
-			ShiftID:         shift.ID,
-			StoreID:         shift.StoreID,
-			DrawerID:        shift.DrawerID,
-			DrawerName:      drawerName,
-			OpenedBy:        shift.OpenedBy,
-			OpenedByName:    openedByName,
-			OpenedAt:        shift.OpenedAt,
-			ClosedBy:        shift.ClosedBy,
-			ClosedByName:    &closedByName,
-			ClosedAt:        shift.ClosedAt,
-			Status:          shift.Status,
-			Summary:         *summary,
-			ExpectedCash:    expectedCash,
-			CountedCash:     in.CountedCash,
-			Variance:        variance,
-			VarianceReason:  shift.VarianceReason,
-			OwnerOverrideBy: shift.OwnerOverrideBy,
-			OverrideByName:  overrideByName,
-			Notes:           shift.Notes,
+			ShiftID:                      shift.ID,
+			StoreID:                      shift.StoreID,
+			DrawerID:                     shift.DrawerID,
+			DrawerName:                   drawerName,
+			OpenedBy:                     shift.OpenedBy,
+			OpenedByName:                 openedByName,
+			OpenedAt:                     shift.OpenedAt,
+			ClosedBy:                     shift.ClosedBy,
+			ClosedByName:                 &closedByName,
+			ClosedAt:                     shift.ClosedAt,
+			Status:                       shift.Status,
+			Summary:                      *summary,
+			ExpectedCash:                 expectedCash,
+			CountedCash:                  in.CountedCash,
+			Variance:                     variance,
+			VarianceReason:               shift.VarianceReason,
+			OwnerOverrideBy:              shift.OwnerOverrideBy,
+			OverrideByName:               overrideByName,
+			Notes:                        shift.Notes,
+			UnsettledOpenTabsCount:       unsettledCount,
+			UnsettledOpenTabsTotalAmount: unsettledTotal,
+			UnsettledOpenTabs:            unsettledList,
 		}
 
 		result = &CloseShiftResult{
@@ -692,26 +697,31 @@ func (s *ShiftService) ForceCloseShift(ctx context.Context, actor *Authenticated
 		openedByName, _ := s.repo.GetUserFullName(ctx, tx, actor.Staff.Store.ID, shift.OpenedBy)
 		closedByName := actor.Staff.FullName
 
+		unsettledCount, unsettledTotal, unsettledList, _ := s.populateUnsettledOpenTabs(ctx, tx, actor.Staff.Store.ID)
+
 		report = &domain.ZReport{
-			ShiftID:         shift.ID,
-			StoreID:         shift.StoreID,
-			DrawerID:        shift.DrawerID,
-			DrawerName:      drawerName,
-			OpenedBy:        shift.OpenedBy,
-			OpenedByName:    openedByName,
-			OpenedAt:        shift.OpenedAt,
-			ClosedBy:        shift.ClosedBy,
-			ClosedByName:    &closedByName,
-			ClosedAt:        shift.ClosedAt,
-			Status:          shift.Status,
-			Summary:         *summary,
-			ExpectedCash:    expectedCash,
-			CountedCash:     counted,
-			Variance:        variance,
-			VarianceReason:  shift.VarianceReason,
-			OwnerOverrideBy: shift.OwnerOverrideBy,
-			OverrideByName:  &closedByName,
-			Notes:           shift.Notes,
+			ShiftID:                      shift.ID,
+			StoreID:                      shift.StoreID,
+			DrawerID:                     shift.DrawerID,
+			DrawerName:                   drawerName,
+			OpenedBy:                     shift.OpenedBy,
+			OpenedByName:                 openedByName,
+			OpenedAt:                     shift.OpenedAt,
+			ClosedBy:                     shift.ClosedBy,
+			ClosedByName:                 &closedByName,
+			ClosedAt:                     shift.ClosedAt,
+			Status:                       shift.Status,
+			Summary:                      *summary,
+			ExpectedCash:                 expectedCash,
+			CountedCash:                  counted,
+			Variance:                     variance,
+			VarianceReason:               shift.VarianceReason,
+			OwnerOverrideBy:              shift.OwnerOverrideBy,
+			OverrideByName:               &closedByName,
+			Notes:                        shift.Notes,
+			UnsettledOpenTabsCount:       unsettledCount,
+			UnsettledOpenTabsTotalAmount: unsettledTotal,
+			UnsettledOpenTabs:            unsettledList,
 		}
 		return nil
 	})
@@ -747,17 +757,22 @@ func (s *ShiftService) GetXReport(ctx context.Context, actor *AuthenticatedStaff
 		}
 		openedByName, _ := s.repo.GetUserFullName(ctx, tx, actor.Staff.Store.ID, shift.OpenedBy)
 
+		unsettledCount, unsettledTotal, unsettledList, _ := s.populateUnsettledOpenTabs(ctx, tx, actor.Staff.Store.ID)
+
 		report = &domain.XReport{
-			ShiftID:      shift.ID,
-			StoreID:      shift.StoreID,
-			DrawerID:     shift.DrawerID,
-			DrawerName:   drawerName,
-			OpenedBy:     shift.OpenedBy,
-			OpenedByName: openedByName,
-			OpenedAt:     shift.OpenedAt,
-			GeneratedAt:  s.nowFunc().UTC(),
-			Status:       shift.Status,
-			Summary:      *summary,
+			ShiftID:                      shift.ID,
+			StoreID:                      shift.StoreID,
+			DrawerID:                     shift.DrawerID,
+			DrawerName:                   drawerName,
+			OpenedBy:                     shift.OpenedBy,
+			OpenedByName:                 openedByName,
+			OpenedAt:                     shift.OpenedAt,
+			GeneratedAt:                  s.nowFunc().UTC(),
+			Status:                       shift.Status,
+			Summary:                      *summary,
+			UnsettledOpenTabsCount:       unsettledCount,
+			UnsettledOpenTabsTotalAmount: unsettledTotal,
+			UnsettledOpenTabs:            unsettledList,
 		}
 
 		// Blind count security: jika kasir mengakses X report saat shift masih 'open', redact expected_cash
@@ -826,26 +841,31 @@ func (s *ShiftService) GetZReport(ctx context.Context, actor *AuthenticatedStaff
 			varCash = *shift.Variance
 		}
 
+		unsettledCount, unsettledTotal, unsettledList, _ := s.populateUnsettledOpenTabs(ctx, tx, actor.Staff.Store.ID)
+
 		report = &domain.ZReport{
-			ShiftID:         shift.ID,
-			StoreID:         shift.StoreID,
-			DrawerID:        shift.DrawerID,
-			DrawerName:      drawerName,
-			OpenedBy:        shift.OpenedBy,
-			OpenedByName:    openedByName,
-			OpenedAt:        shift.OpenedAt,
-			ClosedBy:        shift.ClosedBy,
-			ClosedByName:    closedByName,
-			ClosedAt:        shift.ClosedAt,
-			Status:          shift.Status,
-			Summary:         *summary,
-			ExpectedCash:    expCash,
-			CountedCash:     cntCash,
-			Variance:        varCash,
-			VarianceReason:  shift.VarianceReason,
-			OwnerOverrideBy: shift.OwnerOverrideBy,
-			OverrideByName:  overrideByName,
-			Notes:           shift.Notes,
+			ShiftID:                      shift.ID,
+			StoreID:                      shift.StoreID,
+			DrawerID:                     shift.DrawerID,
+			DrawerName:                   drawerName,
+			OpenedBy:                     shift.OpenedBy,
+			OpenedByName:                 openedByName,
+			OpenedAt:                     shift.OpenedAt,
+			ClosedBy:                     shift.ClosedBy,
+			ClosedByName:                 closedByName,
+			ClosedAt:                     shift.ClosedAt,
+			Status:                       shift.Status,
+			Summary:                      *summary,
+			ExpectedCash:                 expCash,
+			CountedCash:                  cntCash,
+			Variance:                     varCash,
+			VarianceReason:               shift.VarianceReason,
+			OwnerOverrideBy:              shift.OwnerOverrideBy,
+			OverrideByName:               overrideByName,
+			Notes:                        shift.Notes,
+			UnsettledOpenTabsCount:       unsettledCount,
+			UnsettledOpenTabsTotalAmount: unsettledTotal,
+			UnsettledOpenTabs:            unsettledList,
 		}
 		return nil
 	})
@@ -853,6 +873,22 @@ func (s *ShiftService) GetZReport(ctx context.Context, actor *AuthenticatedStaff
 		return nil, err
 	}
 	return report, nil
+}
+
+func (s *ShiftService) populateUnsettledOpenTabs(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	storeID uuid.UUID,
+) (int, int64, []domain.UnsettledTabSummary, error) {
+	unsettled, err := s.repo.GetUnsettledOpenTabs(ctx, tx, storeID, s.nowFunc().UTC())
+	if err != nil {
+		return 0, 0, nil, err
+	}
+	var total int64
+	for _, t := range unsettled {
+		total += t.TotalAmount
+	}
+	return len(unsettled), total, unsettled, nil
 }
 
 // verifyOwnerPIN iterates over active owners and returns the UUID of the owner matching the Argon2id PIN.

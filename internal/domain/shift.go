@@ -81,39 +81,54 @@ type ShiftCashSummary struct {
 	TotalMovements int   `json:"total_movements"`
 }
 
+type UnsettledTabSummary struct {
+	OrderNumber           string    `json:"order_number"`
+	Label                 string    `json:"label"`
+	Status                string    `json:"status"`
+	TotalAmount           int64     `json:"total_amount"`
+	CreatedAt             time.Time `json:"created_at"`
+	IsOverdueBusinessDate bool      `json:"is_overdue_business_date"`
+}
+
 type XReport struct {
-	ShiftID          uuid.UUID        `json:"shift_id"`
-	StoreID          uuid.UUID        `json:"store_id"`
-	DrawerID         uuid.UUID        `json:"drawer_id"`
-	DrawerName       string           `json:"drawer_name"`
-	OpenedBy         uuid.UUID        `json:"opened_by"`
-	OpenedByName     string           `json:"opened_by_name"`
-	OpenedAt         time.Time        `json:"opened_at"`
-	GeneratedAt      time.Time        `json:"generated_at"`
-	Status           ShiftStatus      `json:"status"`
-	Summary          ShiftCashSummary `json:"summary"`
-	ExpectedCash     *int64           `json:"expected_cash,omitempty"` // disamarkan (nil) jika dibaca kasir saat shift open
-	ExpectedRedacted bool             `json:"expected_redacted"`
+	ShiftID                      uuid.UUID             `json:"shift_id"`
+	StoreID                      uuid.UUID             `json:"store_id"`
+	DrawerID                     uuid.UUID             `json:"drawer_id"`
+	DrawerName                   string                `json:"drawer_name"`
+	OpenedBy                     uuid.UUID             `json:"opened_by"`
+	OpenedByName                 string                `json:"opened_by_name"`
+	OpenedAt                     time.Time             `json:"opened_at"`
+	GeneratedAt                  time.Time             `json:"generated_at"`
+	Status                       ShiftStatus           `json:"status"`
+	Summary                      ShiftCashSummary      `json:"summary"`
+	ExpectedCash                 *int64                `json:"expected_cash,omitempty"` // disamarkan (nil) jika dibaca kasir saat shift open
+	ExpectedRedacted             bool                  `json:"expected_redacted"`
+	UnsettledOpenTabsCount       int                   `json:"unsettled_open_tabs_count"`
+	UnsettledOpenTabsTotalAmount int64                 `json:"unsettled_open_tabs_total_amount"`
+	UnsettledOpenTabs            []UnsettledTabSummary `json:"unsettled_open_tabs,omitempty"`
 }
 
 type ZReport struct {
-	ShiftID         uuid.UUID        `json:"shift_id"`
-	StoreID         uuid.UUID        `json:"store_id"`
-	DrawerID        uuid.UUID        `json:"drawer_id"`
-	DrawerName      string           `json:"drawer_name"`
-	OpenedBy        uuid.UUID        `json:"opened_by"`
-	OpenedByName    string           `json:"opened_by_name"`
-	OpenedAt        time.Time        `json:"opened_at"`
-	ClosedBy        *uuid.UUID       `json:"closed_by,omitempty"`
-	ClosedByName    *string          `json:"closed_by_name,omitempty"`
-	ClosedAt        *time.Time       `json:"closed_at,omitempty"`
-	Status          ShiftStatus      `json:"status"`
-	Summary         ShiftCashSummary `json:"summary"`
-	ExpectedCash    int64            `json:"expected_cash"`
-	CountedCash     int64            `json:"counted_cash"`
-	Variance        int64            `json:"variance"`
-	VarianceReason  *string          `json:"variance_reason,omitempty"`
-	OwnerOverrideBy *uuid.UUID       `json:"owner_override_by,omitempty"`
-	OverrideByName  *string          `json:"override_by_name,omitempty"`
-	Notes           *string          `json:"notes,omitempty"`
+	ShiftID                      uuid.UUID             `json:"shift_id"`
+	StoreID                      uuid.UUID             `json:"store_id"`
+	DrawerID                     uuid.UUID             `json:"drawer_id"`
+	DrawerName                   string                `json:"drawer_name"`
+	OpenedBy                     uuid.UUID             `json:"opened_by"`
+	OpenedByName                 string                `json:"opened_by_name"`
+	OpenedAt                     time.Time             `json:"opened_at"`
+	ClosedBy                     *uuid.UUID            `json:"closed_by,omitempty"`
+	ClosedByName                 *string               `json:"closed_by_name,omitempty"`
+	ClosedAt                     *time.Time            `json:"closed_at,omitempty"`
+	Status                       ShiftStatus           `json:"status"`
+	Summary                      ShiftCashSummary      `json:"summary"`
+	ExpectedCash                 int64                 `json:"expected_cash"`
+	CountedCash                  int64                 `json:"counted_cash"`
+	Variance                     int64                 `json:"variance"`
+	VarianceReason               *string               `json:"variance_reason,omitempty"`
+	OwnerOverrideBy              *uuid.UUID            `json:"owner_override_by,omitempty"`
+	OverrideByName               *string               `json:"override_by_name,omitempty"`
+	Notes                        *string               `json:"notes,omitempty"`
+	UnsettledOpenTabsCount       int                   `json:"unsettled_open_tabs_count"`
+	UnsettledOpenTabsTotalAmount int64                 `json:"unsettled_open_tabs_total_amount"`
+	UnsettledOpenTabs            []UnsettledTabSummary `json:"unsettled_open_tabs,omitempty"`
 }

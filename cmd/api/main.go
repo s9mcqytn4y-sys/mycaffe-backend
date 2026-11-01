@@ -196,10 +196,12 @@ func main() {
 			pos.GET("/shifts/:id/x-report", authHandler.RequireStaff(), shiftHandler.GetXReport)
 			pos.GET("/shifts/:id/z-report", authHandler.RequireStaff(), shiftHandler.GetZReport)
 
-			// Open Tabs & Order Rounds (Iteration 4c, PR 4c-1)
+			// Open Tabs, Rounds & Split Bill (Iteration 4c-1 & 4c-2)
 			pos.POST("/tabs", authHandler.RequirePermission(rbac.TabManage), tabHandler.OpenTab)
 			pos.POST("/tabs/:id/rounds", authHandler.RequirePermission(rbac.TabManage), tabHandler.SubmitRound)
 			pos.GET("/tabs/:id", authHandler.RequireStaff(), tabHandler.GetTab)
+			pos.POST("/tabs/:id/close", authHandler.RequirePermission(rbac.TabManage), tabHandler.CloseTab)
+			pos.POST("/tabs/:id/reopen", authHandler.RequirePermission(rbac.TabManage), tabHandler.ReopenTab)
 
 			// Guest menu & quote (public, cacheable catalog; dynamic quote for guest carts).
 			v1.GET("/public/stores/:slug/catalog", catalogHandler.PublicCatalog)

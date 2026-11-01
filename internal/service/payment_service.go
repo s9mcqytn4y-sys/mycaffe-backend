@@ -28,6 +28,9 @@ var (
 	ErrReconciliationRefRequired     = errors.New("reconciliation_ref is required for static_qris and edc payments")
 	ErrNoOpenShift                   = errors.New("tidak ada sesi shift aktif untuk kasir ini; buka shift kasir terlebih dahulu")
 	ErrTabNotClosed                  = errors.New("tab belum ditutup; selesaikan atau tutup tab sebelum memproses pembayaran")
+	ErrSplitIDRequired               = errors.New("split_id is required for open_tab payments")
+	ErrSplitIDNotAllowed             = errors.New("split_id is not allowed for pay_first payments")
+	ErrSplitPaymentPending           = errors.New("split bill memiliki transaksi pembayaran yang sedang gantung (pending)")
 )
 
 // GatewayClient abstracts Midtrans Core API operations for deterministic unit and integration testing.

@@ -130,6 +130,62 @@ func (h *TabHandler) GetTab(c *gin.Context) {
 	c.JSON(http.StatusOK, res)
 }
 
+func (h *TabHandler) CloseTab(c *gin.Context) {
+	staff := currentStaff(c)
+	if staff == nil {
+		authError(c, http.StatusUnauthorized, "UNAUTHENTICATED", "Autentikasi diperlukan.")
+		return
+	}
+
+	orderID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		authError(c, http.StatusBadRequest, "INVALID_ID", "ID tab tidak valid.")
+		return
+	}
+
+	var in service.CloseTabInput
+	// Optional body (empty body means single-payer full split)
+	if c.Request.ContentLength > 0 {
+		if err := c.ShouldBindJSON(&in); err != nil {
+			authError(c, http.StatusBadRequest, "INVALID_REQUEST", "Format konfigurasi split bill tidak valid.")
+			return
+		}
+	}
+
+	res, err := h.tab.CloseTab(c.Request.Context(), staff, orderID, in)
+	if err != nil {
+		writeTabServiceError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, res)
+}
+
+func (h *TabHandler) ReopenTab(c *gin.Context) {
+	staff := currentStaff(c)
+	if staff == nil {
+		authError(c, http.StatusUnauthorized, "UNAUTHENTICATED", "Autentikasi diperlukan.")
+		return
+	}
+
+	orderID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		authError(c, http.StatusBadRequest, "INVALID_ID", "ID tab tidak valid.")
+		return
+	}
+
+	order, err := h.tab.ReopenTab(c.Request.Context(), staff, orderID)
+	if err != nil {
+		writeTabServiceError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"order":   order,
+		"message": "Tab reopened successfully",
+	})
+}
+
 func writeTabServiceError(c *gin.Context, err error) {
 	var tabConflict *service.TabConflictError
 	var validation *service.ValidationError
@@ -142,8 +198,22 @@ func writeTabServiceError(c *gin.Context, err error) {
 		})
 	case errors.Is(err, service.ErrIdempotencyConflict):
 		authError(c, http.StatusConflict, "IDEMPOTENCY_CONFLICT", err.Error())
+	case errors.Is(err, service.ErrTabClosed):
+		authError(c, http.StatusConflict, "TAB_CLOSED", "Tab sudah ditutup untuk pembayaran.")
 	case errors.Is(err, service.ErrTabNotOpen):
 		authError(c, http.StatusConflict, "TAB_NOT_OPEN", "Tab tidak dalam status terbuka atau sudah ditutup.")
+	case errors.Is(err, service.ErrSplitAlreadyPaid):
+		authError(c, http.StatusConflict, "SPLIT_ALREADY_PAID", "Split bill sudah terbayar sebagian, tidak dapat dibatalkan atau dibuka kembali.")
+	case errors.Is(err, service.ErrSplitPaymentPending):
+		authError(c, http.StatusConflict, "SPLIT_PAYMENT_PENDING", "Split bill memiliki transaksi pembayaran yang sedang gantung (pending). Batalkan atau tunggu kedaluwarsa.")
+	case errors.Is(err, service.ErrTabCannotReopen):
+		authError(c, http.StatusConflict, "TAB_CANNOT_REOPEN", "Tab tidak dapat dibuka kembali.")
+	case errors.Is(err, service.ErrInvalidSplitStrategy):
+		authError(c, http.StatusBadRequest, "INVALID_SPLIT_STRATEGY", err.Error())
+	case errors.Is(err, service.ErrInvalidSplitCount):
+		authError(c, http.StatusUnprocessableEntity, "INVALID_SPLIT_COUNT", err.Error())
+	case errors.Is(err, service.ErrItemAllocationMismatch):
+		authError(c, http.StatusUnprocessableEntity, "ITEM_ALLOCATION_MISMATCH", err.Error())
 	case errors.Is(err, service.ErrEmptyRoundItems):
 		authError(c, http.StatusBadRequest, "EMPTY_ROUND_ITEMS", "Ronde pesanan harus memiliki minimal satu item.")
 	case errors.Is(err, service.ErrInvalidTabInput), errors.Is(err, service.ErrInvalidOrderInput):

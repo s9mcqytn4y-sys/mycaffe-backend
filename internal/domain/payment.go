@@ -288,6 +288,7 @@ type Payment struct {
 	StoreID            uuid.UUID            `json:"store_id" db:"store_id"`
 	OrderID            uuid.UUID            `json:"order_id" db:"order_id"`
 	SplitID            *uuid.UUID           `json:"split_id,omitempty" db:"split_id"`
+	ShiftID            *uuid.UUID           `json:"shift_id,omitempty" db:"shift_id"`
 	AttemptNo          int                  `json:"attempt_no" db:"attempt_no"`
 	IdempotencyKey     string               `json:"idempotency_key" db:"idempotency_key"`
 	RequestHash        string               `json:"-" db:"request_hash"`

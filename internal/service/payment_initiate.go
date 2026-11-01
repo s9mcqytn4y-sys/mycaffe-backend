@@ -141,8 +141,17 @@ func (s *PaymentService) initiateDirectCashierPayment(
 		if err != nil {
 			return err
 		}
-		if order.BillingMode == domain.BillingModeOpenTab && order.Status == domain.OrderStatusOpen {
-			return ErrTabNotClosed
+		if order.BillingMode == domain.BillingModeOpenTab {
+			if order.Status == domain.OrderStatusOpen {
+				return ErrTabNotClosed
+			}
+			if input.SplitID == nil {
+				return ErrSplitIDRequired
+			}
+		} else {
+			if input.SplitID != nil {
+				return ErrSplitIDNotAllowed
+			}
 		}
 		targetSplit, err := resolveOrderSplit(input.SplitID, splits)
 		if err != nil {
@@ -160,6 +169,25 @@ func (s *PaymentService) initiateDirectCashierPayment(
 			return ErrOrderNotPayable
 		}
 
+		// Concurrency protection (P12): for open tabs, prevent cash tender if there is an active pending payment attempt on this split
+		if order.BillingMode == domain.BillingModeOpenTab {
+			activePending, err := s.paymentRepo.GetActivePaymentForSplitForUpdate(ctx, tx, trustedStoreID, split.ID)
+			if err != nil && !errors.Is(err, postgres.ErrPaymentNotFound) {
+				return err
+			}
+			if activePending != nil && (activePending.Status == domain.PaymentStatusPending || activePending.Status == domain.PaymentStatusAuthorized) {
+				return ErrSplitPaymentPending
+			}
+		} else {
+			if err := s.paymentRepo.ExpirePendingPaymentsByOrder(ctx, tx, trustedStoreID, order.ID); err != nil {
+				return err
+			}
+		}
+		attemptNo, err := s.paymentRepo.NextAttemptNumberForSplit(ctx, tx, trustedStoreID, split.ID)
+		if err != nil {
+			return err
+		}
+
 		var cashTendered, changeGiven int64
 		if input.Method == domain.PaymentMethodCash {
 			if input.CashTenderedAmount < split.TotalAmount {
@@ -169,23 +197,17 @@ func (s *PaymentService) initiateDirectCashierPayment(
 			changeGiven = input.CashTenderedAmount - split.TotalAmount
 		}
 
-		if err := s.paymentRepo.ExpirePendingPaymentsByOrder(ctx, tx, trustedStoreID, order.ID); err != nil {
-			return err
-		}
-		attemptNo, err := s.paymentRepo.NextAttemptNumberForSplit(ctx, tx, trustedStoreID, split.ID)
-		if err != nil {
-			return err
-		}
-
 		now := s.nowFunc().UTC()
 		paymentID := uuid.New()
 		splitID := split.ID
 		actorID := actor.ID
+		activeShiftID := activeShift.ID
 		payment := &domain.Payment{
 			ID:                 paymentID,
 			StoreID:            trustedStoreID,
 			OrderID:            order.ID,
 			SplitID:            &splitID,
+			ShiftID:            &activeShiftID,
 			AttemptNo:          attemptNo,
 			IdempotencyKey:     input.IdempotencyKey,
 			RequestHash:        requestHash,
@@ -207,15 +229,17 @@ func (s *PaymentService) initiateDirectCashierPayment(
 			return err
 		}
 
-		// Bind order to active shift
-		if _, err := tx.ExecContext(ctx, `
-			UPDATE orders
-			SET shift_id = $1
-			WHERE store_id = $2 AND id = $3
-		`, activeShift.ID, trustedStoreID, order.ID); err != nil {
-			return fmt.Errorf("failed to bind order to active shift: %w", err)
+		// Bind order to active shift if not already assigned
+		if order.ShiftID == nil {
+			if _, err := tx.ExecContext(ctx, `
+				UPDATE orders
+				SET shift_id = $1
+				WHERE store_id = $2 AND id = $3
+			`, activeShift.ID, trustedStoreID, order.ID); err != nil {
+				return fmt.Errorf("failed to bind order to active shift: %w", err)
+			}
+			order.ShiftID = &activeShift.ID
 		}
-		order.ShiftID = &activeShift.ID
 
 		// If method is cash, record cash movement in the drawer ledger
 		if input.Method == domain.PaymentMethodCash {
@@ -355,8 +379,17 @@ func (s *PaymentService) initiateMidtransGatewayPayment(
 		if err != nil {
 			return err
 		}
-		if order.BillingMode == domain.BillingModeOpenTab && order.Status == domain.OrderStatusOpen {
-			return ErrTabNotClosed
+		if order.BillingMode == domain.BillingModeOpenTab {
+			if order.Status == domain.OrderStatusOpen {
+				return ErrTabNotClosed
+			}
+			if input.SplitID == nil {
+				return ErrSplitIDRequired
+			}
+		} else {
+			if input.SplitID != nil {
+				return ErrSplitIDNotAllowed
+			}
 		}
 		targetSplit, err := resolveOrderSplit(input.SplitID, splits)
 		if err != nil {
@@ -401,6 +434,14 @@ func (s *PaymentService) initiateMidtransGatewayPayment(
 			}
 		}
 
+		var activeShiftID *uuid.UUID
+		if input.ActorUserID != nil && *input.ActorUserID != uuid.Nil {
+			activeShift, err := s.shiftRepo.GetActiveShiftForStaff(ctx, tx, trustedStoreID, *input.ActorUserID, input.DrawerID)
+			if err == nil && activeShift != nil {
+				activeShiftID = &activeShift.ID
+			}
+		}
+
 		attemptNo, err := s.paymentRepo.NextAttemptNumberForSplit(ctx, tx, trustedStoreID, split.ID)
 		if err != nil {
 			return err
@@ -413,6 +454,7 @@ func (s *PaymentService) initiateMidtransGatewayPayment(
 			StoreID:         trustedStoreID,
 			OrderID:         order.ID,
 			SplitID:         &splitID,
+			ShiftID:         activeShiftID,
 			AttemptNo:       attemptNo,
 			IdempotencyKey:  input.IdempotencyKey,
 			RequestHash:     requestHash,

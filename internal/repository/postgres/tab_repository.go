@@ -260,3 +260,246 @@ func (r *TabRepository) GetOrderItemsWithOptionsByOrder(ctx context.Context, tx 
 
 	return items, nil
 }
+
+// CreatePaymentSplitsTx inserts payment splits and their item allocations inside a transaction.
+func (r *TabRepository) CreatePaymentSplitsTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	splits []domain.PaymentSplit,
+	splitItems []domain.PaymentSplitItem,
+) error {
+	if tx == nil {
+		return ErrNilTransaction
+	}
+	if len(splits) == 0 {
+		return nil
+	}
+
+	splitQuery := `
+		INSERT INTO payment_splits (
+			id, store_id, order_id, split_number, label, split_mode,
+			subtotal_amount, tax_amount, service_charge_amount, total_amount, paid_amount, status
+		) VALUES (
+			$1, $2, $3, $4, $5, $6,
+			$7, $8, $9, $10, $11, $12
+		)
+	`
+	for _, sp := range splits {
+		_, err := tx.ExecContext(
+			ctx, splitQuery,
+			sp.ID, sp.StoreID, sp.OrderID, sp.SplitNumber, sp.Label, sp.SplitMode,
+			sp.SubtotalAmount, sp.TaxAmount, sp.ServiceChargeAmount, sp.TotalAmount, sp.PaidAmount, sp.Status,
+		)
+		if err != nil {
+			return err
+		}
+	}
+
+	if len(splitItems) > 0 {
+		itemQuery := `
+			INSERT INTO payment_split_items (
+				id, store_id, split_id, order_item_id, quantity, allocated_amount
+			) VALUES (
+				$1, $2, $3, $4, $5, $6
+			)
+		`
+		for _, it := range splitItems {
+			_, err := tx.ExecContext(
+				ctx, itemQuery,
+				it.ID, it.StoreID, it.SplitID, it.OrderItemID, it.Quantity, it.AllocatedAmount,
+			)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+// GetPaymentSplitsByOrderID retrieves all splits for an order, along with allocated items if any.
+func (r *TabRepository) GetPaymentSplitsByOrderID(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	storeID, orderID uuid.UUID,
+) ([]domain.PaymentSplit, error) {
+	if tx == nil {
+		return nil, ErrNilTransaction
+	}
+
+	var splits []domain.PaymentSplit
+	query := `
+		SELECT id, store_id, order_id, split_number, label, split_mode,
+		       subtotal_amount, tax_amount, service_charge_amount, total_amount,
+		       paid_amount, status, created_at, updated_at
+		FROM payment_splits
+		WHERE store_id = $1 AND order_id = $2
+		ORDER BY split_number ASC
+	`
+	if err := tx.SelectContext(ctx, &splits, query, storeID, orderID); err != nil {
+		return nil, err
+	}
+	if len(splits) == 0 {
+		return splits, nil
+	}
+
+	splitIDs := make([]uuid.UUID, len(splits))
+	splitIndexMap := make(map[uuid.UUID]int, len(splits))
+	for i, sp := range splits {
+		splitIDs[i] = sp.ID
+		splitIndexMap[sp.ID] = i
+	}
+
+	itemQuery, args, err := sqlx.In(`
+		SELECT id, store_id, split_id, order_item_id, quantity, allocated_amount, created_at
+		FROM payment_split_items
+		WHERE store_id = ? AND split_id IN (?)
+		ORDER BY created_at ASC
+	`, storeID, splitIDs)
+	if err != nil {
+		return nil, err
+	}
+	itemQuery = tx.Rebind(itemQuery)
+
+	var items []domain.PaymentSplitItem
+	if err := tx.SelectContext(ctx, &items, itemQuery, args...); err != nil {
+		return nil, err
+	}
+
+	for _, it := range items {
+		if idx, ok := splitIndexMap[it.SplitID]; ok {
+			splits[idx].Items = append(splits[idx].Items, it)
+		}
+	}
+
+	return splits, nil
+}
+
+// GetPaymentSplitByIDForUpdate locks and retrieves a single split row.
+func (r *TabRepository) GetPaymentSplitByIDForUpdate(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	storeID, splitID uuid.UUID,
+) (*domain.PaymentSplit, error) {
+	if tx == nil {
+		return nil, ErrNilTransaction
+	}
+
+	var sp domain.PaymentSplit
+	query := `
+		SELECT id, store_id, order_id, split_number, label, split_mode,
+		       subtotal_amount, tax_amount, service_charge_amount, total_amount,
+		       paid_amount, status, created_at, updated_at
+		FROM payment_splits
+		WHERE store_id = $1 AND id = $2
+		FOR UPDATE
+	`
+	err := tx.GetContext(ctx, &sp, query, storeID, splitID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &sp, nil
+}
+
+// CancelPaymentSplitsTx marks all non-cancelled splits of an order as cancelled.
+func (r *TabRepository) CancelPaymentSplitsTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	storeID, orderID uuid.UUID,
+) error {
+	if tx == nil {
+		return ErrNilTransaction
+	}
+	query := `
+		UPDATE payment_splits
+		SET status = 'cancelled', updated_at = NOW()
+		WHERE store_id = $1 AND order_id = $2 AND status != 'cancelled'
+	`
+	_, err := tx.ExecContext(ctx, query, storeID, orderID)
+	return err
+}
+
+// UpdatePaymentSplitStatusTx updates paid_amount and status of a single split.
+func (r *TabRepository) UpdatePaymentSplitStatusTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	storeID, splitID uuid.UUID,
+	status domain.SplitBillStatus,
+	paidAmount int64,
+) error {
+	if tx == nil {
+		return ErrNilTransaction
+	}
+	query := `
+		UPDATE payment_splits
+		SET status = $1, paid_amount = $2, updated_at = NOW()
+		WHERE store_id = $3 AND id = $4
+	`
+	_, err := tx.ExecContext(ctx, query, status, paidAmount, storeID, splitID)
+	return err
+}
+
+// CountUnpaidSplitsTx returns the number of active (non-cancelled, non-paid) splits for an order.
+func (r *TabRepository) CountUnpaidSplitsTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	storeID, orderID uuid.UUID,
+) (int, error) {
+	if tx == nil {
+		return 0, ErrNilTransaction
+	}
+	var count int
+	query := `
+		SELECT COUNT(*)
+		FROM payment_splits
+		WHERE store_id = $1 AND order_id = $2 AND status NOT IN ('paid', 'cancelled')
+	`
+	if err := tx.GetContext(ctx, &count, query, storeID, orderID); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+// HasPendingPaymentForSplitTx checks if there is any pending or authorized payment attempt for a given split.
+func (r *TabRepository) HasPendingPaymentForSplitTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	storeID, splitID uuid.UUID,
+) (bool, error) {
+	if tx == nil {
+		return false, ErrNilTransaction
+	}
+	var count int
+	query := `
+		SELECT COUNT(*)
+		FROM payments
+		WHERE store_id = $1 AND split_id = $2 AND status IN ('pending', 'authorized')
+	`
+	if err := tx.GetContext(ctx, &count, query, storeID, splitID); err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+// UpdateOrderStatusAndPaymentStatusTx updates order status and payment status in an active transaction.
+func (r *TabRepository) UpdateOrderStatusAndPaymentStatusTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	storeID, orderID uuid.UUID,
+	status domain.OrderStatus,
+	paymentStatus domain.OrderPaymentStatus,
+) error {
+	if tx == nil {
+		return ErrNilTransaction
+	}
+	query := `
+		UPDATE orders
+		SET status = $1, payment_status = $2, updated_at = NOW()
+		WHERE store_id = $3 AND id = $4
+	`
+	_, err := tx.ExecContext(ctx, query, status, paymentStatus, storeID, orderID)
+	return err
+}

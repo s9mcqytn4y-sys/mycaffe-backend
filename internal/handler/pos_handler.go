@@ -18,13 +18,18 @@ import (
 // The store and the acting user always come from the verified access token; request bodies
 // carry no store_id or actor id.
 type POSHandler struct {
-	orders   *service.OrderService
-	payments *service.PaymentService
-	settings *service.SettingsService
+	orders      *service.OrderService
+	payments    *service.PaymentService
+	settings    *service.SettingsService
+	operational *service.OperationalService
 }
 
 func NewPOSHandler(orders *service.OrderService, payments *service.PaymentService, settings *service.SettingsService) *POSHandler {
 	return &POSHandler{orders: orders, payments: payments, settings: settings}
+}
+
+func (h *POSHandler) SetOperational(op *service.OperationalService) {
+	h.operational = op
 }
 
 type POSCreateOrderRequest struct {
@@ -270,4 +275,149 @@ func (h *POSHandler) UpdateSettings(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, settings)
+}
+
+// VoidOrder handles POST /pos/orders/:id/void (permission order.void).
+func (h *POSHandler) VoidOrder(c *gin.Context) {
+	if h.operational == nil {
+		authError(c, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "Layanan operasional belum aktif.")
+		return
+	}
+	orderID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		authError(c, http.StatusBadRequest, "INVALID_ID", "ID pesanan tidak valid.")
+		return
+	}
+	var in service.VoidOrderInput
+	if err := c.ShouldBindJSON(&in); err != nil {
+		authError(c, http.StatusBadRequest, "INVALID_REQUEST", "Data pembatalan pesanan tidak valid.")
+		return
+	}
+	res, err := h.operational.VoidOrder(c.Request.Context(), currentStaff(c), orderID, in)
+	if err != nil {
+		writeOperationalError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, res)
+}
+
+// RefundPayment handles POST /pos/orders/:id/payments/:payment_id/refund (permission payment.refund).
+func (h *POSHandler) RefundPayment(c *gin.Context) {
+	if h.operational == nil {
+		authError(c, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "Layanan operasional belum aktif.")
+		return
+	}
+	orderID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		authError(c, http.StatusBadRequest, "INVALID_ID", "ID pesanan tidak valid.")
+		return
+	}
+	paymentID, err := uuid.Parse(c.Param("payment_id"))
+	if err != nil {
+		authError(c, http.StatusBadRequest, "INVALID_ID", "ID pembayaran tidak valid.")
+		return
+	}
+	var in service.RefundPaymentInput
+	if err := c.ShouldBindJSON(&in); err != nil {
+		authError(c, http.StatusBadRequest, "INVALID_REQUEST", "Data pengembalian dana (refund) tidak valid.")
+		return
+	}
+	res, err := h.operational.RefundPayment(c.Request.Context(), currentStaff(c), orderID, paymentID, in)
+	if err != nil {
+		writeOperationalError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, res)
+}
+
+// OverrideStock handles POST /pos/products/:id/stock-override (permission stock.override).
+func (h *POSHandler) OverrideStock(c *gin.Context) {
+	if h.operational == nil {
+		authError(c, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "Layanan operasional belum aktif.")
+		return
+	}
+	productID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		authError(c, http.StatusBadRequest, "INVALID_ID", "ID produk tidak valid.")
+		return
+	}
+	var in service.StockOverrideInput
+	if err := c.ShouldBindJSON(&in); err != nil {
+		authError(c, http.StatusBadRequest, "INVALID_REQUEST", "Data penyesuaian stok tidak valid.")
+		return
+	}
+	res, err := h.operational.OverrideStock(c.Request.Context(), currentStaff(c), productID, in)
+	if err != nil {
+		writeOperationalError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, res)
+}
+
+func writeOperationalError(c *gin.Context, err error) {
+	var validation *service.ValidationError
+	switch {
+	case errors.As(err, &validation):
+		c.JSON(http.StatusUnprocessableEntity, gin.H{
+			"code":   "VALIDATION_FAILED",
+			"error":  "Periksa kembali isian yang ditandai.",
+			"fields": validation.Fields,
+		})
+	case errors.Is(err, service.ErrOwnerPINRequired):
+		c.JSON(http.StatusUnprocessableEntity, gin.H{
+			"code":  "OWNER_PIN_REQUIRED",
+			"error": "Total transaksi melebihi batas toleransi toko. Wajib menyertakan PIN Owner.",
+		})
+	case errors.Is(err, service.ErrInvalidOwnerPIN):
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"code":  "INVALID_OWNER_PIN",
+			"error": "PIN Owner salah atau akun pemilik toko terkunci.",
+		})
+	case errors.Is(err, service.ErrInvalidStaffPIN):
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"code":  "INVALID_STAFF_PIN",
+			"error": "PIN staf kasir tidak valid.",
+		})
+	case errors.Is(err, service.ErrInsufficientCashInDrawer):
+		c.JSON(http.StatusConflict, gin.H{
+			"code":  "INSUFFICIENT_DRAWER_CASH",
+			"error": "Saldo kas fisik di laci saat ini tidak mencukupi untuk memproses refund tunai.",
+		})
+	case errors.Is(err, service.ErrNoOpenShift):
+		c.JSON(http.StatusConflict, gin.H{
+			"code":  "NO_OPEN_SHIFT",
+			"error": "Kasir tidak memiliki sesi shift terbuka di laci kas untuk refund tunai.",
+		})
+	case errors.Is(err, service.ErrOrderAlreadyPaid):
+		c.JSON(http.StatusConflict, gin.H{
+			"code":  "ORDER_ALREADY_PAID",
+			"error": "Pesanan sudah berstatus lunas. Gunakan endpoint refund untuk pengembalian dana.",
+		})
+	case errors.Is(err, service.ErrOrderAlreadyCancelled):
+		c.JSON(http.StatusConflict, gin.H{
+			"code":  "ORDER_ALREADY_CANCELLED",
+			"error": "Pesanan sudah dalam status dibatalkan.",
+		})
+	case errors.Is(err, service.ErrPaymentAlreadyRefunded):
+		c.JSON(http.StatusConflict, gin.H{
+			"code":  "PAYMENT_ALREADY_REFUNDED",
+			"error": "Pembayaran ini sudah pernah di-refund.",
+		})
+	case errors.Is(err, service.ErrOrderNotRefundable):
+		c.JSON(http.StatusConflict, gin.H{
+			"code":  "NOT_REFUNDABLE",
+			"error": "Transaksi tidak dalam status yang dapat di-refund.",
+		})
+	case errors.Is(err, postgres.ErrOrderNotFound), errors.Is(err, postgres.ErrPaymentNotFound):
+		c.JSON(http.StatusNotFound, gin.H{
+			"code":  "NOT_FOUND",
+			"error": "Data pesanan atau pembayaran tidak ditemukan.",
+		})
+	default:
+		log.Printf("[pos] operational error: %v", err)
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"code":  "SERVICE_TEMPORARILY_UNAVAILABLE",
+			"error": "Gagal memproses aksi operasional. Silakan coba kembali.",
+		})
+	}
 }

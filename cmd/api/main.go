@@ -143,6 +143,8 @@ func main() {
 		paymentService := service.NewPaymentService(db, paymentRepo, orderRepo, midtransClient)
 		midtransHandler.SetPaymentService(paymentService)
 		posHandler = handler.NewPOSHandler(orderService, paymentService, service.NewSettingsService(db))
+		operationalService := service.NewOperationalService(db, orderRepo, paymentRepo, postgres.NewShiftRepository(), postgres.NewAuthRepository(), postgres.NewSettingsRepository())
+		posHandler.SetOperational(operationalService)
 		catalogHandler = handler.NewCatalogHandler(service.NewCatalogService(db))
 		shiftHandler = handler.NewShiftHandler(service.NewShiftService(db))
 		tabHandler = handler.NewTabHandler(service.NewTabService(db, postgres.NewTabRepository(), orderRepo))
@@ -202,6 +204,11 @@ func main() {
 			pos.GET("/tabs/:id", authHandler.RequireStaff(), tabHandler.GetTab)
 			pos.POST("/tabs/:id/close", authHandler.RequirePermission(rbac.TabManage), tabHandler.CloseTab)
 			pos.POST("/tabs/:id/reopen", authHandler.RequirePermission(rbac.TabManage), tabHandler.ReopenTab)
+
+			// POS Operational: Void, Refund & Stock Override (Iteration 4d)
+			pos.POST("/orders/:id/void", authHandler.RequirePermission(rbac.OrderVoid), posHandler.VoidOrder)
+			pos.POST("/orders/:id/payments/:payment_id/refund", authHandler.RequirePermission(rbac.PaymentRefund), posHandler.RefundPayment)
+			pos.POST("/products/:id/stock-override", authHandler.RequirePermission(rbac.StockOverride), posHandler.OverrideStock)
 
 			// Guest menu & quote (public, cacheable catalog; dynamic quote for guest carts).
 			v1.GET("/public/stores/:slug/catalog", catalogHandler.PublicCatalog)

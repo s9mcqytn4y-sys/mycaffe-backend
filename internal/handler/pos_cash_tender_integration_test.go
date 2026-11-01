@@ -164,8 +164,12 @@ func TestPOSCashTenderIntegration(t *testing.T) {
 	if wOpenShift.Code != http.StatusCreated {
 		t.Fatalf("open shift failed: %d %s", wOpenShift.Code, wOpenShift.Body.String())
 	}
-	var shift domain.Shift
-	_ = json.Unmarshal(wOpenShift.Body.Bytes(), &shift)
+	var openShiftRes service.OpenShiftResult
+	_ = json.Unmarshal(wOpenShift.Body.Bytes(), &openShiftRes)
+	if openShiftRes.Shift == nil || openShiftRes.Shift.ID == uuid.Nil {
+		t.Fatalf("empty shift returned from open shift: %s", wOpenShift.Body.String())
+	}
+	shift := *openShiftRes.Shift
 
 	// 5. Insufficient cash tendered returns 400 INVALID_PAYMENT
 	t.Run("InsufficientCashTendered_Returns400", func(t *testing.T) {

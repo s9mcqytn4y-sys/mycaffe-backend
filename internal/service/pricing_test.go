@@ -13,6 +13,7 @@ import (
 func TestValidateAndPriceOrder_PurePricingAndModifiers(t *testing.T) {
 	storeID := uuid.MustParse("11111111-1111-4111-8111-111111111111")
 	prodID := uuid.MustParse("aaaa0000-0000-4000-8000-000000000001")
+	variantID := uuid.MustParse("aaaa0000-0000-4000-8000-0000000000f1")
 	grpSugarID := uuid.MustParse("bbbb0000-0000-4000-8000-000000000001")
 	grpMilkID := uuid.MustParse("bbbb0000-0000-4000-8000-000000000002")
 	grpFoamSubID := uuid.MustParse("bbbb0000-0000-4000-8000-000000000003")
@@ -41,6 +42,9 @@ func TestValidateAndPriceOrder_PurePricingAndModifiers(t *testing.T) {
 					TrackStock:    true,
 					StockQuantity: 10,
 				},
+			},
+			Variants: map[uuid.UUID]domain.ProductVariant{
+				variantID: {ID: variantID, StoreID: storeID, ProductID: prodID, Name: "Reguler", Price: 28000, IsDefault: true, IsAvailable: true},
 			},
 			ModifierGroups: map[uuid.UUID]domain.ModifierGroup{
 				grpSugarID: {
@@ -233,6 +237,25 @@ func TestValidateAndPriceOrder_PurePricingAndModifiers(t *testing.T) {
 					Modifiers: []service.SelectedModifierInput{{OptionID: optLessSugarID, Quantity: 1}},
 				},
 			},
+		}
+		_, err := service.ValidateAndPriceOrder(store, input, cat)
+		if !errors.Is(err, service.ErrProductUnavailable) {
+			t.Fatalf("expected ErrProductUnavailable, got %v", err)
+		}
+	})
+
+	t.Run("product without default variant is rejected even with base_price (ADR-004)", func(t *testing.T) {
+		cat := buildCatalog()
+		cat.Variants = map[uuid.UUID]domain.ProductVariant{}
+		input := service.OrderCreationInput{
+			IdempotencyKey: "idem-test-adr004",
+			CustomerName:   "Budi",
+			OrderType:      domain.OrderTypeTakeaway,
+			Items: []service.OrderItemInput{{
+				ProductID: prodID,
+				Quantity:  1,
+				Modifiers: []service.SelectedModifierInput{{OptionID: optLessSugarID, Quantity: 1}},
+			}},
 		}
 		_, err := service.ValidateAndPriceOrder(store, input, cat)
 		if !errors.Is(err, service.ErrProductUnavailable) {

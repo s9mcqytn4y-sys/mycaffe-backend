@@ -133,7 +133,7 @@ func TestTabSplitLifecycleIntegration(t *testing.T) {
 	// Ensure sufficient stock and odd base price to verify remainder allocation
 	ctx := context.Background()
 	_ = database.WithTenantTx(ctx, db, centralStoreID, func(tx *sqlx.Tx) error {
-		_, err := tx.ExecContext(ctx, `UPDATE products SET stock_quantity = 1000, base_price = 19999 WHERE id = $1`, productID)
+		_, err := tx.ExecContext(ctx, `WITH p AS (UPDATE products SET stock_quantity = 1000 WHERE id = $1) UPDATE product_variants SET price = 19999 WHERE product_id = $1 AND is_default`, productID)
 		return err
 	})
 

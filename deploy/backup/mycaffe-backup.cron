@@ -1,0 +1,12 @@
+# /etc/cron.d/mycaffe-backup — install and env file: docs/setup/backup-and-restore.md
+# Runs as the `mycaffe` OS user (member of the docker group). Times are UTC.
+# /opt/mycaffe = checkout of the released tag (deploy/ and scripts/ only, never edited on the VPS).
+# /etc/mycaffe/backup.env = R2 + GPG settings, mode 600, owned by mycaffe.
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# Hourly encrypted backup (RPO <= 1 h). flock skips a run if the previous one is still going.
+15 * * * * mycaffe flock -n /tmp/mycaffe-backup.lock bash -c 'set -a; . /etc/mycaffe/backup.env; set +a; /opt/mycaffe/scripts/backup/backup_to_r2.sh' >> /var/log/mycaffe/backup.log 2>&1
+
+# Monthly restore drill, 2nd of the month 20:30 UTC (03:30 WIB, outside opening hours).
+30 20 2 * * mycaffe flock -n /tmp/mycaffe-backup.lock bash -c 'set -a; . /etc/mycaffe/backup.env; set +a; /opt/mycaffe/scripts/backup/restore_drill.sh' >> /var/log/mycaffe/restore-drill.log 2>&1

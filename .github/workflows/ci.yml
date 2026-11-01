@@ -101,6 +101,7 @@ jobs:
         run: |
           bash -n scripts/backup/backup_to_r2.sh
           bash -n scripts/backup/restore_from_r2.sh
+          bash -n scripts/backup/restore_drill.sh
           bash -n scripts/deploy/init-letsencrypt.sh
           sh -n deploy/postgres/00-init-roles.sh
           sh -n deploy/nginx/entrypoint-tls-bootstrap.sh
@@ -239,3 +240,38 @@ jobs:
             exit 1
           fi
           echo "Integration tests run: $(grep -cE -- '^--- PASS: Test[A-Za-z0-9_]*(Integration|RLS)' go-test.log)"
+
+      - name: Backup to S3 (R2 stand-in) and Restore Drill Round-Trip
+        env:
+          R2_ENDPOINT: http://127.0.0.1:9090
+          R2_BACKUP_BUCKET: mycaffe-backups
+          R2_BACKUP_PREFIX: backups
+          AWS_ACCESS_KEY_ID: ci-not-a-secret
+          AWS_SECRET_ACCESS_KEY: ci-not-a-secret
+          AWS_DEFAULT_REGION: us-east-1
+          BACKUP_ENCRYPTION_PASSPHRASE: ci-only-throwaway-passphrase
+        run: |
+          set -euo pipefail
+          docker run -d --name s3mock -p 127.0.0.1:9090:9090 adobe/s3mock:4.7.0
+          aws configure set default.s3.addressing_style path
+          for i in $(seq 1 60); do curl -sf http://127.0.0.1:9090/ >/dev/null && break; sleep 1; done
+          aws --endpoint-url "$R2_ENDPOINT" s3 mb "s3://$R2_BACKUP_BUCKET"
+          PG="$(docker ps -q --filter ancestor=postgres:18-alpine | head -n 1)"
+
+          # Two backups of the integration-test database: both land in hourly/, only the first is promoted.
+          DB_CONTAINER="$PG" DB_NAME=mycaffe_test ./scripts/backup/backup_to_r2.sh
+          sleep 2
+          DB_CONTAINER="$PG" DB_NAME=mycaffe_test ./scripts/backup/backup_to_r2.sh
+          count() { aws --endpoint-url "$R2_ENDPOINT" s3 ls "s3://$R2_BACKUP_BUCKET/backups/$1/" | grep -c '\.dump\.gpg$' || true; }
+          test "$(count hourly)" = 2 && test "$(count daily)" = 1 && test "$(count monthly)" = 1
+
+          # Drill: restore the newest backup into a throwaway PG18, prove mycaffe_app can read it, compare with the source.
+          SOURCE_CONTAINER="$PG" SOURCE_DB=mycaffe_test ./scripts/backup/restore_drill.sh | tee drill.log
+          grep -q '^RESULT PASS' drill.log
+
+          # Restoring over a non-disposable database without explicit confirmation must be refused.
+          if DB_CONTAINER="$PG" DB_NAME=mycaffe_prod DB_MIGRATOR_USER=mycaffe_migrator BACKUP_OBJECT=latest \
+               ./scripts/backup/restore_from_r2.sh; then
+            echo "Restore guard did not block a production-named database." >&2
+            exit 1
+          fi

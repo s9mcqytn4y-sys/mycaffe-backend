@@ -7,7 +7,7 @@ set -euo pipefail
 
 # Required environment variables:
 # DB_CONTAINER (default: mycaffe-postgres)
-# DB_USER (default: mycaffe_migrator)
+# DB_USER (default: mycaffe_backup — read-only BYPASSRLS role from 00-init-roles.sh, local socket only)
 # DB_NAME (default: mycaffe_prod)
 # R2_BACKUP_BUCKET (default: mycaffe-backups)
 # R2_ENDPOINT (e.g. https://<account_id>.r2.cloudflarestorage.com)
@@ -16,7 +16,7 @@ set -euo pipefail
 # BACKUP_ENCRYPTION_PASSPHRASE (High-entropy passphrase for GPG symmetric AES256)
 
 DB_CONTAINER="${DB_CONTAINER:-mycaffe-postgres}"
-DB_USER="${DB_USER:-mycaffe_migrator}"
+DB_USER="${DB_USER:-mycaffe_backup}"
 DB_NAME="${DB_NAME:-mycaffe_prod}"
 R2_BACKUP_BUCKET="${R2_BACKUP_BUCKET:-${R2_BUCKET:-mycaffe-backups}}"
 R2_BACKUP_PREFIX="${R2_BACKUP_PREFIX:-backups}"
@@ -65,8 +65,24 @@ fi
 )
 echo "[BACKUP] Authenticated GPG encryption completed. File size: ${FILESIZE} bytes."
 
-echo "[BACKUP] Uploading encrypted archive and SHA-256 manifest to Cloudflare R2 bucket: ${R2_BACKUP_BUCKET}/${R2_BACKUP_PREFIX}..."
-aws --endpoint-url "${R2_ENDPOINT}" s3 cp "${BACKUP_FILE}" "s3://${R2_BACKUP_BUCKET}/${R2_BACKUP_PREFIX}/$(basename "${BACKUP_FILE}")"
-aws --endpoint-url "${R2_ENDPOINT}" s3 cp "${CHECKSUM_FILE}" "s3://${R2_BACKUP_BUCKET}/${R2_BACKUP_PREFIX}/$(basename "${CHECKSUM_FILE}")"
+# Retention tiers: every run lands in hourly/; the first successful run of a UTC day / month is also
+# copied to daily/ and monthly/. R2 lifecycle rules expire each prefix (docs/setup/backup-and-restore.md).
+BASE="s3://${R2_BACKUP_BUCKET}/${R2_BACKUP_PREFIX}"
+NAME="$(basename "${BACKUP_FILE}")"
+s3() { aws --endpoint-url "${R2_ENDPOINT}" s3 "$@"; }
+
+echo "[BACKUP] Uploading encrypted archive and SHA-256 manifest to ${BASE}/hourly/..."
+s3 cp --only-show-errors "${BACKUP_FILE}" "${BASE}/hourly/${NAME}"
+s3 cp --only-show-errors "${CHECKSUM_FILE}" "${BASE}/hourly/${NAME}.sha256"
+
+promote() { # tier, name prefix that identifies the period
+    if ! s3 ls "${BASE}/$1/$2" >/dev/null 2>&1; then
+        s3 cp --only-show-errors "${BASE}/hourly/${NAME}" "${BASE}/$1/${NAME}"
+        s3 cp --only-show-errors "${BASE}/hourly/${NAME}.sha256" "${BASE}/$1/${NAME}.sha256"
+        echo "[BACKUP] Promoted to $1/."
+    fi
+}
+promote daily "backup_${DB_NAME}_${TIMESTAMP:0:8}"
+promote monthly "backup_${DB_NAME}_${TIMESTAMP:0:6}"
 
 echo "[BACKUP] Backup and integrity manifest uploaded successfully at $(date -u +%Y%m%d_%H%M%SZ)."

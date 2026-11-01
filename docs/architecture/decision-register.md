@@ -116,6 +116,13 @@ window, one shift per drawer, drawer kick + no-sale, local cart + quote, plan ap
 |----|----------|
 | ADR4 | Catalog cleanup done now, before Iteration 5: pricing reads only the variant price, `products.base_price` kept as a deprecated mirror, unit stock stays on products (variants share it), DB CHECK single-choice groups `max_select = 1`. See [ADR-004](adr-004-catalog-schema-modernization.md) |
 
+## Iteration 5 plan (proposed 2026-11-01, awaiting owner approval)
+
+| ID | Proposal |
+|----|----------|
+| QR1 | Printed table QR = opaque 256-bit random token, rotatable by the owner, unique lookup across stores; replaces Q5 (HMAC + key id + `qr_version`) once approved. Pause via `qr_ordering_paused` (store) and `tables.is_active` (table). Rationale and the other approvals needed: [iteration-5-table-qr-kds-plan.md](iteration-5-table-qr-kds-plan.md) §2.3 and §8 |
+
+
 ## Awaiting owner approval
 
 | ID | Proposal | Until approved |

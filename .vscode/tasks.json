@@ -1,0 +1,44 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "dev:run",
+            "type": "shell",
+            "command": "powershell -ExecutionPolicy Bypass -File .\\scripts\\dev.ps1 run",
+            "group": "build",
+            "problemMatcher": ["$go"]
+        },
+        {
+            "label": "dev:test-int",
+            "type": "shell",
+            "command": "powershell -ExecutionPolicy Bypass -File .\\scripts\\dev.ps1 test-int",
+            "group": "test",
+            "problemMatcher": ["$go"]
+        },
+        {
+            "label": "dev:check",
+            "type": "shell",
+            "command": "powershell -ExecutionPolicy Bypass -File .\\scripts\\dev.ps1 check",
+            "group": "test",
+            "problemMatcher": ["$go"]
+        },
+        {
+            "label": "dev:migrate",
+            "type": "shell",
+            "command": "powershell -ExecutionPolicy Bypass -File .\\scripts\\dev.ps1 migrate",
+            "problemMatcher": []
+        },
+        {
+            "label": "dev:seed",
+            "type": "shell",
+            "command": "powershell -ExecutionPolicy Bypass -File .\\scripts\\dev.ps1 seed",
+            "problemMatcher": []
+        },
+        {
+            "label": "dev:markdownlint",
+            "type": "shell",
+            "command": "npx markdownlint-cli 'docs/**/*.md'",
+            "problemMatcher": []
+        }
+    ]
+}

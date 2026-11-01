@@ -1,20 +1,23 @@
 {
     "recommendations": [
-        "anthropic.claude-code",
         "golang.go",
         "google.google-antigravity",
-        "dracula-theme.theme-dracula",
-        "pkief.material-icon-theme",
-        "usernamehw.errorlens",
-        "eamodio.gitlens",
+        "anthropic.claude-code",
         "mtxr.sqltools",
         "mtxr.sqltools-driver-pg",
-        "humao.rest-client",
-        "mikestead.dotenv",
-        "yzhang.markdown-all-in-one",
         "esbenp.prettier-vscode",
+        "usernamehw.errorlens",
+        "eamodio.gitlens",
+        "davidanson.vscode-markdownlint",
+        "yzhang.markdown-all-in-one",
+        "mikestead.dotenv",
+        "humao.rest-client",
         "editorconfig.editorconfig",
+        "dracula-theme.theme-dracula",
+        "pkief.material-icon-theme",
         "skeinllc.anti-slop"
+    ],
+    "unwantedRecommendations": [
+        "ms-mssql.mssql"
     ]
 }
-

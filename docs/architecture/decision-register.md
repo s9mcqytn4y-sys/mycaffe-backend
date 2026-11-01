@@ -99,6 +99,23 @@ window, one shift per drawer, drawer kick + no-sale, local cart + quote, plan ap
 | **P13** | **Shift Attribution on Payments** | Menambahkan kolom `payments.shift_id` (nullable, FK ke `shifts.id` ON DELETE RESTRICT) via migrasi additive `000012`. Kolom diisi dengan ID shift kasir yang aktif saat transaksi pembayaran dieksekusi (termasuk non-tunai jika kasir sedang membuka shift). Agregasi laporan X-Report & Z-Report menghitung pelunasan tab berdasarkan shift saat pembayaran dibayar (`payments.shift_id`), bukan shift saat tab dibuka (`orders.shift_id`). |
 | **P14** | **Shift Decoupling & Unsettled Open Tabs Warning** | Penutupan shift (`POST /pos/shifts/current/close`) tidak diblokir oleh adanya tab yang belum lunas. Laporan penutupan shift (X-Report & Z-Report) memuat ringkasan peringatan: `unsettled_open_tabs_count`, total nilai rupiah tab gantung, dan daftar `order_number` terkait (baik status `open` maupun `pending_payment`). Tab yang melampaui hari bisnis ditandai khusus. |
 
+## Hotfix v0.4.3: void/refund money and stock rules (recorded 2026-11-01, owner audit of v0.4.2)
+
+| ID | Rule (implemented) |
+|----|--------------------|
+| HF1 | Void only while no money is attached: payment_status `unpaid`/`failed`/`expired` and no payment row `pending`, `authorized`, `paid`, `partially_refunded` or `refunded` on the order or its splits; otherwise 409 `ORDER_HAS_PAYMENTS` (use refund) |
+| HF2 | Stock is returned by one shared helper (products **and** modifier options) only while `stock_status` is `reserved`/`committed`, then set to `released`; void, expiry, reconciliation and refund all use it, so stock never comes back twice. Void also cancels every `order_rounds` row and writes `order.cancelled` to the outbox in the same transaction |
+| HF3 | Refund restock: `restore_stock` is required (no default). A `by_item` split restores only its own `payment_split_items`; `full`/`equal` restore the whole order once, when the refund makes the order fully refunded (decided by that last refund's flag) |
+| HF4 | Refunds start only when the order is `paid` or `partially_refunded` (a half-paid tab is still being collected). `payments.refunded_amount`, `orders.refunded_amount` and the split status (`refunded`) are updated; `payment_splits.paid_amount` stays gross because settlement recomputes the order's paid amount from it |
+| HF5 | PINs re-entered for void, refund, stock override and shift variance use the login counter (5 wrong → locked 15 min, which also ends running sessions). Wrong owner PINs advance every unlocked owner's counter (the targeted owner is unknown) and are audited `OWNER_PIN_FAILED`; 5 of them by one actor in 15 min → 429 `PIN_ATTEMPTS_EXCEEDED`. Accepted risk: a cashier can lock the owner out for 15 min with 5 guesses (same as guessing the owner's login) |
+| HF6 | Stock override no longer turns tracking on silently: untracked product → 422 `PRODUCT_NOT_TRACKED` unless `enable_tracking: true`; unknown product → 404 |
+
+## Awaiting owner approval
+
+| ID | Proposal | Until approved |
+|----|----------|----------------|
+| RF1 | **Non-cash refunds.** (a) Dynamic QRIS paid through Midtrans: call the Midtrans refund API when it supports that transaction, record the provider refund id, mark refunded only on the provider's success (webhook/status check). (b) Fallback for any non-cash payment, and for (a) when the API refuses: cash from the open drawer as a `refund` movement whose reason and audit metadata keep the original method and reference. (c) EDC: cash refund as in (b), or manual reversal on the EDC terminal recorded with its reference number and reconciled later. Static QRIS: (b) only (no provider API). | Non-cash refund → 409 `REFUND_METHOD_NOT_SUPPORTED`; nothing is marked refunded |
+
 ## Resolved from existing sources (not re-asked)
 
 | Topic | Resolution | Source |

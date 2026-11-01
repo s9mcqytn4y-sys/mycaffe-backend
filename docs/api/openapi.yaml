@@ -1255,6 +1255,90 @@ paths:
           description: Switching protocols
         "401":
           description: WS_TICKET_REQUIRED or WS_TICKET_INVALID (unknown, used, expired, or subject no longer valid)
+  /api/v1/kds/tickets:
+    get:
+      tags: [KDS]
+      operationId: listKDSTickets
+      summary: Open tickets of one station (queued, preparing, ready), oldest first
+      description: >-
+        bar needs kds.ticket.read.barista (cashier with cashier_handles_bar), kitchen needs
+        kds.ticket.read.kitchen. One ticket per (order or tab round) x station; items with prep station
+        none never create a ticket. late_payment marks orders revived by a late settlement (Q7).
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: station
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [bar, kitchen]
+      responses:
+        "200":
+          description: Tickets with their lines
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [tickets]
+                properties:
+                  tickets:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/KDSTicket"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+  /api/v1/kds/tickets/{id}/transition:
+    post:
+      tags: [KDS]
+      operationId: transitionKDSTicket
+      summary: Move a ticket (queued→preparing→ready→served, ready→preparing recall)
+      description: >-
+        expected_status guards against two screens overwriting each other. The order (or tab round)
+        status is derived in the same transaction: all served → served; all ready or served → ready;
+        any work started → preparing; otherwise queued. When every order of a table session is paid and
+        done, the session's settled_at starts the auto-close countdown. Emits kds.ticket_updated.
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - $ref: "#/components/parameters/ResourceID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [to, expected_status]
+              properties:
+                to:
+                  type: string
+                  enum: [preparing, ready, served]
+                expected_status:
+                  type: string
+                  enum: [queued, preparing, ready]
+      responses:
+        "200":
+          description: Updated ticket
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KDSTicket"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: KDS_STALE_STATUS or KDS_TRANSITION_NOT_ALLOWED
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
   /api/v1/pos/drawers:
     get:
       tags: [POS Shifts]
@@ -2655,6 +2739,64 @@ components:
             $ref: "#/components/schemas/ValidationErrorResponse"
 
   schemas:
+    KDSTicket:
+      type: object
+      required: [id, order_id, order_number, queue_number, table_number, station, status, late_payment, created_at, lines]
+      properties:
+        id:
+          type: string
+          format: uuid
+        order_id:
+          type: string
+          format: uuid
+        round_id:
+          type: string
+          format: uuid
+        round_number:
+          type: integer
+        order_number:
+          type: string
+        queue_number:
+          type: string
+        table_number:
+          type: string
+        station:
+          type: string
+          enum: [bar, kitchen]
+        status:
+          type: string
+          enum: [queued, preparing, ready, served, cancelled]
+        late_payment:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        started_at:
+          type: string
+          format: date-time
+        ready_at:
+          type: string
+          format: date-time
+        served_at:
+          type: string
+          format: date-time
+        lines:
+          type: array
+          items:
+            type: object
+            required: [name, quantity, options]
+            properties:
+              name:
+                type: string
+              variant:
+                type: string
+              quantity:
+                type: integer
+              options:
+                type: string
+                description: JSON snapshot of the selected modifiers
+              notes:
+                type: string
     WSTicket:
       type: object
       required: [ticket, expires_at, channels]

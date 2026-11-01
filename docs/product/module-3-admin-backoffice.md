@@ -1,9 +1,11 @@
 # Module 3: Owner/Admin Backoffice
 
 ## Primary goals
+
 Single source of truth, fraud prevention, and decisions grounded in reconciled data. The dashboard should communicate operational health quickly without confusing gross sales, gateway settlement, estimated gross profit, and net profit.
 
 ## Pillars
+
 1. **Dashboard:** active shift, live queue load, SLA, sold-out alerts, gross/net sales, transaction count, AOV, payment-method split, and filters by period.
 2. **Catalog and modifiers:** products, categories, centralized modifier groups/options, required/optional selection limits, selling price, optional cost basis, availability, schedule, and sold-out reset policy.
 3. **Finance:** cost/HPP, margin estimates, gateway settlement reconciliation, store-configured tax/service/takeaway rules, expenses, and exportable P&L.
@@ -14,6 +16,7 @@ Single source of truth, fraud prevention, and decisions grounded in reconciled d
 8. **Table QR management:** generated table tokens, active/inactive state, rotation/revocation, branded print-ready QR templates, and emergency QR-order pause.
 
 ## Finance correctness
+
 - Treat sample tax/MDR percentages and settlement times as examples only. Configure them per store/provider and verify current provider terms and applicable rules.
 - Preserve the actual fee/tax/discount rules applied to each transaction so later setting changes do not rewrite historical sales.
 - Gross profit requires valid cost/HPP data. Net profit requires complete operating expenses and cost treatment; label partial data as an estimate.
@@ -21,6 +24,7 @@ Single source of truth, fraud prevention, and decisions grounded in reconciled d
 - Do not call an order “completed” merely because a payment settled; payment and fulfillment states are separate.
 
 ## Security and operational control
+
 - Enforce RBAC on the backend, not only by hiding UI buttons.
 - Hash PINs using a strong password-hashing function, rate-limit attempts, apply lockout/backoff, and audit sensitive actions.
 - Do not permit a cashier to void/refund a paid transaction without the configured authorization flow.
@@ -29,6 +33,7 @@ Single source of truth, fraud prevention, and decisions grounded in reconciled d
 - Keep owner-only financial and cost fields out of cashier/kitchen APIs.
 
 ## Suggested entities to evaluate (not a final schema)
+
 `stores`, `store_settings`, `tables`, `products`, `categories`, `modifier_groups`, `modifier_options`, `product_modifier_groups`, `orders`, `order_items`, `payments`, `pos_shifts`, `expenses`, `staff_users`, `audit_logs`, and appropriate settlement/reconciliation records.
 
 Review existing schema and the architecture decision document before creating any of these. Do not blindly create duplicate tables if equivalent structures already exist.

@@ -99,23 +99,29 @@ Seluruh identitas statis dari prototipe awal telah dihapus sepenuhnya dan digant
 ## 4. Product Knowledge & Kapabilitas Operasional
 
 ### 4.1 Empat Peran Staf Operasional (Tanpa Birokrasi Approval Bertingkat)
+
 Operasional kafe membutuhkan kecepatan tinggi di jam sibuk. MyCaffe sengaja membatasi peran pengguna menjadi **4 peran inti** (`owner`, `cashier`, `barista`, `kitchen`) tanpa peran `manager` terpisah dan tanpa alur persetujuan (approval) berlapis yang menghambat antrean:
+
 - **Owner (`owner`):** Akses penuh ke konfigurasi toko, katalog menu, manajemen harga/pajak/service charge, manajemen staf, inventaris, penarikan dana, laporan keuangan, dan seluruh aksi operasional.
 - **Cashier (`cashier`):** Mengoperasikan POS Kasir (termasuk layar kedua pelanggan/Dual-Screen), menerima pembayaran tunai/EDC/QRIS statis/QRIS dinamis, membuka pesanan `open_tab`, mengelola split bill, membuka/menutup shift kasir, serta melakukan void/refund dengan pencatatan alasan wajib ke `audit_logs`.
 - **Barista (`barista`):** Mengoperasikan KDS Barista untuk pesanan minuman, memperbarui status tahapan peracikan (`queued` -> `preparing` -> `ready` -> `served`), dan mengatur ketersediaan cepat item minuman (86-ing stok habis).
 - **Kitchen (`kitchen`):** Mengoperasikan KDS Dapur untuk pesanan makanan dan pastry dengan kapabilitas yang setara dengan Barista pada stasiun dapur.
 
 ### 4.2 Fleksibilitas Mode Shift (`stores.shift_mode`)
+
 Setiap toko dapat memilih satu dari dua mode shift sesuai skala operasionalnya:
+
 1. **`single_auto` (Default untuk kafe 1 shift):** Sistem membuka dan menutup buku operasional harian secara otomatis mengikuti jam operasional toko tanpa mewajibkan kasir melakukan ritual buka/tutup laci kas berlapis.
 2. **`multi_shift` (Untuk kafe 2-3 shift):** Mewajibkan pencatatan modal awal kas tunai (opening cash float), serah terima antar-kasir, dan rekonsiliasi uang fisik saat tutup shift (closing cash count).
 
 ### 4.3 Katalog Menu dan 1-Level Nested Sub-Addons
+
 - Mendukung grup modifier (`modifier_groups`) dengan aturan pemilihan tunggal (`single`) maupun jamak (`multiple`), batas minimum/maksimum (`min_select`, `max_select`), dan override kewajiban per produk (`product_modifier_groups.override_required`). Pada grup bertipe `single`, kuantitas opsi (`quantity`) wajib bernilai `1`.
 - Mendukung **1-Level Nested Sub-Addons** melalui tabel `option_modifier_groups`: pemilihan sebuah opsi induk (misalnya memilih *Oat Milk*) dapat memicu munculnya grup modifier anak (misalnya *Plant Milk Preparation: Standard Pour / Whipped Oat Cold Foam*). Jika opsi induk pada grup `multiple` dipilih dengan `quantity > 1`, maka harga dan pemotongan stok sub-addon dikalikan secara proporsional (`item.Quantity * parentMod.Quantity * subAddon.Quantity`).
 - Seluruh nama produk, harga dasar, nama grup modifier, nama opsi, dan selisih harga (`price_delta`) di-snapshot secara permanen ke `order_items` dan `order_item_options` saat pesanan dibuat. Perubahan harga katalog di masa depan tidak pernah mengubah struk historis.
 
 ### 4.4 Mesin Harga Integer Rupiah (`int64`) & Basis Points (`BPS`)
+
 - Seluruh nominal uang disimpan dan dihitung sebagai bilangan bulat Rupiah (`int64` di Go, `BIGINT` di PostgreSQL 18) tanpa tipe floating-point (`float64`).
 - Tarif pajak (PB1), service charge, dan MDR QRIS disimpan dalam satuan **Basis Points (`1% = 100 BPS`)** per toko dengan pembulatan deterministik *Round Half Up*:
   $$\text{Fee} = \left\lfloor \frac{\text{Amount} \times \text{BPS} + 5000}{10000} \right\rfloor$$
@@ -128,7 +134,9 @@ Setiap toko dapat memilih satu dari dua mode shift sesuai skala operasionalnya:
   6. `TotalAmount` = `TaxableBase + TaxAmount`.
 
 ### 4.5 Pemisahan Status Pesanan, Status Pembayaran, dan Siklus Hidup Reservasi Stok
+
 MyCaffe memisahkan siklus hidup persiapan dapur (`orders.status`), siklus hidup finansial (`orders.payment_status`, `payment_splits.status`, dan `payments.status`), serta siklus hidup reservasi stok (`orders.stock_status`):
+
 - **Order Status (`orders.status`):** `pending_payment`, `queued`, `preparing`, `ready`, `served`, `completed`, `cancelled`.
 - **Order Payment Status (`orders.payment_status`):** `unpaid`, `pending`, `partially_paid`, `paid`, `failed`, `cancelled`, `expired`, `partially_refunded`, `refunded`, `chargeback`, `partial_chargeback`.
 - **Order Stock Reservation Status (`orders.stock_status`):**
@@ -140,5 +148,6 @@ MyCaffe memisahkan siklus hidup persiapan dapur (`orders.status`), siklus hidup 
 - **Split Bill Status (`payment_splits.status`):** `unpaid`, `pending`, `partially_paid`, `paid`, `cancelled`, `refunded`.
 
 ### 4.6 Pemisahan Inventaris Habis Pakai vs Aset Tidak Habis Pakai
+
 - **Barang Habis Pakai (Consumables / Tracked Stock):** Biji kopi, susu, sirup, pastry, dan cup dikelola melalui reservasi stok transaksional (`track_stock = true`, `stock_quantity`) yang dikunci secara atomik (`SELECT ... FOR UPDATE`) dalam urutan UUID deterministik saat pesanan dibuat.
 - **Aset Operasional Tidak Habis Pakai (Non-Consumable Assets):** Mesin espresso, grinder, tablet POS, printer thermal, dan perangkat jaringan dicatat sebagai inventaris aset toko untuk pemantauan kondisi/perawatan (maintenance log) tanpa tercampur dengan stok bahan baku penjualan.

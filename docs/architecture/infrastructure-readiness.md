@@ -1,6 +1,7 @@
 # Infrastructure Readiness & Architectural Boundaries
 
 ## 1. Hosting Tier & Production Topology (ADR-002)
+
 - **Production Server**: Single-VPS Hostinger KVM 2 (2 vCPU, 8 GB RAM, 100 GB NVMe SSD, Ubuntu 24.04 LTS).
 - **Deployment Model**: Modular Monolith orchestrated with Docker Compose (`deploy/docker/docker-compose.prod.yml`):
   - `nginx`: Reverse proxy (ports 80/443), empty-volume TLS bootstrap (`deploy/nginx/entrypoint-tls-bootstrap.sh`), Let's Encrypt Certbot webroot renewal, rate limiting (30 rps general, 10 rps webhook), WebSocket upgrades (`/ws`), and gzip compression.
@@ -11,11 +12,13 @@
 - **Zero In-Place Coding Rule**: Source code is never edited or compiled on the production VPS. All releases are built in GitHub Actions and pulled from `ghcr.io` as immutable tagged images.
 
 ## 2. Hostinger API & MCP Boundary
+
 - **Scope Definition**: The Hostinger API and Hostinger MCP (`https://mcp.hostinger.com`) are strictly infrastructure management tools (used for server health monitoring, DNS record management, and VPS maintenance operations).
 - **Hard Rule**: Hostinger API/SDK must never be imported as an application runtime dependency inside the Go backend codebase (`mycaffe-backend`).
 - **Access Control**: Any future infrastructure provisioning or DNS change via MCP requires explicit owner approval and must never be automated autonomously by agents without review.
 
 ## 3. Database Architecture & Realtime Strategy
+
 - **Runtime Target**: Native PostgreSQL 18 (pinned to `postgres:18-alpine` in Docker and CI).
 - **Decoupling from External DB PaaS**: External database PaaS runtime dependencies are fully superseded (ADR-002). The platform runs on pure PostgreSQL 18 with versioned SQL migrations (`db/migrations/`) and development seeds (`db/seeds/development.sql`).
 - **Realtime Layer**: Real-time event propagation across KDS, POS, and TV queue display screens is handled by the Go WebSocket Hub (`internal/realtime`) paired with transactional `outbox_events`, scoped strictly by tenant `store_id`.
@@ -27,6 +30,7 @@
   - `checkpoint_completion_target = 0.9`
 
 ## 4. Payment Gateway & Reconciliation Readiness
+
 - **Midtrans Core API**: Direct Core API (`qris`, `bank_transfer`, `gopay`, `shopeepay`, `card`, `cstore`) plus cashier offline methods (`cash`, `static_qris`, `edc`) without Snap popup dependencies.
 - **MDR & Tax Configuration**:
   - Regular QRIS MDR, PB1 restaurant tax, and service charge are stored in Basis Points (`BPS`) per tenant on `stores` (`tax_bps`, `service_bps`, `qris_mdr_bps`).
@@ -35,6 +39,7 @@
 - **Webhook Idempotency**: Enforced via unique index `uq_payment_notification_logs_event_hash` on `(store_id, event_hash)`, where `event_hash` is SHA-256 over provider order ID, transaction ID, status code, transaction/fraud status, and gross amount (migration `000004`).
 
 ## 5. Implementation Status (4-Tier Matrix)
+
 - **Implemented & Tested**:
   - `deploy/docker` & `deploy/nginx`: Multi-stage Dockerfile (`api` + `migrate`), dev & prod Docker Compose, Nginx TLS bootstrap entrypoint, and Let's Encrypt script.
   - `db/migrations` & `cmd/migrate`: PostgreSQL 18 schema (17 tables) with triple-role separation (`postgres`, `mycaffe_migrator`, `mycaffe_app`), RLS (`ENABLE ROW LEVEL SECURITY`), `ON DELETE RESTRICT` + `REVOKE DELETE` on financial history, and additive `orders.request_hash` migration.
@@ -54,6 +59,7 @@
   - Production Midtrans credentials, domain/DNS cutover, and live Hostinger KVM 2 VPS provisioning.
 
 ## 6. Backup & Disaster Recovery
+
 - **Offsite Storage Destination**: Dual-bucket Cloudflare R2 (`mycaffe-media` for public CDN assets and `mycaffe-backups` for private zero-egress database backups).
 - **Automated Script**: `scripts/backup/backup_to_r2.sh` executes `pg_dump`, compresses and encrypts the archive using GPG (`--cipher-algo AES256 --digest-algo SHA512`), generates a `.sha256` checksum manifest, and uploads both to `mycaffe-backups`.
 - **Restore Verification**: `scripts/backup/restore_from_r2.sh` downloads the encrypted backup and `.sha256` manifest, verifies checksum integrity before decryption, and restores into PostgreSQL 18.

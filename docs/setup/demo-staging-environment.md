@@ -4,7 +4,7 @@ A self-healing demo stack that runs on a local workstation and is reachable from
 through a Cloudflare Quick Tunnel. Defined in `deploy/docker/docker-compose.demo.yml`.
 
 | Service | Role | Restart |
-|---------|------|---------|
+| --------- | ------ | --------- |
 | `postgres` | PostgreSQL 18, triple-role init (`00-init-roles.sh`) | `unless-stopped` + healthcheck |
 | `migrate` | Builds `mycaffe-api:demo`, runs `migrate up` then the idempotent development seed | runs once per `up` |
 | `api` | MyCaffe API, `APP_ENV=staging`, Midtrans sandbox | `unless-stopped` + healthcheck |
@@ -42,7 +42,7 @@ container restarts**. For a stable hostname, create a Named Tunnel in the Cloudf
 `APP_ENV=staging` keeps unauthenticated routes fail-closed until Phase 02 ships:
 
 | Route | Demo behavior |
-|-------|---------------|
+| ------- | --------------- |
 | `GET /health/live`, `/health/ready` | `200` |
 | `POST /api/v1/payments/midtrans/webhook` | Live: rejects unsigned/invalid payloads; signed sandbox notifications are processed |
 | `POST /api/v1/auth/staff/login`, `/refresh`, `/logout`, `GET /api/v1/auth/staff/me` | Live (Phase 02.01-B). Dev PIN `482913` for seeded staff; strict limit on `/login` only |

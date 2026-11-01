@@ -7,6 +7,7 @@ Dokumen ini mendefinisikan spesifikasi teknis, arsitektur database, aturan idemp
 ## 1. Masalah Inti yang Diselesaikan pada Phase 01 Sub-task 04
 
 Status terkini pada repositori `mycaffe-backend` (`feature/phase-01-subtask-04-payment-ledger` / **PR #5**):
+
 1. Pembuatan pesanan transaksional (`OrderService.CreateOrder`), reservasi stok (`stock_status = 'reserved'`), pelepasan stok saat kedaluwarsa (`CancelOrExpireUnpaidOrder`), dan komit stok saat lunas (`ConfirmOrderPaymentAndCommitStock`) telah **Implemented & Tested** (merged ke `staging` via **PR #4**).
 2. Klien HTTP Midtrans Core API (`internal/pkg/midtrans/midtrans.go`) dengan `ChargeCoreAPI`, `CheckTransaction`, `SetPaymentIdempotencyKey`, dan verifikasi tanda tangan SHA-512 (`VerifySignature`, `ParseGrossAmountIDR`, `MapMidtransStatus`) telah **Implemented & Tested**.
 3. Migrasi `20261031000004_harden_payment_idempotency_and_webhook_inbox.up.sql`, `PaymentRepository`, `PaymentService` (`InitiatePayment`, `ProcessMidtransWebhook`, `ExpireOverdueOrders`, `ReconcileStalePendingPayments`, `StartReconciliationWorker`), serta aktivasi HTTP `200 OK` pada `POST /api/v1/payments/midtrans/webhook` dan endpoint `POST /api/v1/orders/:id/payments/initiate` (fail-closed `503` di `staging`/`production` hingga Phase 02 Auth) telah **Implemented & Tested**.
@@ -32,6 +33,7 @@ Fungsi tersebut dibuat sebagai `SECURITY DEFINER`, dengan hak akses yang harus d
 **Koreksi penting tentang RLS:** migration awal mengaktifkan `ENABLE ROW LEVEL SECURITY`; migration yang saat ini ada tidak menerapkan `FORCE ROW LEVEL SECURITY`. Role aplikasi `mycaffe_app` bukan pemilik tabel dan tidak memiliki `BYPASSRLS`, sehingga query aplikasi tetap tunduk pada policy tenant. Fungsi `SECURITY DEFINER` menggunakan privilege pemiliknya untuk lookup lintas tenant sebelum transaksi tenant dibuka. Dokumentasi dan acceptance test harus mencerminkan konfigurasi aktual ini, bukan mengklaim `FORCE RLS`.
 
 Alur webhook yang benar:
+
 1. Validasi body, signature SHA-512, currency, nominal, dan status sebelum lookup.
 2. Panggil `resolve_payment_webhook_context(notif.OrderID)` menggunakan koneksi aplikasi. Fungsi hanya boleh dipanggil setelah signature valid.
 3. Jika tidak ditemukan, jangan membuat tenant context dari payload; catat peringatan tanpa membocorkan apakah ID lain valid.

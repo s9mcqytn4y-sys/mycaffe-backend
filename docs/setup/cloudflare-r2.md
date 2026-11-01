@@ -34,6 +34,7 @@ graph TD
 ## 2. Persyaratan & Kredensial
 
 Perangkat yang dibutuhkan:
+
 1. `wrangler` CLI (>= v3.0 / v4.x terpasang via `npm install -g wrangler` atau `npx wrangler`)
 2. `aws` CLI (v2) untuk eksekusi backup/restore via S3-compatible API
 3. Akun Cloudflare aktif dengan R2 diaktifkan.
@@ -61,6 +62,7 @@ R2_BACKUP_PREFIX=backups
 Skrip PowerShell telah disediakan di folder `scripts/cloudflare/`:
 
 ### A. Setup & Konfigurasi Bucket (`setup-r2.ps1`)
+
 Membuat ketiga bucket jika belum ada, mengaktifkan public dev-url pada `mycaffe-media`, dan menerapkan aturan CORS browser:
 
 ```powershell
@@ -68,6 +70,7 @@ powershell -File scripts/cloudflare/setup-r2.ps1
 ```
 
 ### B. Verifikasi Konfigurasi (`verify-r2.ps1`)
+
 Memeriksa status bucket, public access, dan CORS rule:
 
 ```powershell
@@ -81,6 +84,7 @@ powershell -File scripts/cloudflare/verify-r2.ps1
 Untuk mengizinkan upload langsung (presigned PUT) dan pengambilan gambar dari frontend web:
 
 File konfigurasi: `config/cloudflare/r2-media-cors.json`
+
 ```json
 {
   "rules": [
@@ -113,6 +117,7 @@ File konfigurasi: `config/cloudflare/r2-media-cors.json`
 ```
 
 Penerapan manual via CLI:
+
 ```bash
 npx wrangler r2 bucket cors set mycaffe-media --file config/cloudflare/r2-media-cors.json
 ```
@@ -122,17 +127,20 @@ npx wrangler r2 bucket cors set mycaffe-media --file config/cloudflare/r2-media-
 ## 5. Prosedur Backup & Restore PostgreSQL ke R2
 
 ### Keamanan Backup
+
 - Database di-dump menggunakan `pg_dump` format biner.
 - Dienkripsi secara lokal menggunakan GPG symmetric cipher AES-256 (`gpg --symmetric --cipher-algo AES256`).
 - Dihitung manifest SHA-256 menggunakan nama file relatif (bebas dependensi path lokal).
 - Di-upload ke `s3://mycaffe-backups/backups/`.
 
 ### Menjalankan Backup
+
 ```bash
 bash scripts/backup/backup_to_r2.sh
 ```
 
 ### Menjalankan Restore (Drill Recovery)
+>
 > [!CAUTION]
 > Skrip `restore_from_r2.sh` memiliki **destructive safety guard**: secara default memblokir restore ke database non-disposable kecuali nama database mengandung `test`, `temp`, `drill`, atau `recovery`, atau jika `CONFIRM_DESTRUCTIVE_RESTORE=true` diberikan.
 > Selalu uji pemulihan pada database sementara (misal: `mycaffe_recovery_drill`).

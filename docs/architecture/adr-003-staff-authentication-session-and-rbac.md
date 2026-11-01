@@ -1,6 +1,7 @@
 # ADR-003: Staff Authentication, Session Lifecycle & RBAC Policy (Phase 02 Sub-task 01-A)
 
 ## Status
+
 **PROPOSED** — owner decisions recorded on 2026-10-31; awaiting owner approval of this document before increment 02.01-B (implementation) starts.
 
 - **Baseline:** PR #5 head `19bd992` (`feature/phase-01-subtask-04-payment-ledger`).
@@ -15,7 +16,7 @@ Classification used below: *Implemented & Tested*, *Guarded / Fail-Closed*, *Pla
 ### 1.1 What exists today (verified against `19bd992`)
 
 | Area | State | Classification |
-|---|---|---|
+| --- | --- | --- |
 | `users` table | `store_id`, `email`, `full_name`, `role`, `pin_hash`, `is_active`; `UNIQUE(store_id, email)`; `CHECK role IN (owner, cashier, barista, kitchen)`; RLS `store_id = current_store_id()` | Implemented & Tested |
 | `stores` RLS | `USING (id = current_store_id())` — `mycaffe_app` cannot read any store row before tenant context is set | Implemented & Tested |
 | JWT validation (`internal/pkg/auth/token.go`) | HS256 only, required `exp`, `iss=mycaffe-backend`, `aud=mycaffe-pos`, UUID `store_id`/`user_id`, role enum | Implemented & Tested |
@@ -29,7 +30,7 @@ Classification used below: *Implemented & Tested*, *Guarded / Fail-Closed*, *Pla
 ### 1.2 New findings not covered by the design review
 
 | # | Finding | Impact | Disposition |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | F1 | Pre-auth `store_slug → store_id` lookup is impossible for `mycaffe_app` because of `stores` RLS. | Login cannot resolve the tenant without either a bypass or a dedicated resolver. | D5: narrowly-scoped `SECURITY DEFINER` resolver returning only `(id, is_active)`. |
 | F2 | Gin trusted proxies are not configured (`router.SetTrustedProxies` is never called), so `c.ClientIP()` honours any client-supplied `X-Forwarded-For`. | Per-IP login throttling and IP logging can be spoofed/bypassed. | Must be fixed in 02.01-B **before** per-IP limits are relied upon: trust only the Nginx container network, read `X-Real-IP` set by Nginx. |
 | F3 | `GET /ws` accepted the staff JWT via `?token=` query string (dev only). **Removed in 02.01-C.** | Once real access tokens exist, they would land in Nginx access logs and browser history. | 02.01-C removes query-string acceptance of staff access tokens; WebSocket gets a separate one-time ticket in Phase 03. Route stays contained until then. |
@@ -41,12 +42,14 @@ Classification used below: *Implemented & Tested*, *Guarded / Fail-Closed*, *Pla
 ## 2. Decisions
 
 ### D1 — Login identity: `store_slug + email + PIN` *(owner decision 2026-10-31)*
+
 - Endpoint: `POST /api/v1/auth/staff/login` with body `{store_slug, email, pin}`.
 - `email` is normalized to `lower(trim(email))` before lookup; the same normalization is enforced on user create/update.
 - No `password_hash` or `staff_code` column is added. Owner and operational staff use the same mechanism; owner-only actions are protected by RBAC and PIN re-authentication (D6), not by a second credential type.
 - **Accepted trade-off:** a 6-digit PIN is a weak secret (10⁶ space). Security rests on server-side throttling/lockout (D3), not on PIN entropy. Revisit (owner password or TOTP for owner role) if the platform hosts high-value merchants.
 
 ### D2 — PIN policy & hashing *(owner decision: "Ketat")*
+
 - Numeric only, **exactly 6 digits** (owner decision E1, 2026-10-31; previously 6–12). Reject trivially weak PINs at set/reset time: all-identical digits, ascending/descending runs (`123456`, `654321`), and a small denylist (`000000`, `111111`, `121212`, `112233`, birth-year-like `19xx19`).
 - Hash: **argon2id** via `golang.org/x/crypto/argon2` (already in `go.sum` as an indirect dependency at v0.58.0 — promoted to direct, no new module). Parameters: `m=19456 KiB, t=2, p=1`, 16-byte random salt, 32-byte key, stored as a PHC string (`$argon2id$v=19$m=19456,t=2,p=1$<salt>$<hash>`) in the existing `pin_hash VARCHAR(255)`.
 - Parameters are read from the PHC string on verify, so they can be raised later; a successful login with outdated parameters transparently re-hashes.
@@ -56,10 +59,11 @@ Classification used below: *Implemented & Tested*, *Guarded / Fail-Closed*, *Pla
 - Constant-time comparison (`crypto/subtle`) for the derived key.
 
 ### D3 — Throttling & lockout *(owner decision: "Ketat")*
+
 Three layers, outermost first:
 
 | Layer | Key | Limit | Store |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | Nginx | `$binary_remote_addr` on `/api/v1/auth/staff/` | dedicated `auth_limit` zone, 10 r/min, burst 5 | Nginx shared memory |
 | App per-IP | trusted client IP (requires F2 fix) | 20 failed attempts / 15 min sliding window | in-process (single VPS per ADR-002) |
 | Account lockout | `(store_id, user_id)` | **5 consecutive failures → locked 15 min** | persisted on `users` (`failed_pin_attempts`, `locked_until`) |
@@ -73,7 +77,7 @@ Three layers, outermost first:
 ### D4 — Session lifecycle *(owner decision: "Ketat")*
 
 | Property | Value |
-|---|---|
+| --- | --- |
 | Access token | JWT HS256, **TTL 15 min**, sent as `Authorization: Bearer` |
 | Refresh token | opaque, 256-bit `crypto/rand`, base64url; **absolute session lifetime 12 h** (one shift), rotated on every refresh |
 | Server state | `auth_sessions` row per login; only **SHA-256** of refresh tokens is stored |
@@ -85,7 +89,7 @@ Three layers, outermost first:
 **Access-token claims** (replaces `CustomClaims` for issued tokens):
 
 | Claim | Value |
-|---|---|
+| --- | --- |
 | header `kid` | key ID from a key ring (`STAFF_JWT_KEYS`), enabling rotation without a flag day; falls back to `JWT_SECRET_KEY` as `kid=k1` during migration |
 | `iss` | `mycaffe-backend` (unchanged) |
 | `aud` | `mycaffe-pos` (unchanged; reserved for staff only — guest/QR tokens get different audiences) |
@@ -102,26 +106,30 @@ Three layers, outermost first:
 **Config changes:** `STAFF_ACCESS_TOKEN_TTL=15m`, `STAFF_REFRESH_TOKEN_TTL=12h`, `STAFF_MAX_SESSIONS_PER_USER=3`, `STAFF_SESSION_IDLE_TIMEOUT=2h`, `STAFF_PIN_MAX_FAILURES=5`, `STAFF_PIN_LOCKOUT=15m`, `STAFF_JWT_KEYS` (optional key ring). `JWT_EXPIRED_HOURS` is ignored once 02.01-B ships and is removed in a later release. Production validation fails closed if TTLs exceed 1 h (access) / 24 h (refresh).
 
 ### D5 — Pre-authentication tenant resolution
+
 - New function `resolve_store_for_login(p_slug VARCHAR) RETURNS TABLE (store_id UUID, is_active BOOLEAN)`, `SECURITY DEFINER`, `SET search_path = public, pg_temp`, owned by `mycaffe_migrator`, `EXECUTE` granted to `mycaffe_app` only, `REVOKE … FROM PUBLIC`.
 - Returns at most one row, only where `deleted_at IS NULL`; exposes no name, settings, or other columns.
 - All user lookups then run as `mycaffe_app` inside `WithTenantTx(store_id)` under normal RLS. No other RLS bypass is introduced.
 - This follows the existing pattern of `resolve_payment_webhook_context` and `list_stores_with_pending_reconciliation` and must be added to the allow-list in AGENTS.md when implemented.
 
 ### D6 — Sensitive-action PIN re-authentication *(owner decision O1, 2026-10-31)*
+
 The design review flagged a conflict between Module 3 ("cashier must not void/refund without the configured authorization flow") and the brand guide ("cashier can void/refund with mandatory reason"). `docs/architecture/decisions-before-code.md` §6 (already approved) resolves it: *"Sensitive cashier actions require a PIN and mandatory reason logged to append-only `audit_logs`."* Proposed contract:
+
 - Void/refund/stock override/price override/shift-close discrepancy require the **acting user to re-enter their own PIN** plus a non-empty reason in the same request.
 - No owner approval step, no second actor (preserves the "no multi-step approval" rule).
 - Re-auth PIN failures count toward the same D3 lockout counter.
 - Void/refund above a per-store amount threshold (`void_refund_owner_threshold`, default Rp100.000) requires the **owner PIN** instead of the acting cashier PIN (owner decision O1). Discounts above `cashier_max_discount_bps` (default 10%) and every stock override also require the owner PIN (O4).
 
 ### D7 — RBAC: single permission policy, four fixed roles
+
 - Roles stay exactly `owner`, `cashier`, `barista`, `kitchen`. No new role, no per-store custom roles in Phase 02.
 - One Go package (`internal/pkg/rbac`) defines permission constants and a static `role → permission set` map. Handlers declare a required permission via route middleware; services that perform critical operations re-check the permission against the trusted actor (defence in depth).
 - The domain role enum, JWT role validation, and DB `CHECK` stay in lock-step via a unit test that compares all three.
 - **Unresolved powers default to owner-only (fail-closed)** until the owner decides otherwise.
 
 | Permission | owner | cashier | barista | kitchen | Note |
-|---|:-:|:-:|:-:|:-:|---|
+| --- | :-: | :-: | :-: | :-: | --- |
 | `store.settings.manage` | ✓ | | | | |
 | `staff.manage` (create, deactivate, role change, PIN reset, unlock) | ✓ | | | | last active owner cannot be deactivated or demoted |
 | `catalog.manage` | ✓ | | | | |
@@ -146,10 +154,11 @@ The design review flagged a conflict between Module 3 ("cashier must not void/re
 Cross-tenant access is impossible for every role by construction (RLS + trusted `store_id`), not by a permission.
 
 ### D8 — Route authentication classes
+
 Every route gets exactly one class; a route accepting more than one token type is forbidden.
 
 | Class | Credential | Routes |
-|---|---|---|
+| --- | --- | --- |
 | `public` | none | `/health*`, `GET /api/v1/public/stores/{slug}/catalog` (planned) |
 | `public-auth-exchange` | credential in POST body, no-store response, rate-limited | `POST /api/v1/auth/staff/login`, `POST /api/v1/public/table-sessions` (02.01-E) |
 | `staff-refresh` | refresh cookie + `X-CSRF-Protection` | `POST /api/v1/auth/staff/refresh`, `POST /api/v1/auth/staff/logout` |
@@ -163,7 +172,7 @@ Consequence for current routes (02.01-C): `POST /api/v1/orders` and `POST /api/v
 ## 3. Threat model (STRIDE, staff-auth surface)
 
 | Threat | Vector | Control | Test (02.01-B/C) |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | **S**poofing — PIN brute force | repeated login | D3 three-layer limits + lockout; F2 fix | 5 failures lock; 6th correct PIN still `401`; concurrent failures do not exceed threshold |
 | Spoofing — account enumeration | response/timing differences | generic `401`, dummy argon2id | identical body/status for unknown store, unknown email, inactive, locked, wrong PIN |
 | Spoofing — IP spoofing | forged `X-Forwarded-For` | trusted proxies = Nginx only (F2) | header from untrusted peer is ignored |
@@ -182,7 +191,9 @@ Consequence for current routes (02.01-C): `POST /api/v1/orders` and `POST /api/v
 | Elevation — cross-tenant ID substitution | object ID of tenant B | RLS + trusted `store_id` | integration test as `mycaffe_app` returns 404 |
 
 ## 4. Schema delta planned for 02.01-B (not implemented here)
+
 Migration `20261101000005_add_staff_auth_sessions` (additive, reversible):
+
 1. Pre-check: fail the migration with a clear message if `(store_id, lower(email))` duplicates exist; then `UPDATE users SET email = lower(trim(email))` and `CREATE UNIQUE INDEX uq_users_store_email_ci ON users (store_id, lower(email))`.
 2. `users`: add `failed_pin_attempts INT NOT NULL DEFAULT 0 CHECK (>= 0)`, `locked_until TIMESTAMPTZ`, `pin_changed_at TIMESTAMPTZ`.
 3. `auth_sessions`: `id, store_id, user_id, created_at, expires_at, last_refreshed_at, revoked_at, revoked_reason, user_agent_hash, created_ip`; composite FK `(store_id, user_id) → users(store_id, id) ON DELETE CASCADE`; `UNIQUE(store_id, id)`; RLS enabled with the standard `store_isolation_*` policy; index `(store_id, user_id) WHERE revoked_at IS NULL`.
@@ -196,19 +207,20 @@ Down migration drops the new objects and columns, restores the previous audit CH
 ## 5. Implementation sequence after approval
 
 | Increment | Contents | Exit gate |
-|---|---|---|
+| --- | --- | --- |
 | 02.01-B | F2 trusted proxies; argon2id PIN package; migration 000005; login/refresh/logout/me handlers & service; token issuer with `kid`/`typ`/`sid`; config; dev seed hashes | unit + PG18 integration tests as `mycaffe_app` for every row of §3 covering login/session; 3 CI gates green |
 | 02.01-C | auth middleware with per-request revalidation; `internal/pkg/rbac`; trusted actor context; remove `store_id`/`actor_user_id` from bodies; owner staff-management endpoints; F3 query-token removal | table-driven role × permission tests; cross-tenant denial; contained routes still `503` in staging/prod |
 | 02.01-D/E | tables, QR credentials, guest sessions (separate ADR-004) | per design review §10 |
 
 ## 6. Logging rules for this surface
+
 - Never log PIN, refresh token, access token, `Authorization` header, or `Set-Cookie`.
 - Failed-login log line: `request_id`, trusted client IP, `store_slug` (already public in QR URLs), a truncated SHA-256 of the normalized email (for correlation without storing the address), and the outcome category (`invalid_credentials`, `rate_limited`). The internal reason (unknown email vs wrong PIN vs locked) is logged server-side only, never returned.
 
 ## 7. Owner decisions (resolved 2026-10-31)
 
 | # | Decision |
-|---|---|
+| --- | --- |
 | O1 | D6 confirmed: cashier own PIN + reason; above `void_refund_owner_threshold` (default Rp100.000) owner PIN required |
 | O2 | POS frontend and API share one registrable domain; refresh via HttpOnly cookie |
 | O3 | Max 3 active sessions per staff, idle timeout 2 h, absolute 12 h |
@@ -216,4 +228,5 @@ Down migration drops the new objects and columns, restores the previous audit CH
 | O5–O8 | Printed QR: no time expiry, version rotation + per-store emergency pause. Guest: one session per device, 3 h. Recorded in `docs/architecture/decision-register.md`; detailed in ADR-004 (02.01-D/E) |
 
 ## 8. Rollback
+
 This ADR is documentation only. Each later increment is independently reversible: migration 000005 has a tested down migration; new routes are additive; the contained routes remain `503` in staging/production until 02.01-C passes, so reverting 02.01-B/C restores today's behaviour.

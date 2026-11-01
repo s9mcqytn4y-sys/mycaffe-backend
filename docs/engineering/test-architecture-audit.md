@@ -9,7 +9,7 @@ Dokumen ini mendokumentasikan arsitektur pengujian MyCaffe Core POS, strategi ko
 Pemeriksaan pada commit `316cfa9`:
 
 | Test File | Lapisan | Baris | Target Pengujian | Kebutuhan Lingkungan | Status CI |
-|-----------|---------|-------|------------------|----------------------|-----------|
+| ----------- | --------- | ------- | ------------------ | ---------------------- | ----------- |
 | `internal/service/pricing_test.go` | Unit Test Murni | 436 | Kalkulasi pembulatan BPS, modifier sub-addon pricing, line pricing | Tanpa DB / Network | Selalu jalan di job `build-and-test` |
 | `internal/domain/payment_test.go` | Unit Test Murni | 336 | Validasi state machine pembayaran dan enum | Tanpa DB / Network | Selalu jalan di job `build-and-test` |
 | `internal/config/config_test.go` | Unit Test Murni | 271 | Parsing env, default values, validation | Tanpa DB / Network | Selalu jalan di job `build-and-test` |
@@ -26,6 +26,7 @@ Pemeriksaan pada commit `316cfa9`:
 ## 2. Prinsip Konsolidasi & Piramida Pengujian
 
 ### 2.1 Lapisan 1 — Unit Tests Murni (In-Memory, Super Cepat)
+
 - **Karakteristik**: Berjalan tanpa database PostgreSQL, tanpa Docker, dan tanpa network I/O.
 - **Cakupan**:
   - Validasi formula `expected_cash = opening_float + cash_sales - cash_refunds - paid_outs + cash_ins`.
@@ -36,6 +37,7 @@ Pemeriksaan pada commit `316cfa9`:
   - Kalkulasi hash deterministik SHA-256 untuk quote fingerprint dan request hash.
 
 ### 2.2 Lapisan 2 — Repository Integration Tests (PostgreSQL 18 Asli)
+
 - **Karakteristik**: Terhubung ke database uji PostgreSQL 18 menggunakan role non-superuser `mycaffe_app`.
 - **Cakupan**:
   - Penegakan kebijakan Row-Level Security (RLS) antar-tenant.
@@ -44,12 +46,14 @@ Pemeriksaan pada commit `316cfa9`:
   - Trigger integritas ledger finansial (trigger anti-tampering `cash_movements` yang menolak UPDATE dan DELETE).
 
 ### 2.3 Lapisan 3 — Service Integration Tests (ACID Boundaries)
+
 - **Karakteristik**: Menguji batas transaksi atomik (`database.WithTenantTx`).
 - **Cakupan**:
   - Atomisitas pembayaran tunai: sukses pembayaran wajib mencatat entri `cash_movements` (tipe `sale`) dalam transaksi yang sama.
   - Idempotency replay: pengulangan request pembayaran dengan `idempotency_key` yang sama tidak boleh mencatat mutasi kas ganda.
 
 ### 2.4 Lapisan 4 — HTTP Integration Tests
+
 - **Karakteristik**: Menggunakan `httptest.ResponseRecorder` dan router Gin.
 - **Cakupan**:
   - Validasi middleware autentikasi dan penegakan izin RBAC.
@@ -62,7 +66,7 @@ Pemeriksaan pada commit `316cfa9`:
 
 Untuk menghilangkan penamaan berbasis riwayat iterasi/agent, struktur pengujian akan dialihkan secara bertahap pada PR 4b-0 dan PR 4b-1:
 
-```
+```text
 internal/
   service/
     pricing_test.go                     # Pure math & BPS rounding
@@ -83,7 +87,7 @@ internal/
 ## 4. Matriks 30 Skenario Operasional E2E POS Acceptance
 
 | # | Kasus Uji Operasional | Lapisan | Ekspektasi Perilaku Bisnis |
-|---|-----------------------|---------|----------------------------|
+| --- | ----------------------- | --------- | ---------------------------- |
 | 1 | Kasir login & buka shift baru dengan modal awal Rp 100.000 | E2E | Shift berstatus `open`, tercatat `cash_movements` tipe `opening_float` Rp 100.000. |
 | 2 | Dua kasir mencoba membuka drawer yang sama bersamaan | Concurrency | Transaksi kedua ditolak `409 CONFLICT` oleh parsial unique index. |
 | 3 | Kasir memproses transaksi tunai tanpa membuka shift | HTTP / Service | Ditolak seketika dengan `409 NO_OPEN_SHIFT`. Order tetap belum lunas. |

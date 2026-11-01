@@ -9,6 +9,7 @@
 ## 1. Business & Technical Architecture (P10–P14)
 
 ### A. Dua Strategi Split Bill Terverifikasi (P11)
+
 1. **Equal Split (Bagi Rata $N$ Orang)**:
    - Nilai $N$ diwajibkan antara 2 hingga 20 orang.
    - Total tagihan dibagi menjadi $N$ bagian:
@@ -94,6 +95,7 @@ CREATE INDEX IF NOT EXISTS idx_payment_splits_order_status ON payment_splits(sto
 1. **Gunakan Kembali Rute Pembayaran POS**:
    - Dilarang membuat endpoint `/splits/:id/pay` baru.
    - Perluas request payload `POST /api/v1/pos/orders/:id/payments`:
+
      ```json
      {
        "payment_method": "cash", // "cash" | "midtrans_qris" | "edc"
@@ -102,6 +104,7 @@ CREATE INDEX IF NOT EXISTS idx_payment_splits_order_status ON payment_splits(sto
        "cash_tendered_amount": 50000 // jika tunai
      }
      ```
+
    - **Validasi Billing Mode**:
      - Jika `billing_mode == 'open_tab'`: `split_id` adalah **WAJIB**. Jika kosong $\to$ `400 BAD_REQUEST`.
      - Jika `billing_mode == 'pay_first'`: `split_id` **DITOLAK** $\to$ `400 BAD_REQUEST`.
@@ -130,6 +133,7 @@ CREATE INDEX IF NOT EXISTS idx_payment_splits_order_status ON payment_splits(sto
 2. **Peringatan Open Tab pada Penutupan Shift**:
    - Endpoint `POST /pos/shifts/current/close` TIDAK diblokir oleh open tabs.
    - Respons X/Z Report dan ringkasan penutupan shift memuat objek audit:
+
      ```json
      {
        "unsettled_open_tabs_count": 2,
@@ -140,6 +144,7 @@ CREATE INDEX IF NOT EXISTS idx_payment_splits_order_status ON payment_splits(sto
        ]
      }
      ```
+
    - Tab yang melewati pergantian hari bisnis (`business_date < current_business_date`) ditandai dengan flag `is_overdue_business_date: true`.
 
 ---

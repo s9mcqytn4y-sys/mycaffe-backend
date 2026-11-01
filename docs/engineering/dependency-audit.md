@@ -7,6 +7,7 @@ Dokumen ini merekam hasil audit formal dependensi modul Go (`go.mod`, `go.sum`),
 ## 1. Verifikasi Modul Aktual
 
 Audit dieksekusi pada environment lokal:
+
 ```bash
 go version: go 1.27.3 windows/amd64
 go mod verify: all modules verified
@@ -19,7 +20,7 @@ govulncheck ./...: 0 vulnerabilities found affecting code
 ## 2. Inventarisasi Dependensi Langsung (*Direct Dependencies*)
 
 | Modul | Versi | Tanggung Jawab / Fitur | Evaluasi Arsitektural | Lisensi | Status Keputusan |
-|-------|-------|------------------------|-----------------------|---------|------------------|
+| ------- | ------- | ------------------------ | ----------------------- | --------- | ------------------ |
 | `github.com/gin-gonic/gin` | `v1.12.0` | HTTP Web Framework, route routing, middleware context | Performa tinggi, API ergonomis, mature | MIT | **Pertahankan** |
 | `github.com/jackc/pgx/v5` | `v5.11.0` | Driver PostgreSQL natif berperforma tinggi, pgtype, TCP pooling | Driver standar industri untuk PostgreSQL 18 | MIT | **Pertahankan** |
 | `github.com/jmoiron/sqlx` | `v1.4.0` | Ekstensi `database/sql` untuk struct scanning & named queries | Ringan, tanpa overhead query planner ORM | MIT | **Pertahankan** |
@@ -37,6 +38,7 @@ govulncheck ./...: 0 vulnerabilities found affecting code
 ## 3. Evaluasi Dependensi Tak Langsung (*Indirect Dependencies*)
 
 Dependensi tak langsung yang ditarik oleh framework Gin, pgx, dan parser:
+
 - `github.com/bytedance/sonic`: Parser JSON cepat berbasis Assembly (digunakan oleh Gin).
 - `github.com/go-playground/validator/v10`: Engine validasi struct tag.
 - `golang.org/x/net`, `golang.org/x/sys`, `golang.org/x/text`: Sub-repositori inti bahasa Go.

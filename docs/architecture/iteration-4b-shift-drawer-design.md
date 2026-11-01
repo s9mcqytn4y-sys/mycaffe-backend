@@ -9,10 +9,10 @@ Desain ini merealisasikan keputusan bisnis owner **P6, P7, C1, H1** (wawancara k
 ## 1. Business Alignment & Context
 
 | ID | Keputusan | Konsekuensi Arsitektur |
-|----|-----------|------------------------|
+| ---- | ----------- | ------------------------ |
 | **P6** | **1 Drawer per Terminal POS; 1 Open Shift per Drawer** | Relasi 1:1 antara terminal fisik dan laci kas. Pergantian kasir (*handover*) dilakukan via siklus `close` -> `open`. Parsial unique index memastikan tidak ada 2 shift yang terbuka bersamaan di satu laci. Mode `single_auto` didukung untuk kafe kecil (1 shift per hari kerja, modal awal 0). Owner dapat melakukan *force-close* pada shift yang ditinggalkan kasir. |
 | **P7** | **Laci Otomatis Terbuka pada Transaksi Kas; Audit `no_sale`** | Respons transaksi kas (`sale`, `refund`, `paid_out`, `cash_in`, `no_sale`) menyertakan instruksi `open_drawer: true` untuk memicu kick RJ-11 printer ESC/POS. Aksi `no_sale` wajib memiliki alasan tekstual dan diaudit ketat pada X/Z Report. |
-| **C1** | **Blind Cash Count pada Tutup Shift & Toleransi Selisih (Variance)** | Saat menutup shift, kasir memasukkan jumlah uang fisik yang dihitung di laci tanpa melihat nilai *expected cash* sistem (*blind count*). Jika selisih `|counted - expected| > cash_variance_tolerance` toko (default Rp 5.000 pada `store_settings`), penutupan wajib menyertakan alasan dan verifikasi PIN Owner. |
+| **C1** | **Blind Cash Count pada Tutup Shift & Toleransi Selisih (Variance)** | Saat menutup shift, kasir memasukkan jumlah uang fisik yang dihitung di laci tanpa melihat nilai *expected cash* sistem (*blind count*). Jika selisih `\|counted - expected\| > cash_variance_tolerance` toko (default Rp 5.000 pada `store_settings`), penutupan wajib menyertakan alasan dan verifikasi PIN Owner. |
 | **H1** | **Hardware Drawer Kick via ESC/POS** | Backend tidak terhubung langsung ke hardware fisik; backend menyediakan instruksi standar `open_drawer: true` pada payload JSON response kasir, yang diteruskan frontend ke printer via ESC/POS command `ESC p` (`\x1b\x70\x00\x19\xfa`). |
 
 ---
@@ -152,6 +152,7 @@ $$\text{Variance} = \text{Counted Cash} - \text{Expected Cash}$$
 - **Variance = 0**: Kas seimbang (*perfect balance*).
 
 Jika $|\text{Variance}| > \text{store_settings.cash\_variance\_tolerance}$:
+
 - Kasir tidak dapat menutup shift secara mandiri.
 - API mengembalikan error `422 VARIANCE_EXCEEDS_TOLERANCE` jika request tidak menyertakan `owner_pin` yang valid dan `variance_reason`.
 - Verifikasi PIN Owner wajib terikat pada identitas Owner yang terdaftar (`users.role = 'owner'` dan `is_active = true`), bukan verifikasi PIN anonim.
@@ -164,7 +165,7 @@ Jika $|\text{Variance}| > \text{store_settings.cash\_variance\_tolerance}$:
 Semua mutasi kas dicatat dalam tabel `cash_movements` di dalam transaksi database yang sama (`database.WithTenantTx`):
 
 | Mutasi | Sifat | Pengaruh Kas | Kondisi & Validasi |
-|--------|-------|--------------|-------------------|
+| -------- | ------- | -------------- | ------------------- |
 | `opening_float` | Otomatis | $+ \text{amount}$ | Dibuat saat shift dibuka. Modal awal kas di laci kas. |
 | `sale` | Otomatis | $+ \text{amount}$ | Dibuat saat POS menerima cash tender (`POST /pos/orders/{id}/payments` method `cash`). Memeriksa shift aktif; jika tidak ada, gagal `409 NO_OPEN_SHIFT` (kecuali mode `single_auto` auto-open). Mengembalikan `open_drawer: true`. |
 | `refund` | Otomatis | $- \text{amount}$ | Dibuat saat cash refund diproses (Iteration 4d). Memeriksa shift aktif & $\text{amount} \le \text{expected\_cash}$. Mengembalikan `open_drawer: true`. |
@@ -175,7 +176,9 @@ Semua mutasi kas dicatat dalam tabel `cash_movements` di dalam transaksi databas
 | `no_sale` | Manual | $0$ | Buka laci kas tanpa mutasi finansial (e.g. tukar receh). Wajib ada `reason`. Mengembalikan `open_drawer: true`. Dicatat dan diaudit khusus pada X/Z report untuk mencegah fraud. |
 
 ### Aturan Jumlah Transaksi Kas
+
 Jika tagihan Rp 85.000 dibayar dengan uang tunai Rp 100.000:
+
 - `payments.amount`: Rp 85.000 (total tagihan terbayar).
 - `cash_movements.amount`: Rp 85.000 (bersih kas masuk ke laci).
 - Frontend menerima: `{"payment_id": "...", "change": 15000, "open_drawer": true}`.
@@ -186,6 +189,7 @@ Jika tagihan Rp 85.000 dibayar dengan uang tunai Rp 100.000:
 ## 5. X Report vs. Z Report Specifications
 
 ### 5.1 X Report (`GET /pos/shifts/{id}/x-report`)
+
 - **Tujuan**: Laporan bacaan tengah shift (*mid-shift audit / flash report*).
 - **Proteksi Blind Count**: Nilai `expected_cash` di-redact untuk peran kasir agar sifat *blind count* tidak bocor sebelum penutupan. Hanya peran owner yang dapat melihat nilai expected cash berjalan.
 - **Karakteristik**:
@@ -194,6 +198,7 @@ Jika tagihan Rp 85.000 dibayar dengan uang tunai Rp 100.000:
   - Memperlihatkan performa shift berjalan: ringkasan penjualan per metode bayar, total kas masuk/keluar.
 
 ### 5.2 Z Report (`GET /pos/shifts/{id}/z-report`)
+
 - **Tujuan**: Laporan pertanggungjawaban final (*end-of-shift reconciliation*).
 - **Karakteristik**:
   - Dihasilkan saat status shift `closed` atau `force_closed`.
@@ -214,22 +219,26 @@ Jika tagihan Rp 85.000 dibayar dengan uang tunai Rp 100.000:
 Semua endpoint shift berada di bawah prefix `/pos/shifts` dan `/pos/drawers`.
 
 ### 6.1 Laci Kas (`/pos/drawers`)
+
 - `GET /pos/drawers`: Menampilkan daftar laci kas aktif di toko. Izin: `OrderPOSCreate` atau `ShiftOpen`.
 - `POST /pos/drawers`: Menambahkan laci kas baru (terminal baru). Izin: `StoreSettingsManage` (Owner only).
 
 ### 6.2 Siklus Shift (`/pos/shifts`)
+
 - `GET /pos/shifts/current?drawer_id={uuid}`: Mengambil shift yang sedang aktif di laci kas tertentu. Izin: `OrderPOSCreate`.
 - `POST /pos/shifts`: Membuka shift baru (`opening_float`, `drawer_id`, `notes`). Izin: `ShiftOpen` (Kasir/Owner).
 - `POST /pos/shifts/{id}/close`: Menutup shift dengan blind count (`counted_cash`, `notes`, opsional `variance_reason`, `owner_pin`). Izin: `ShiftClose` (Kasir/Owner).
 - `POST /pos/shifts/{id}/force-close`: Force-close shift oleh owner (`reason`, `counted_cash`, `notes`). Izin: `ShiftForceClose` (Owner only).
 
 ### 6.3 Mutasi Kas Manual (`/pos/shifts/{id}/cash-movements`)
+
 - `POST /pos/shifts/{id}/cash-movements`:
   - Body: `{ "movement_type": "paid_out" | "cash_in" | "no_sale", "amount": 25000, "reason": "Beli es batu 2 kantong" }`
   - Izin: `CashMovementCreate`.
   - Respons: `{ "movement": {...}, "open_drawer": true }`.
 
 ### 6.4 Laporan X / Z
+
 - `GET /pos/shifts/{id}/x-report`: Menghasilkan X Report untuk shift terbuka. Izin: `ShiftOpen` / `ShiftClose`.
 - `GET /pos/shifts/{id}/z-report`: Menghasilkan Z Report untuk shift tertutup. Izin: `ShiftClose`.
 
@@ -240,7 +249,7 @@ Semua endpoint shift berada di bawah prefix `/pos/shifts` dan `/pos/drawers`.
 Integrasi langsung pada [internal/pkg/rbac/rbac.go](file:///c:/Projects/myCaffe-backend/internal/pkg/rbac/rbac.go):
 
 | Endpoint / Operasi | Izin RBAC | Kasir (`cashier`) | Barista (`barista`) | Kitchen (`kitchen`) | Pemilik (`owner`) |
-|--------------------|-----------|-------------------|---------------------|---------------------|-------------------|
+| -------------------- | ----------- | ------------------- | --------------------- | --------------------- | ------------------- |
 | Buka Shift (`POST /pos/shifts`) | `ShiftOpen` | Ya | Tidak (403) | Tidak (403) | Ya |
 | Cash Tender di POS | `PaymentTenderDirect` | Ya (bila shift open) | Tidak (403) | Tidak (403) | Ya |
 | Catat Mutasi Kas (`paid_out`/`cash_in`/`no_sale`) | `CashMovementCreate` | Ya | Tidak (403) | Tidak (403) | Ya |
@@ -255,7 +264,7 @@ Integrasi langsung pada [internal/pkg/rbac/rbac.go](file:///c:/Projects/myCaffe-
 ## 8. File-by-File Implementation Plan
 
 | File | Komponen | Tanggung Jawab |
-|------|----------|----------------|
+| ------ | ---------- | ---------------- |
 | `db/migrations/20261101000010_iteration_4b_shift_cash_drawer.up.sql` | Migration Up | Tabel `cash_drawers`, `shifts`, `cash_movements`, RLS policies, trigger anti-tampering. |
 | `db/migrations/20261101000010_iteration_4b_shift_cash_drawer.down.sql` | Migration Down | Teardown bersih dan idempotent rollback. |
 | `internal/domain/shift.go` | Domain Models | Struct `CashDrawer`, `Shift`, `CashMovement`, `XReport`, `ZReport`, enum status & tipe mutasi. |

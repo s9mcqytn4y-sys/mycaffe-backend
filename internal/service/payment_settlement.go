@@ -172,18 +172,9 @@ func (s *PaymentService) applyNonPaidStatusTx(
 	deadlinePassed := order.ExpiresAt != nil && !s.nowFunc().Before(*order.ExpiresAt)
 	if deadlinePassed {
 		if order.StockStatus == domain.OrderStockStatusReserved {
-			products, options := computeOrderStockQuantities(order)
-			for _, productID := range sortedUUIDKeysFromIntMap(products) {
-				if err := s.orderRepo.RestoreProductStock(ctx, tx, order.StoreID, productID, products[productID]); err != nil {
-					return err
-				}
+			if err := releaseOrderStockTx(ctx, tx, s.orderRepo, order); err != nil {
+				return err
 			}
-			for _, optionID := range sortedUUIDKeysFromIntMap(options) {
-				if err := s.orderRepo.RestoreModifierOptionStock(ctx, tx, order.StoreID, optionID, options[optionID]); err != nil {
-					return err
-				}
-			}
-			order.StockStatus = domain.OrderStockStatusReleased
 		}
 		order.Status = domain.OrderStatusCancelled
 		order.PaymentStatus = domain.OrderPaymentStatusExpired

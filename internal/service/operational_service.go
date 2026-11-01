@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,21 +12,20 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/domain"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/auth"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/database"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/rbac"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/repository/postgres"
 )
 
 var (
 	ErrOrderAlreadyCancelled    = errors.New("order is already cancelled")
+	ErrOrderHasPayments         = errors.New("order has settled or pending payments and cannot be voided; use refund instead")
 	ErrOrderNotRefundable       = errors.New("order or payment is not in refundable state")
 	ErrPaymentAlreadyRefunded   = errors.New("payment has already been refunded")
 	ErrOwnerPINRequired         = errors.New("action amount exceeds store threshold; owner PIN is required")
 	ErrInvalidStaffPIN          = errors.New("invalid staff PIN")
 	ErrInsufficientCashInDrawer = errors.New("insufficient cash in active drawer for cash refund")
-	ErrNegativeStockQuantity    = errors.New("stock quantity cannot be negative")
-	ErrEmptyReason              = errors.New("reason is required for operational actions")
+	ErrRefundMethodNotSupported = errors.New("only cash payments can be refunded at the POS until a non-cash refund policy is approved")
+	ErrProductNotTracked        = errors.New("product is not configured for inventory tracking")
 )
 
 type OperationalService struct {
@@ -33,8 +33,8 @@ type OperationalService struct {
 	orderRepo   *postgres.OrderRepository
 	paymentRepo *postgres.PaymentRepository
 	shiftRepo   *postgres.ShiftRepository
-	authRepo    *postgres.AuthRepository
 	settings    *postgres.SettingsRepository
+	pins        *pinGuard
 	nowFunc     func() time.Time
 }
 
@@ -62,15 +62,51 @@ func NewOperationalService(
 	if !ok || settingsRepo == nil {
 		settingsRepo = postgres.NewSettingsRepository()
 	}
-	return &OperationalService{
+	s := &OperationalService{
 		db:          db,
 		orderRepo:   orderRepo,
 		paymentRepo: paymentRepo,
 		shiftRepo:   shiftRepo,
-		authRepo:    authRepo,
 		settings:    settingsRepo,
 		nowFunc:     time.Now,
 	}
+	s.pins = newPINGuard(db, authRepo, func() time.Time { return s.nowFunc() })
+	return s
+}
+
+// authorizeAmount enforces decision O1: the actor's own PIN up to void_refund_owner_threshold, an
+// owner PIN above it. It returns the approving owner's id when an owner PIN was used.
+func (s *OperationalService) authorizeAmount(ctx context.Context, tx *sqlx.Tx, actor *AuthenticatedStaff, amount int64, pin string, ownerPIN *string) (*uuid.UUID, error) {
+	settings, err := s.settings.GetStoreSettings(ctx, tx, actor.Staff.Store.ID)
+	if err != nil {
+		return nil, err
+	}
+	threshold := settings.VoidRefundOwnerThreshold
+	if threshold <= 0 {
+		threshold = 100000 // default Rp 100.000
+	}
+	pin = strings.TrimSpace(pin)
+	if amount > threshold {
+		owner := ""
+		if ownerPIN != nil {
+			owner = strings.TrimSpace(*ownerPIN)
+		}
+		if owner == "" && actor.Staff.Role == domain.RoleOwner {
+			owner = pin
+		}
+		if owner == "" {
+			return nil, ErrOwnerPINRequired
+		}
+		ownerID, err := s.pins.verifyOwner(ctx, tx, actor, owner)
+		if err != nil {
+			return nil, err
+		}
+		return &ownerID, nil
+	}
+	if pin == "" {
+		return nil, &ValidationError{Fields: map[string]string{"pin": "PIN staf wajib diisi"}}
+	}
+	return nil, s.pins.verifyStaff(ctx, tx, actor, pin)
 }
 
 type VoidOrderInput struct {
@@ -84,8 +120,9 @@ type VoidOrderResult struct {
 	Message string        `json:"message"`
 }
 
-// VoidOrder cancels an unpaid order, releases reserved stock, audits the action,
-// and enforces cashier PIN vs owner PIN based on void_refund_owner_threshold (Decision O1).
+// VoidOrder cancels an order that has no money attached (no paid, refunded, pending or authorized
+// payment on the order or its splits), returns the stock it still holds exactly once, cancels its
+// rounds and emits order.cancelled. Authority follows decision O1.
 func (s *OperationalService) VoidOrder(
 	ctx context.Context,
 	actor *AuthenticatedStaff,
@@ -103,105 +140,91 @@ func (s *OperationalService) VoidOrder(
 		return nil, &ValidationError{Fields: map[string]string{"reason": "alasan pembatalan (void) wajib diisi"}}
 	}
 
+	storeID := actor.Staff.Store.ID
 	var result *VoidOrderResult
-	err := database.WithTenantTx(ctx, s.db, actor.Staff.Store.ID, func(tx *sqlx.Tx) error {
-		storeID := actor.Staff.Store.ID
-
+	err := s.pins.withPINTx(ctx, storeID, func(tx *sqlx.Tx) error {
 		order, _, err := s.orderRepo.GetOrderByIDForUpdate(ctx, tx, storeID, orderID)
 		if err != nil {
 			return err
 		}
-
 		if order.Status == domain.OrderStatusCancelled {
 			return ErrOrderAlreadyCancelled
 		}
-		if order.PaymentStatus == domain.OrderPaymentStatusPaid {
-			return ErrOrderAlreadyPaid
+		switch order.PaymentStatus {
+		case domain.OrderPaymentStatusUnpaid, domain.OrderPaymentStatusFailed, domain.OrderPaymentStatusExpired:
+		default:
+			return ErrOrderHasPayments
+		}
+		var moneyAttached bool
+		if err := tx.GetContext(ctx, &moneyAttached, `
+			SELECT EXISTS (
+				SELECT 1 FROM payments
+				WHERE store_id = $1 AND order_id = $2
+				  AND status IN ('pending', 'authorized', 'paid', 'partially_refunded', 'refunded')
+			)
+		`, storeID, order.ID); err != nil {
+			return fmt.Errorf("failed to check order payments: %w", err)
+		}
+		if moneyAttached {
+			return ErrOrderHasPayments
 		}
 
-		// Retrieve store threshold
-		settings, err := s.settings.GetStoreSettings(ctx, tx, storeID)
+		ownerOverrideID, err := s.authorizeAmount(ctx, tx, actor, order.TotalAmount, in.PIN, in.OwnerPIN)
 		if err != nil {
 			return err
 		}
-		threshold := settings.VoidRefundOwnerThreshold
-		if threshold <= 0 {
-			threshold = 100000 // default Rp 100.000
-		}
-
-		var ownerOverrideID *uuid.UUID
-		if order.TotalAmount > threshold {
-			// Owner PIN required
-			ownerPIN := ""
-			if in.OwnerPIN != nil {
-				ownerPIN = strings.TrimSpace(*in.OwnerPIN)
-			}
-			if ownerPIN == "" && actor.Staff.Role == domain.RoleOwner {
-				ownerPIN = strings.TrimSpace(in.PIN)
-			}
-			if ownerPIN == "" {
-				return ErrOwnerPINRequired
-			}
-			verifiedOwnerID, err := s.verifyOwnerPIN(ctx, tx, storeID, ownerPIN)
-			if err != nil {
-				return err
-			}
-			ownerOverrideID = &verifiedOwnerID
-		} else {
-			// Cashier PIN required
-			if strings.TrimSpace(in.PIN) == "" {
-				return &ValidationError{Fields: map[string]string{"pin": "PIN staf wajib diisi"}}
-			}
-			if err := s.verifyStaffPIN(ctx, tx, storeID, actor.Staff.UserID, strings.TrimSpace(in.PIN)); err != nil {
-				return err
-			}
-		}
 
 		now := s.nowFunc().UTC()
-
-		// 1. Update order status to cancelled
-		if _, err := tx.ExecContext(ctx, `
-			UPDATE orders
-			SET status = $1, updated_at = $2
-			WHERE store_id = $3 AND id = $4
-		`, domain.OrderStatusCancelled, now, storeID, order.ID); err != nil {
-			return fmt.Errorf("failed to cancel order: %w", err)
+		previousStock := order.StockStatus
+		if err := releaseOrderStockTx(ctx, tx, s.orderRepo, order); err != nil {
+			return err
 		}
 		order.Status = domain.OrderStatusCancelled
-		order.UpdatedAt = now
-
-		// 2. If tab, cancel any active splits
-		_, _ = tx.ExecContext(ctx, `
-			UPDATE payment_splits
-			SET status = 'cancelled', updated_at = $1
-			WHERE store_id = $2 AND order_id = $3 AND status != 'cancelled'
-		`, now, storeID, order.ID)
-
-		// 3. 100% Stock Restoration for tracked products
-		var items []struct {
-			ProductID uuid.UUID `db:"product_id"`
-			Quantity  int       `db:"quantity"`
+		order.ExpiresAt = nil
+		if err := s.orderRepo.UpdateOrderStatusAndStock(ctx, tx, order); err != nil {
+			return fmt.Errorf("failed to cancel order: %w", err)
 		}
-		if err := tx.SelectContext(ctx, &items, `
-			SELECT product_id, quantity
-			FROM order_items
-			WHERE store_id = $1 AND order_id = $2
-		`, storeID, order.ID); err != nil {
-			return fmt.Errorf("failed to fetch order items for restock: %w", err)
+		if err := s.orderRepo.UpdatePaymentSplitsStatusByOrder(ctx, tx, storeID, order.ID, domain.SplitBillStatusCancelled, false); err != nil {
+			return err
 		}
-		for _, it := range items {
-			if err := s.orderRepo.RestoreProductStock(ctx, tx, storeID, it.ProductID, it.Quantity); err != nil {
-				return fmt.Errorf("failed to restore stock for product %s: %w", it.ProductID, err)
-			}
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE order_rounds SET status = 'cancelled', updated_at = $3
+			WHERE store_id = $1 AND order_id = $2 AND status <> 'cancelled'
+		`, storeID, order.ID, now); err != nil {
+			return fmt.Errorf("failed to cancel order rounds: %w", err)
 		}
 
-		// 4. Audit Log
+		payload, err := json.Marshal(map[string]any{
+			"order_id":       order.ID.String(),
+			"store_id":       storeID.String(),
+			"order_number":   order.OrderNumber,
+			"status":         order.Status,
+			"payment_status": order.PaymentStatus,
+			"stock_status":   order.StockStatus,
+			"reason":         reason,
+			"voided":         true,
+		})
+		if err != nil {
+			return err
+		}
+		if err := s.orderRepo.InsertOutboxEvent(ctx, tx, &domain.OutboxEvent{
+			ID:            uuid.New(),
+			StoreID:       storeID,
+			EventType:     "order.cancelled",
+			AggregateType: "order",
+			AggregateID:   order.ID.String(),
+			Payload:       string(payload),
+		}); err != nil {
+			return err
+		}
+
 		actorID := actor.Staff.UserID
 		auditPayload, _ := json.Marshal(map[string]any{
 			"order_id":          order.ID,
 			"total_amount":      order.TotalAmount,
 			"owner_override_by": ownerOverrideID,
-			"items_restocked":   len(items),
+			"stock_before":      previousStock,
+			"stock_after":       order.StockStatus,
 		})
 		if err := postgres.InsertAuditLog(ctx, tx, &domain.AuditLog{
 			StoreID:     storeID,
@@ -222,7 +245,6 @@ func (s *OperationalService) VoidOrder(
 		}
 		return nil
 	})
-
 	if err != nil {
 		return nil, err
 	}
@@ -230,22 +252,24 @@ func (s *OperationalService) VoidOrder(
 }
 
 type RefundPaymentInput struct {
-	Reason       string  `json:"reason"`
-	PIN          string  `json:"pin"`
-	OwnerPIN     *string `json:"owner_pin"`
-	RestoreStock bool    `json:"restore_stock"` // default true
+	Reason   string  `json:"reason"`
+	PIN      string  `json:"pin"`
+	OwnerPIN *string `json:"owner_pin"`
+	// RestoreStock must be sent explicitly: true returns the goods to stock, false records them as waste.
+	RestoreStock *bool `json:"restore_stock"`
 }
 
 type RefundPaymentResult struct {
-	Payment    *domain.Payment `json:"payment"`
-	Order      *domain.Order   `json:"order"`
-	OpenDrawer bool            `json:"open_drawer"`
-	Message    string          `json:"message"`
+	Payment       *domain.Payment `json:"payment"`
+	Order         *domain.Order   `json:"order"`
+	OpenDrawer    bool            `json:"open_drawer"`
+	StockRestored bool            `json:"stock_restored"`
+	Message       string          `json:"message"`
 }
 
-// RefundPayment processes a full refund for a settled payment or split bill,
-// validates active drawer cash balance for cash refunds, updates payment/order statuses,
-// optionally restores inventory, and records audit and cash movement entries.
+// RefundPayment fully refunds one settled cash payment (a whole order or one split) from the actor's
+// open drawer. Stock comes back only when asked: the split's own lines for a by-item split, otherwise
+// the whole order once, when the refund makes the order fully refunded.
 func (s *OperationalService) RefundPayment(
 	ctx context.Context,
 	actor *AuthenticatedStaff,
@@ -260,192 +284,155 @@ func (s *OperationalService) RefundPayment(
 		return nil, ErrForbidden
 	}
 	reason := strings.TrimSpace(in.Reason)
+	fields := map[string]string{}
 	if reason == "" {
-		return nil, &ValidationError{Fields: map[string]string{"reason": "alasan pengembalian dana (refund) wajib diisi"}}
+		fields["reason"] = "alasan pengembalian dana (refund) wajib diisi"
+	}
+	if in.RestoreStock == nil {
+		fields["restore_stock"] = "wajib diisi: true untuk mengembalikan stok, false bila barang dibuang (waste)"
+	}
+	if len(fields) > 0 {
+		return nil, &ValidationError{Fields: fields}
 	}
 
+	storeID := actor.Staff.Store.ID
 	var result *RefundPaymentResult
-	err := database.WithTenantTx(ctx, s.db, actor.Staff.Store.ID, func(tx *sqlx.Tx) error {
-		storeID := actor.Staff.Store.ID
-
+	err := s.pins.withPINTx(ctx, storeID, func(tx *sqlx.Tx) error {
 		order, _, err := s.orderRepo.GetOrderByIDForUpdate(ctx, tx, storeID, orderID)
 		if err != nil {
 			return err
 		}
-
 		payment, err := s.paymentRepo.GetPaymentByIDForUpdate(ctx, tx, storeID, paymentID)
 		if err != nil {
 			return err
 		}
 		if payment.OrderID != order.ID {
-			return errors.New("payment does not belong to specified order")
+			return postgres.ErrPaymentNotFound
 		}
 		if payment.Status == domain.PaymentStatusRefunded {
 			return ErrPaymentAlreadyRefunded
 		}
-		if payment.Status != domain.PaymentStatusPaid {
+		// Refunds start once the whole bill is settled; a half-paid tab is still being collected.
+		if payment.Status != domain.PaymentStatusPaid ||
+			(order.PaymentStatus != domain.OrderPaymentStatusPaid && order.PaymentStatus != domain.OrderPaymentStatusPartiallyRefunded) {
 			return ErrOrderNotRefundable
 		}
+		if payment.Method != domain.PaymentMethodCash {
+			return ErrRefundMethodNotSupported
+		}
 
-		// Retrieve store threshold
-		settings, err := s.settings.GetStoreSettings(ctx, tx, storeID)
+		ownerOverrideID, err := s.authorizeAmount(ctx, tx, actor, payment.Amount, in.PIN, in.OwnerPIN)
 		if err != nil {
 			return err
 		}
-		threshold := settings.VoidRefundOwnerThreshold
-		if threshold <= 0 {
-			threshold = 100000 // default Rp 100.000
-		}
-
-		var ownerOverrideID *uuid.UUID
-		if payment.Amount > threshold {
-			ownerPIN := ""
-			if in.OwnerPIN != nil {
-				ownerPIN = strings.TrimSpace(*in.OwnerPIN)
-			}
-			if ownerPIN == "" && actor.Staff.Role == domain.RoleOwner {
-				ownerPIN = strings.TrimSpace(in.PIN)
-			}
-			if ownerPIN == "" {
-				return ErrOwnerPINRequired
-			}
-			verifiedOwnerID, err := s.verifyOwnerPIN(ctx, tx, storeID, ownerPIN)
-			if err != nil {
-				return err
-			}
-			ownerOverrideID = &verifiedOwnerID
-		} else {
-			if strings.TrimSpace(in.PIN) == "" {
-				return &ValidationError{Fields: map[string]string{"pin": "PIN staf wajib diisi"}}
-			}
-			if err := s.verifyStaffPIN(ctx, tx, storeID, actor.Staff.UserID, strings.TrimSpace(in.PIN)); err != nil {
-				return err
-			}
-		}
-
 		now := s.nowFunc().UTC()
-		var openDrawer bool
 
-		// If cash payment, enforce active cashier shift and drawer balance check
-		if payment.Method == domain.PaymentMethodCash {
-			// Find active open shift for current cashier
-			activeShift, err := s.shiftRepo.GetActiveShiftForStaff(ctx, tx, storeID, actor.Staff.UserID, nil)
-			if err != nil || activeShift == nil {
-				return ErrNoOpenShift
-			}
-
-			// Calculate current drawer cash balance
-			summary, err := s.shiftRepo.AggregateCashTotalsByShift(ctx, tx, storeID, activeShift.ID)
-			if err != nil {
-				return err
-			}
-			expectedCash := activeShift.OpeningFloat + summary.CashSales + summary.Tips + summary.CashIns - summary.CashRefunds - summary.PaidOuts - summary.StaffMeals
-			if expectedCash < payment.Amount {
-				return ErrInsufficientCashInDrawer
-			}
-
-			// Record cash movement for refund
-			mov := &domain.CashMovement{
-				ID:           uuid.New(),
-				StoreID:      storeID,
-				ShiftID:      activeShift.ID,
-				MovementType: domain.CashMovementRefund,
-				Amount:       payment.Amount,
-				ActorID:      actor.Staff.UserID,
-				Reason:       &reason,
-				OrderID:      &order.ID,
-				PaymentID:    &payment.ID,
-				CreatedAt:    now,
-			}
-			if err := s.shiftRepo.InsertCashMovement(ctx, tx, mov); err != nil {
-				return fmt.Errorf("failed to record cash movement for refund: %w", err)
-			}
-			openDrawer = true
+		activeShift, err := s.shiftRepo.GetActiveShiftForStaff(ctx, tx, storeID, actor.Staff.UserID, nil)
+		if err != nil || activeShift == nil {
+			return ErrNoOpenShift
+		}
+		summary, err := s.shiftRepo.AggregateCashTotalsByShift(ctx, tx, storeID, activeShift.ID)
+		if err != nil {
+			return err
+		}
+		if summary.ExpectedCash(activeShift.OpeningFloat) < payment.Amount {
+			return ErrInsufficientCashInDrawer
+		}
+		if err := s.shiftRepo.InsertCashMovement(ctx, tx, &domain.CashMovement{
+			ID:           uuid.New(),
+			StoreID:      storeID,
+			ShiftID:      activeShift.ID,
+			MovementType: domain.CashMovementRefund,
+			Amount:       payment.Amount,
+			ActorID:      actor.Staff.UserID,
+			Reason:       &reason,
+			OrderID:      &order.ID,
+			PaymentID:    &payment.ID,
+			CreatedAt:    now,
+		}); err != nil {
+			return fmt.Errorf("failed to record cash movement for refund: %w", err)
 		}
 
-		// Update payment status to refunded
 		if _, err := tx.ExecContext(ctx, `
-			UPDATE payments
-			SET status = $1, refunded_amount = $2, updated_at = $3
-			WHERE store_id = $4 AND id = $5
-		`, domain.PaymentStatusRefunded, payment.Amount, now, storeID, payment.ID); err != nil {
+			UPDATE payments SET status = $3, refunded_amount = amount, updated_at = $4
+			WHERE store_id = $1 AND id = $2
+		`, storeID, payment.ID, domain.PaymentStatusRefunded, now); err != nil {
 			return fmt.Errorf("failed to update payment to refunded: %w", err)
 		}
 		payment.Status = domain.PaymentStatusRefunded
 		payment.RefundedAmount = payment.Amount
 		payment.UpdatedAt = now
 
-		// Update split status if bound to split
+		splitMode := domain.SplitModeFull
 		if payment.SplitID != nil {
-			_, _ = tx.ExecContext(ctx, `
-				UPDATE payment_splits
-				SET status = 'refunded', updated_at = $1
-				WHERE store_id = $2 AND id = $3
-			`, now, storeID, *payment.SplitID)
-		}
-
-		// Check whether all non-cancelled splits or payments are refunded
-		var remainingPaidCount int
-		if err := tx.GetContext(ctx, &remainingPaidCount, `
-			SELECT COUNT(*)
-			FROM payments
-			WHERE store_id = $1 AND order_id = $2 AND status = 'paid'
-		`, storeID, order.ID); err != nil {
-			return err
-		}
-
-		if remainingPaidCount == 0 {
-			// Entire order is now refunded
-			_, err = tx.ExecContext(ctx, `
-				UPDATE orders
-				SET payment_status = $1, updated_at = $2
-				WHERE store_id = $3 AND id = $4
-			`, domain.OrderPaymentStatusRefunded, now, storeID, order.ID)
-			if err != nil {
-				return fmt.Errorf("failed to update order to refunded: %w", err)
+			// paid_amount stays gross (like orders.paid_amount); settlement recomputes the order's paid
+			// amount from it, and the refunded value lives on the payment and orders.refunded_amount.
+			if err := tx.GetContext(ctx, &splitMode, `
+				UPDATE payment_splits SET status = 'refunded', updated_at = $3
+				WHERE store_id = $1 AND id = $2
+				RETURNING split_mode
+			`, storeID, *payment.SplitID, now); err != nil {
+				return fmt.Errorf("failed to mark split refunded: %w", err)
 			}
+		}
+
+		order.RefundedAmount += payment.Amount
+		fullyRefunded := order.RefundedAmount >= order.PaidAmount
+		order.PaymentStatus = domain.OrderPaymentStatusPartiallyRefunded
+		if fullyRefunded {
 			order.PaymentStatus = domain.OrderPaymentStatusRefunded
-		} else {
-			// Partially refunded
-			_, err = tx.ExecContext(ctx, `
-				UPDATE orders
-				SET payment_status = $1, updated_at = $2
-				WHERE store_id = $3 AND id = $4
-			`, domain.OrderPaymentStatusPartiallyRefunded, now, storeID, order.ID)
-			if err != nil {
-				return fmt.Errorf("failed to update order to partially refunded: %w", err)
-			}
-			order.PaymentStatus = domain.OrderPaymentStatusPartiallyRefunded
 		}
 
-		// Stock restoration (if requested)
-		if in.RestoreStock {
-			var items []struct {
-				ProductID uuid.UUID `db:"product_id"`
-				Quantity  int       `db:"quantity"`
-			}
-			if err := tx.SelectContext(ctx, &items, `
-				SELECT product_id, quantity
-				FROM order_items
-				WHERE store_id = $1 AND order_id = $2
-			`, storeID, order.ID); err != nil {
-				return fmt.Errorf("failed to fetch order items for restock: %w", err)
-			}
-			for _, it := range items {
-				if err := s.orderRepo.RestoreProductStock(ctx, tx, storeID, it.ProductID, it.Quantity); err != nil {
-					return fmt.Errorf("failed to restore stock for product %s: %w", it.ProductID, err)
+		stockRestored := false
+		if *in.RestoreStock {
+			switch {
+			case splitMode == domain.SplitModeByItem:
+				var lines []struct {
+					OrderItemID uuid.UUID `db:"order_item_id"`
+					Quantity    int       `db:"quantity"`
 				}
+				if err := tx.SelectContext(ctx, &lines, `
+					SELECT order_item_id, quantity FROM payment_split_items
+					WHERE store_id = $1 AND split_id = $2
+				`, storeID, *payment.SplitID); err != nil {
+					return fmt.Errorf("failed to load split items for restock: %w", err)
+				}
+				lineQty := make(map[uuid.UUID]int, len(lines))
+				for _, l := range lines {
+					lineQty[l.OrderItemID] += l.Quantity
+				}
+				products, options := computeItemStockQuantities(order, lineQty)
+				if err := restoreStockTx(ctx, tx, s.orderRepo, storeID, products, options); err != nil {
+					return err
+				}
+				stockRestored = len(lines) > 0
+			case fullyRefunded:
+				before := order.StockStatus
+				if err := releaseOrderStockTx(ctx, tx, s.orderRepo, order); err != nil {
+					return err
+				}
+				stockRestored = order.StockStatus != before
 			}
 		}
 
-		// Audit Log
+		if err := tx.QueryRowxContext(ctx, `
+			UPDATE orders SET payment_status = $3, refunded_amount = $4, stock_status = $5, updated_at = $6
+			WHERE store_id = $1 AND id = $2
+			RETURNING updated_at
+		`, storeID, order.ID, order.PaymentStatus, order.RefundedAmount, order.StockStatus, now).Scan(&order.UpdatedAt); err != nil {
+			return fmt.Errorf("failed to update refunded order: %w", err)
+		}
+
 		actorID := actor.Staff.UserID
 		auditPayload, _ := json.Marshal(map[string]any{
 			"payment_id":        payment.ID,
 			"order_id":          order.ID,
+			"split_id":          payment.SplitID,
+			"split_mode":        splitMode,
 			"amount":            payment.Amount,
 			"method":            payment.Method,
-			"restore_stock":     in.RestoreStock,
+			"restore_stock":     *in.RestoreStock,
+			"stock_restored":    stockRestored,
 			"owner_override_by": ownerOverrideID,
 		})
 		if err := postgres.InsertAuditLog(ctx, tx, &domain.AuditLog{
@@ -462,14 +449,14 @@ func (s *OperationalService) RefundPayment(
 		}
 
 		result = &RefundPaymentResult{
-			Payment:    payment,
-			Order:      order,
-			OpenDrawer: openDrawer,
-			Message:    "Pengembalian dana (refund) berhasil diproses.",
+			Payment:       payment,
+			Order:         order,
+			OpenDrawer:    true,
+			StockRestored: stockRestored,
+			Message:       "Pengembalian dana (refund) tunai berhasil diproses.",
 		}
 		return nil
 	})
-
 	if err != nil {
 		return nil, err
 	}
@@ -480,6 +467,8 @@ type StockOverrideInput struct {
 	NewQuantity int    `json:"new_quantity"`
 	Reason      string `json:"reason"`
 	OwnerPIN    string `json:"owner_pin"`
+	// EnableTracking must be true to start tracking a product that is not tracked yet.
+	EnableTracking bool `json:"enable_tracking"`
 }
 
 type StockOverrideResult struct {
@@ -518,11 +507,11 @@ func (s *OperationalService) OverrideStock(
 	}
 
 	var result *StockOverrideResult
-	err := database.WithTenantTx(ctx, s.db, actor.Staff.Store.ID, func(tx *sqlx.Tx) error {
+	err := s.pins.withPINTx(ctx, actor.Staff.Store.ID, func(tx *sqlx.Tx) error {
 		storeID := actor.Staff.Store.ID
 
 		// Verify Owner PIN unconditionally (Decision O4)
-		verifiedOwnerID, err := s.verifyOwnerPIN(ctx, tx, storeID, ownerPIN)
+		verifiedOwnerID, err := s.pins.verifyOwner(ctx, tx, actor, ownerPIN)
 		if err != nil {
 			return err
 		}
@@ -540,7 +529,13 @@ func (s *OperationalService) OverrideStock(
 			FOR UPDATE
 		`
 		if err := tx.GetContext(ctx, &product, query, storeID, productID); err != nil {
-			return errors.New("product not found")
+			if errors.Is(err, sql.ErrNoRows) {
+				return ErrProductNotFound
+			}
+			return fmt.Errorf("failed to load product for stock override: %w", err)
+		}
+		if !product.TrackStock && !in.EnableTracking {
+			return ErrProductNotTracked
 		}
 
 		now := s.nowFunc().UTC()
@@ -564,6 +559,7 @@ func (s *OperationalService) OverrideStock(
 			"new_quantity":      in.NewQuantity,
 			"delta":             delta,
 			"owner_verified_by": verifiedOwnerID,
+			"tracking_enabled":  !product.TrackStock,
 		})
 		if err := postgres.InsertAuditLog(ctx, tx, &domain.AuditLog{
 			StoreID:     storeID,
@@ -593,51 +589,4 @@ func (s *OperationalService) OverrideStock(
 		return nil, err
 	}
 	return result, nil
-}
-
-// verifyStaffPIN verifies the given PIN against the staff member's hashed PIN.
-func (s *OperationalService) verifyStaffPIN(ctx context.Context, tx *sqlx.Tx, storeID, staffUserID uuid.UUID, pin string) error {
-	var user struct {
-		PinHash     *string    `db:"pin_hash"`
-		LockedUntil *time.Time `db:"locked_until"`
-		IsActive    bool       `db:"is_active"`
-	}
-	query := `SELECT pin_hash, locked_until, is_active FROM users WHERE store_id = $1 AND id = $2`
-	if err := tx.GetContext(ctx, &user, query, storeID, staffUserID); err != nil {
-		return err
-	}
-	if !user.IsActive {
-		return errors.New("akun staf tidak aktif")
-	}
-	now := s.nowFunc().UTC()
-	if user.LockedUntil != nil && user.LockedUntil.After(now) {
-		return errors.New("akun staf sedang terkunci karena salah PIN")
-	}
-	if user.PinHash == nil || *user.PinHash == "" {
-		return errors.New("PIN staf belum diatur")
-	}
-	ok, err := auth.VerifyPIN(pin, *user.PinHash)
-	if err != nil || !ok {
-		return ErrInvalidStaffPIN
-	}
-	return nil
-}
-
-// verifyOwnerPIN searches for an active owner of the store whose PIN matches.
-func (s *OperationalService) verifyOwnerPIN(ctx context.Context, tx *sqlx.Tx, storeID uuid.UUID, pin string) (uuid.UUID, error) {
-	owners, err := s.authRepo.ListActiveOwners(ctx, tx, storeID)
-	if err != nil {
-		return uuid.Nil, err
-	}
-	now := s.nowFunc().UTC()
-	for _, owner := range owners {
-		if owner.LockedUntil != nil && owner.LockedUntil.After(now) {
-			continue
-		}
-		ok, err := auth.VerifyPIN(pin, owner.PinHash)
-		if err == nil && ok {
-			return owner.ID, nil
-		}
-	}
-	return uuid.Nil, ErrInvalidOwnerPIN
 }

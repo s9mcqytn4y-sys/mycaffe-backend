@@ -92,19 +92,9 @@ func (s *OrderService) CancelOrExpireUnpaidOrder(
 
 		// Restore stock only if currently reserved.
 		if order.StockStatus == domain.OrderStockStatusReserved {
-			prodRestores, optRestores := computeOrderStockQuantities(order)
-
-			for _, prodID := range sortedUUIDKeysFromIntMap(prodRestores) {
-				if err := s.repo.RestoreProductStock(ctx, tx, trustedStoreID, prodID, prodRestores[prodID]); err != nil {
-					return err
-				}
+			if err := releaseOrderStockTx(ctx, tx, s.repo, order); err != nil {
+				return err
 			}
-			for _, optID := range sortedUUIDKeysFromIntMap(optRestores) {
-				if err := s.repo.RestoreModifierOptionStock(ctx, tx, trustedStoreID, optID, optRestores[optID]); err != nil {
-					return err
-				}
-			}
-			order.StockStatus = domain.OrderStockStatusReleased
 		}
 
 		order.Status = domain.OrderStatusCancelled
@@ -258,24 +248,67 @@ func (s *OrderService) ConfirmOrderPaymentAndCommitStock(
 }
 
 func computeOrderStockQuantities(order *domain.Order) (map[uuid.UUID]int, map[uuid.UUID]int) {
+	return computeItemStockQuantities(order, nil)
+}
+
+// computeItemStockQuantities sums product and modifier-option stock for the order's lines; when
+// lineQty is non-nil only those order_item ids count, with the given quantity (by-item split refunds).
+func computeItemStockQuantities(order *domain.Order, lineQty map[uuid.UUID]int) (map[uuid.UUID]int, map[uuid.UUID]int) {
 	prodQuantities := make(map[uuid.UUID]int)
 	optQuantities := make(map[uuid.UUID]int)
 	if order == nil {
 		return prodQuantities, optQuantities
 	}
 	for _, item := range order.Items {
+		qty := item.Quantity
+		if lineQty != nil {
+			qty = min(lineQty[item.ID], item.Quantity)
+		}
+		if qty <= 0 {
+			continue
+		}
 		if item.ProductID != nil && *item.ProductID != uuid.Nil {
-			prodQuantities[*item.ProductID] += item.Quantity
+			prodQuantities[*item.ProductID] += qty
 		}
 		for _, opt := range item.Options {
 			if opt.ModifierOptionID != nil && *opt.ModifierOptionID != uuid.Nil {
 				// Note: opt.Quantity on persisted order_item_options already stores the effective per-item option quantity
 				// (for parent options: modReq.Quantity; for child sub-addons: parentOptionQuantity * subReq.Quantity).
-				optQuantities[*opt.ModifierOptionID] += opt.Quantity * item.Quantity
+				optQuantities[*opt.ModifierOptionID] += opt.Quantity * qty
 			}
 		}
 	}
 	return prodQuantities, optQuantities
+}
+
+// restoreStockTx adds the given product and modifier-option quantities back to the catalog.
+func restoreStockTx(ctx context.Context, tx *sqlx.Tx, repo *postgres.OrderRepository, storeID uuid.UUID, products, options map[uuid.UUID]int) error {
+	for _, productID := range sortedUUIDKeysFromIntMap(products) {
+		if err := repo.RestoreProductStock(ctx, tx, storeID, productID, products[productID]); err != nil {
+			return err
+		}
+	}
+	for _, optionID := range sortedUUIDKeysFromIntMap(options) {
+		if err := repo.RestoreModifierOptionStock(ctx, tx, storeID, optionID, options[optionID]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// releaseOrderStockTx returns all stock the order still holds (reserved for unpaid orders and tab
+// rounds, committed once paid) and marks it released, so a second call or a later cancel is a no-op.
+// The caller persists order.StockStatus.
+func releaseOrderStockTx(ctx context.Context, tx *sqlx.Tx, repo *postgres.OrderRepository, order *domain.Order) error {
+	if order.StockStatus != domain.OrderStockStatusReserved && order.StockStatus != domain.OrderStockStatusCommitted {
+		return nil
+	}
+	products, options := computeOrderStockQuantities(order)
+	if err := restoreStockTx(ctx, tx, repo, order.StoreID, products, options); err != nil {
+		return err
+	}
+	order.StockStatus = domain.OrderStockStatusReleased
+	return nil
 }
 
 func resolveStoreBusinessDates(now time.Time, tzName string) (string, string) {

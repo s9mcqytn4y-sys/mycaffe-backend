@@ -96,7 +96,7 @@ refused (refund flow); tab with zero items cannot close; tab older than the busi
 | -- | ------ | -------- |
 | When | before payment (line or whole order) | after payment (line, partial qty, or whole) |
 | Stock | ticket not started ⇒ restock; preparing/ready ⇒ `waste` movement | optional restock flag |
-| Money | none | cash from the open drawer (needs open shift); non-cash: Midtrans API where supported, else manual transfer recorded |
+| Money | none | cash from the open drawer (needs open shift); non-cash refused (409) until decision RF1 is approved |
 | Authority | own PIN + reason; above `void_refund_owner_threshold` ⇒ owner PIN | same, plus time window: cashier same business day; owner ≤ 7 days |
 | Limits | — | total refunds ≤ paid amount; refund method defaults to the original |
 | Audit | `VOID_ORDER` | `REFUND` |
@@ -104,6 +104,11 @@ refused (refund flow); tab with zero items cannot close; tab older than the busi
 Reasons (structured): salah input, pelanggan batal, item habis, komplain, lainnya (free text required).
 Paid orders are never voided. Refund updates `payment_status` (`partially_refunded`/`refunded`) separately
 from `order_status`.
+
+Hotfix v0.4.3 (decisions HF1–HF6 in the [decision register](decision-register.md)) tightened these rules:
+void needs an order with no money attached, stock returns exactly once through one shared helper
+(modifier options included), refund restock is explicit and split-aware, and every re-entered PIN
+shares the login lockout.
 
 ## 6. Decisions recorded
 

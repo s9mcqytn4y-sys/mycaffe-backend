@@ -1409,6 +1409,184 @@ paths:
         "409":
           description: Tab has already settled payments or pending payment attempts
 
+  /api/v1/pos/orders/{id}/void:
+    post:
+      tags: [POS Operational]
+      operationId: voidOrder
+      summary: Cancel unpaid order, restore product stock, and audit action (Iteration 4d)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                  example: "Pelanggan membatalkan pesanan sebelum dibuat"
+                pin:
+                  type: string
+                  example: "123456"
+                owner_pin:
+                  type: string
+                  example: "482913"
+      responses:
+        "200":
+          description: Order voided successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  order:
+                    $ref: "#/components/schemas/Order"
+                  message:
+                    type: string
+        "400":
+          description: Reason missing or invalid order state
+        "401":
+          description: Invalid staff or owner PIN
+        "403":
+          description: Forbidden - lacks order.void permission
+        "422":
+          description: Order total exceeds threshold and owner_pin was not provided
+
+  /api/v1/pos/orders/{id}/payments/{payment_id}/refund:
+    post:
+      tags: [POS Operational]
+      operationId: refundPayment
+      summary: Refund settled payment or split bill, adjust drawer cash ledger, and audit action (Iteration 4d)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: payment_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                  example: "Kopi tumpah oleh kasir, refund tunai"
+                pin:
+                  type: string
+                  example: "123456"
+                owner_pin:
+                  type: string
+                  example: "482913"
+                restore_stock:
+                  type: boolean
+                  default: true
+      responses:
+        "200":
+          description: Refund processed successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  payment:
+                    $ref: "#/components/schemas/Payment"
+                  order:
+                    $ref: "#/components/schemas/Order"
+                  open_drawer:
+                    type: boolean
+                  message:
+                    type: string
+        "401":
+          description: Invalid staff or owner PIN
+        "409":
+          description: No active cashier shift or insufficient drawer cash
+        "422":
+          description: Amount exceeds threshold and owner_pin was not provided
+
+  /api/v1/pos/products/{id}/stock-override:
+    post:
+      tags: [POS Operational]
+      operationId: overrideStock
+      summary: Manually adjust product physical stock with mandatory Owner PIN authorization (Iteration 4d)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [new_quantity, reason, owner_pin]
+              properties:
+                new_quantity:
+                  type: integer
+                  minimum: 0
+                  example: 25
+                reason:
+                  type: string
+                  example: "Stock opname fisik harian penutupan"
+                owner_pin:
+                  type: string
+                  example: "482913"
+      responses:
+        "200":
+          description: Stock adjusted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  product_id:
+                    type: string
+                    format: uuid
+                  product_name:
+                    type: string
+                  previous_quantity:
+                    type: integer
+                  new_quantity:
+                    type: integer
+                  delta:
+                    type: integer
+                  message:
+                    type: string
+        "401":
+          description: Invalid owner PIN
+        "403":
+          description: Forbidden - lacks stock.override permission
+        "422":
+          description: Negative quantity or missing reason/PIN
+
   /api/v1/store/settings:
     get:
       tags: [Staff]

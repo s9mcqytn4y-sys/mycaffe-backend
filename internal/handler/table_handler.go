@@ -1,0 +1,141 @@
+package handler
+
+import (
+	"errors"
+	"net/http"
+
+	"github.com/gin-gonic/gin"
+	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/service"
+)
+
+// TableHandler serves tables, table sessions and QR resolution (iteration 5a).
+type TableHandler struct {
+	tables *service.TableService
+}
+
+func NewTableHandler(tables *service.TableService) *TableHandler {
+	return &TableHandler{tables: tables}
+}
+
+func writeTableError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, service.ErrTableNotFound):
+		authError(c, http.StatusNotFound, "NOT_FOUND", "Meja tidak ditemukan.")
+	case errors.Is(err, service.ErrTableSessionOpen):
+		authError(c, http.StatusConflict, "TABLE_SESSION_OPEN", "Meja masih memiliki sesi aktif. Kosongkan meja terlebih dahulu.")
+	case errors.Is(err, service.ErrTableHasUnpaidOrders):
+		authError(c, http.StatusConflict, "TABLE_HAS_UNPAID_ORDERS", "Masih ada pesanan meja ini yang belum dibayar.")
+	case errors.Is(err, service.ErrTableInactive):
+		authError(c, http.StatusConflict, "TABLE_INACTIVE", "Meja sedang tidak aktif.")
+	default:
+		writeServiceError(c, err)
+	}
+}
+
+// ListTables handles GET /api/v1/pos/tables (any staff).
+func (h *TableHandler) ListTables(c *gin.Context) {
+	board, err := h.tables.ListTables(c.Request.Context(), currentStaff(c))
+	if err != nil {
+		writeTableError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"tables": board})
+}
+
+// CreateTable handles POST /api/v1/pos/tables (table.manage).
+func (h *TableHandler) CreateTable(c *gin.Context) {
+	var in service.TableInput
+	if !bindJSON(c, &in) {
+		return
+	}
+	t, err := h.tables.CreateTable(c.Request.Context(), currentStaff(c), in)
+	if err != nil {
+		writeTableError(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, t)
+}
+
+// UpdateTable handles PATCH /api/v1/pos/tables/:id (table.manage).
+func (h *TableHandler) UpdateTable(c *gin.Context) {
+	id, ok := pathID(c, "id")
+	if !ok {
+		return
+	}
+	var in service.TableInput
+	if !bindJSON(c, &in) {
+		return
+	}
+	t, err := h.tables.UpdateTable(c.Request.Context(), currentStaff(c), id, in)
+	if err != nil {
+		writeTableError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, t)
+}
+
+// ArchiveTable handles POST /api/v1/pos/tables/:id/archive (table.manage).
+func (h *TableHandler) ArchiveTable(c *gin.Context) {
+	id, ok := pathID(c, "id")
+	if !ok {
+		return
+	}
+	if err := h.tables.ArchiveTable(c.Request.Context(), currentStaff(c), id); err != nil {
+		writeTableError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+// RotateQR handles POST /api/v1/pos/tables/:id/rotate-qr (table.qr.manage).
+func (h *TableHandler) RotateQR(c *gin.Context) {
+	id, ok := pathID(c, "id")
+	if !ok {
+		return
+	}
+	t, err := h.tables.RotateQR(c.Request.Context(), currentStaff(c), id)
+	if err != nil {
+		writeTableError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, t)
+}
+
+// OpenSession handles POST /api/v1/pos/tables/:id/sessions (tab.manage).
+func (h *TableHandler) OpenSession(c *gin.Context) {
+	id, ok := pathID(c, "id")
+	if !ok {
+		return
+	}
+	session, err := h.tables.OpenSession(c.Request.Context(), currentStaff(c), id)
+	if err != nil {
+		writeTableError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, session)
+}
+
+// CloseSession handles POST /api/v1/pos/table-sessions/:id/close (tab.manage).
+func (h *TableHandler) CloseSession(c *gin.Context) {
+	id, ok := pathID(c, "id")
+	if !ok {
+		return
+	}
+	session, err := h.tables.CloseSession(c.Request.Context(), currentStaff(c), id)
+	if err != nil {
+		writeTableError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, session)
+}
+
+// ResolveQR handles GET /api/v1/public/qr/:token (public, decision QR1).
+func (h *TableHandler) ResolveQR(c *gin.Context) {
+	table, err := h.tables.ResolveQR(c.Request.Context(), c.Param("token"))
+	if err != nil {
+		writeTableError(c, err)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, table)
+}

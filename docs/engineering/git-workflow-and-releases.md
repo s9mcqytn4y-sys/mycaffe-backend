@@ -13,7 +13,7 @@ feature/* (fitur / bugfix baru)
 staging (branch integrasi pra-rilis)
     │
     ▼ (Pull Request Promosi + PERSETUJUAN EKSPLISIT OWNER + Merge Commit --no-ff)
-main (branch produksi terlindungi + Immutable GHCR Image)
+main (branch produksi + Immutable GHCR Image; tanpa proteksi teknis, lihat §3)
 ```
 
 1. **`feature/*` $\to$ `staging`**:
@@ -59,3 +59,16 @@ main (branch produksi terlindungi + Immutable GHCR Image)
    git tag -a vX.Y.Z -m "Release vX.Y.Z: <Summary>"
    git push origin vX.Y.Z
    ```
+
+---
+
+## 3. Tanpa Branch Protection Teknis (keputusan IN2, 2026-11-02)
+
+Repo privat ini memakai paket GitHub gratis, sehingga ruleset/branch protection tidak tersedia (API 403). Owner memilih disiplin manual. Aturan yang berlaku:
+
+1. Tidak ada push langsung ke `staging` atau `main`; setiap perubahan lewat Pull Request.
+2. Tidak ada merge (ke `staging` maupun `main`) sebelum 3 job CI lulus **dan** Owner menyetujui secara eksplisit di chat.
+3. Dilarang `git push --force` ke `staging`/`main` dan dilarang menghapus kedua branch itu.
+4. Setiap promosi ke `main` dicek ulang sesudahnya: `gh pr list --state merged --base main` harus cocok dengan persetujuan yang tercatat.
+
+Risiko yang diterima: merge tanpa persetujuan (seperti PR #23) tetap mungkin secara teknis; aturan di atas hanya mendeteksi, tidak mencegah.

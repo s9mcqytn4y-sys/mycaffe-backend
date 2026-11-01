@@ -160,6 +160,17 @@ Midtrans facts checked against docs.midtrans.com on 2026-11-02: QRIS is charged 
 | RF1-e | Refund time window (closes gap P5) | Cashier: same business day only. Owner: up to 7 days. Older: no refund in the system. Values in `store_settings` |
 | RF1-f | Provider confirmation | API 200 → `refund_pending`; `refunded` only after the `bank_confirmed_at` notification or a confirming status check. Existing `void_refund_owner_threshold` applies to every method |
 
+## Infrastructure & operations (recorded 2026-11-02, tenth interview)
+
+Status: decided, implementation planned (audit tickets P0-03, P0-04, P0-07, P2-04).
+
+| ID | Decision | Approved option |
+|----|----------|-----------------|
+| IN1 | Production ingress | **Named Cloudflare Tunnel** per client VPS, same pattern as the demo (I2): no inbound ports except SSH from admin IPs, TLS at the Cloudflare edge, client IP from `CF-Connecting-IP` (Nginx `real_ip_header` + `set_real_ip_from` the cloudflared container network; `TRUSTED_PROXIES` set), certbot removed. Changing `docker-compose.prod.yml` and `nginx.prod.conf` still needs approval as a deployment change. If the tunnel is down, cash and static QRIS continue through ADR-005 offline mode |
+| IN2 | Branch protection | **Stay on the free plan; manual discipline.** No technical branch protection (private repo, API 403). Rules in [git-workflow-and-releases.md](../engineering/git-workflow-and-releases.md) §3 apply; the risk of a merge without approval (PR #23) is accepted by the owner |
+| IN3 | Monitoring & alerting | **Grafana Cloud free tier**: external uptime check on `/health/ready` plus metrics via remote write; technical alerts to the operator's Telegram group and email. Store owners get business notifications from MyCaffe only, not technical alerts |
+| IN4 | Accounting export | **Neutral CSV first**: generic journal columns (date, account, debit, credit, reference) with configurable account mapping; adapters for Jurnal/Accurate only when a client uses one |
+
 ## Awaiting owner approval
 
 None.
@@ -175,5 +186,5 @@ None.
 
 | Topic | Needed for | Default until decided |
 | ------- | ----------- | ----------------------- |
-| Production domain name & DNS | Named Cloudflare Tunnel / TLS, cookie domain (O2) | Quick Tunnel URL for demo only |
+| Production domain name | Tunnel hostname (IN1), cookie domain (O2) | Quick Tunnel URL for demo only |
 | Midtrans production credentials & VPS provisioning | Production cutover | Sandbox only |

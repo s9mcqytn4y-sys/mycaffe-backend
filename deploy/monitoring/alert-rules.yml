@@ -1,0 +1,118 @@
+# MyCaffe technical alerts (decision IN3), Prometheus rule format. Load into Grafana Cloud with
+# mimirtool (docs/setup/monitoring.md); unit tests: alert-rules.test.yml (`promtool test rules`, CI).
+# Routing: severity=critical -> Telegram + email, severity=warning -> Telegram.
+groups:
+  - name: mycaffe-api
+    rules:
+      - alert: MyCaffeMetricsMissing
+        expr: absent(up{job="mycaffe-api"})
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Tidak ada metrik API masuk selama 10 menit (Alloy mati, VPS mati, atau kredensial Grafana salah)."
+
+      - alert: MyCaffeAPIDown
+        expr: up{job="mycaffe-api"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "API {{ $labels.client }} tidak bisa di-scrape selama 2 menit."
+
+      - alert: MyCaffeHigh5xxRate
+        # The traffic floor (3 req/min) keeps one failed request at night from paging anyone.
+        expr: |
+          sum by (client) (rate(mycaffe_http_requests_total{status=~"5.."}[5m]))
+            / sum by (client) (rate(mycaffe_http_requests_total[5m])) > 0.05
+          and sum by (client) (rate(mycaffe_http_requests_total[5m])) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Lebih dari 5% request API {{ $labels.client }} gagal 5xx selama 5 menit."
+
+      - alert: MyCaffeSlowRequests
+        # /ws is a long-lived WebSocket; its duration is connection lifetime, not latency.
+        expr: |
+          histogram_quantile(0.95, sum by (client, le) (rate(mycaffe_http_request_duration_seconds_bucket{route!="/ws"}[5m]))) > 1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "p95 latensi API {{ $labels.client }} di atas 1 detik selama 10 menit."
+
+      - alert: MyCaffeWorkerStalled
+        # Intervals: outbox_relay 2s, email 10s, reconciliation 30s. A gauge appears after a worker's first success.
+        expr: time() - mycaffe_worker_last_success_timestamp_seconds > 300
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Worker {{ $labels.worker }} di {{ $labels.client }} tidak menyelesaikan siklus selama lebih dari 5 menit."
+
+      - alert: MyCaffeEmailPermanentFailure
+        expr: increase(mycaffe_email_send_failures_total{permanent="true"}[30m]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "Ada email di {{ $labels.client }} yang gagal permanen (email_outbox.status='failed')."
+
+      - alert: MyCaffeDBPoolSaturated
+        expr: go_sql_in_use_connections / (go_sql_max_open_connections > 0) > 0.9
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Pool koneksi DB {{ $labels.client }} terpakai di atas 90% selama 5 menit."
+
+  - name: mycaffe-host
+    rules:
+      - alert: MyCaffeBackupStale
+        expr: time() - mycaffe_backup_last_success_timestamp_seconds > 7200
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Backup terakhir {{ $labels.client }} sudah lebih dari 2 jam (RPO 1 jam terlampaui)."
+
+      - alert: MyCaffeBackupMetricMissing
+        # Never written since install, or the textfile directory is not mounted.
+        expr: absent(mycaffe_backup_last_success_timestamp_seconds) and on() up{job="integrations/unix"} == 1
+        for: 2h
+        labels:
+          severity: critical
+        annotations:
+          summary: "Belum ada catatan backup sukses selama 2 jam sejak monitoring host aktif."
+
+      - alert: MyCaffeRestoreDrillStale
+        expr: time() - mycaffe_restore_drill_last_success_timestamp_seconds > 35 * 86400
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "Restore drill {{ $labels.client }} belum lulus dalam 35 hari terakhir."
+
+      - alert: MyCaffeDiskLow
+        expr: node_filesystem_avail_bytes / node_filesystem_size_bytes < 0.15
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Disk {{ $labels.mountpoint }} di {{ $labels.client }} tersisa di bawah 15%."
+
+      - alert: MyCaffeDiskCritical
+        expr: node_filesystem_avail_bytes / node_filesystem_size_bytes < 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Disk {{ $labels.mountpoint }} di {{ $labels.client }} tersisa di bawah 5%; PostgreSQL bisa berhenti menulis."
+
+      - alert: MyCaffeMemoryLow
+        expr: node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes < 0.10
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "RAM tersedia di {{ $labels.client }} di bawah 10% selama 15 menit."

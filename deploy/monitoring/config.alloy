@@ -1,0 +1,49 @@
+// Grafana Alloy (decision IN3): scrape the API's internal /metrics and host metrics, remote-write to
+// Grafana Cloud. Alert rules: deploy/monitoring/alert-rules.yml. Setup: docs/setup/monitoring.md.
+// No docker.sock mount: container logs stay on the VPS (`docker compose logs`).
+
+prometheus.scrape "api" {
+	job_name        = "mycaffe-api"
+	targets         = [{"__address__" = "api:9091"}]
+	scrape_interval = "30s"
+	forward_to      = [prometheus.remote_write.grafana_cloud.receiver]
+}
+
+// Host disk/memory/CPU from read-only /proc, /sys and / mounts, plus the textfile metrics the backup
+// and restore-drill scripts write (mycaffe_backup_*, mycaffe_restore_drill_*).
+prometheus.exporter.unix "host" {
+	procfs_path    = "/host/proc"
+	sysfs_path     = "/host/sys"
+	rootfs_path    = "/host/root"
+	set_collectors = ["cpu", "filesystem", "loadavg", "meminfo", "textfile"]
+
+	filesystem {
+		mount_points_exclude = "^/(dev|proc|run|sys|var/lib/docker/.+)($|/)"
+		fs_types_exclude     = "^(autofs|nsfs|overlay|squashfs|tmpfs)$"
+	}
+
+	textfile {
+		directory = "/host/textfile"
+	}
+}
+
+// Exporter targets carry job="integrations/unix", which the alert rules match on.
+prometheus.scrape "host" {
+	targets         = prometheus.exporter.unix.host.targets
+	scrape_interval = "60s"
+	forward_to      = [prometheus.remote_write.grafana_cloud.receiver]
+}
+
+prometheus.remote_write "grafana_cloud" {
+	// One VPS per client (Model A): the client label tells alerts apart in the shared Grafana stack.
+	external_labels = {"client" = sys.env("MYCAFFE_CLIENT")}
+
+	endpoint {
+		url = sys.env("GRAFANA_CLOUD_PROM_URL")
+
+		basic_auth {
+			username = sys.env("GRAFANA_CLOUD_PROM_USER")
+			password = sys.env("GRAFANA_CLOUD_API_KEY")
+		}
+	}
+}

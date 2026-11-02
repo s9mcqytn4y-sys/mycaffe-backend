@@ -66,7 +66,7 @@ We adopt a **Single-VPS Modular Monolith Architecture** managed via **Docker Com
 - **Local Dev & CI (`deploy/docker/docker-compose.yml` + `deploy/nginx/nginx.conf`)**:
   - Builds the Go API and Migrator from local source (`deploy/docker/Dockerfile`), exposes HTTP `:80`, mounts `pgdata:/var/lib/postgresql` per the official PostgreSQL 18 image specification, and initializes non-superuser roles via `deploy/postgres/00-init-roles.sh`.
 - **Production (`deploy/docker/docker-compose.prod.yml` + `deploy/nginx/nginx.prod.conf`)**:
-  - Pulls immutable, version-tagged container images (`ghcr.io/s9mcqytn4y-sys/mycaffe-api:${API_IMAGE_TAG}` built by `.github/workflows/release-ghcr.yml` and `ghcr.io/s9mcqytn4y-sys/mycaffe-web:${WEB_IMAGE_TAG}`). Source code is never compiled on the production VPS.
+  - Pulls container images pinned by digest (`ghcr.io/s9mcqytn4y-sys/mycaffe-api@${API_IMAGE_DIGEST}` built by `.github/workflows/release-ghcr.yml` and `ghcr.io/s9mcqytn4y-sys/mycaffe-web@${WEB_IMAGE_DIGEST}`). Source code is never compiled on the production VPS.
   - Runs the one-shot `migrate` service (`/app/mycaffe-migrate -action=up`) under `COMPOSE_DATABASE_MIGRATION_URL` (`mycaffe_migrator` non-superuser owner role at `@postgres:5432`) with `pg_advisory_lock` before starting `api`.
   - Runs the `api` service under `COMPOSE_DATABASE_URL` (`mycaffe_app` non-superuser role with `NOBYPASSRLS` at `@postgres:5432`).
   - Boots Nginx via `deploy/nginx/entrypoint-tls-bootstrap.sh` so a fresh VPS with an empty `certbot-etc` volume automatically creates a temporary bootstrap certificate, serves `/.well-known/acme-challenge/` on port 80 for `scripts/deploy/init-letsencrypt.sh`, and reloads when Let's Encrypt certificates are issued or renewed.
@@ -93,11 +93,12 @@ Cloudflare R2 is used with two strictly separated buckets and separate IAM API t
 2. **Immutable Artifact Promotion**:
    - All changes are developed on `feature/*` branches, verified via Pull Request against `staging` (passing `build-and-test`, `docker-build`, and `database-migration-test`), and promoted via Pull Request to `main`.
    - Merging to `main` triggers `.github/workflows/release-ghcr.yml`, publishing an immutable image tagged with the Git commit SHA (`sha-<commit>`) and branch/semver tag to `ghcr.io/s9mcqytn4y-sys/mycaffe-api`.
-3. **Production Update Procedure**:
-   - Update `API_IMAGE_TAG` (and `WEB_IMAGE_TAG`) in the VPS deployment environment.
-   - Pull the verified image (`docker compose -f deploy/docker/docker-compose.prod.yml pull`), run additive schema migrations via the `migrate` service (`mycaffe_migrator`), and restart services (`docker compose -f deploy/docker/docker-compose.prod.yml up -d`).
+3. **Production Update Procedure** (P0-05, [deploy.md](../setup/deploy.md)):
+   - Images are pinned by digest (`mycaffe-api@sha256:...`), taken from the release run summary; tags are never deployed.
+   - `scripts/deploy/deploy.sh <api digest> [web digest]` runs a pre-deploy backup, pulls, runs additive migrations via the `migrate` service (`mycaffe_migrator`), starts services and waits for a healthy API, then records the running digests in `/var/lib/mycaffe/deploy/`.
 4. **Rollback Procedure**:
-   - Revert `API_IMAGE_TAG` to the previous verified Git SHA tag and redeploy the container. Never hot-patch files inside a running container or on the VPS host filesystem.
+   - Automatic: a failed pull, migration, start or health check redeploys the previous digests.
+   - Manual: `scripts/deploy/deploy.sh rollback`. Never hot-patch files inside a running container or on the VPS host filesystem.
 
 ## Consequences
 

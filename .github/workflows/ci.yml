@@ -103,8 +103,14 @@ jobs:
           bash -n scripts/backup/restore_from_r2.sh
           bash -n scripts/backup/restore_drill.sh
           bash -n scripts/deploy/init-letsencrypt.sh
+          bash -n scripts/deploy/deploy.sh
+          bash -n scripts/deploy/compose.sh
+          bash -n scripts/deploy/test_deploy_rollback.sh
           sh -n deploy/postgres/00-init-roles.sh
           sh -n deploy/nginx/entrypoint-tls-bootstrap.sh
+
+      - name: Deploy by Digest with Automatic Rollback (local registry)
+        run: ./scripts/deploy/test_deploy_rollback.sh
 
       - name: Validate Alloy Config and Unit-Test Alert Rules
         run: |

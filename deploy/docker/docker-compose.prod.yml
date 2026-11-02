@@ -1,7 +1,7 @@
 # MyCaffe POS Platform - Production Docker Compose
 # Architecture: Single-VPS Modular Monolith (Hostinger KVM 2: 2 vCPU, 8 GB RAM, 100 GB NVMe)
 # Target OS: Ubuntu 24.04 LTS
-# Pulls immutable GHCR images built in CI (no source code compilation on VPS).
+# Pulls GHCR images by digest (immutable) via scripts/deploy/deploy.sh; no source compilation on the VPS.
 
 services:
   postgres:
@@ -53,7 +53,7 @@ services:
           memory: 1024M
 
   migrate:
-    image: ghcr.io/s9mcqytn4y-sys/mycaffe-api:${API_IMAGE_TAG:?API_IMAGE_TAG must be pinned}
+    image: ghcr.io/s9mcqytn4y-sys/mycaffe-api@${API_IMAGE_DIGEST:?API_IMAGE_DIGEST must be set (use scripts/deploy/deploy.sh)}
     container_name: mycaffe-migrate
     restart: "no"
     depends_on:
@@ -69,7 +69,7 @@ services:
       - mycaffe-data
 
   api:
-    image: ghcr.io/s9mcqytn4y-sys/mycaffe-api:${API_IMAGE_TAG:?API_IMAGE_TAG must be pinned}
+    image: ghcr.io/s9mcqytn4y-sys/mycaffe-api@${API_IMAGE_DIGEST:?API_IMAGE_DIGEST must be set (use scripts/deploy/deploy.sh)}
     container_name: mycaffe-api
     restart: unless-stopped
     depends_on:
@@ -135,7 +135,7 @@ services:
           memory: 128M
 
   web:
-    image: ghcr.io/s9mcqytn4y-sys/mycaffe-web:${WEB_IMAGE_TAG:?WEB_IMAGE_TAG must be pinned}
+    image: ghcr.io/s9mcqytn4y-sys/mycaffe-web@${WEB_IMAGE_DIGEST:?WEB_IMAGE_DIGEST must be set (use scripts/deploy/deploy.sh)}
     container_name: mycaffe-web
     restart: unless-stopped
     depends_on:

@@ -41,6 +41,7 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
 
       - name: Build and push Docker image to GHCR
+        id: build
         uses: docker/build-push-action@14487ce63c7a62a4a324b0bfb37086795e31c6c1 # v6.15.0
         with:
           context: .
@@ -48,3 +49,20 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+      # Production deploys pin this digest (scripts/deploy/deploy.sh); tags are only for humans.
+      - name: Publish image digest to the run summary
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          {
+            echo "### ghcr.io/${{ github.repository_owner }}/mycaffe-api"
+            echo
+            echo "Digest: \`${DIGEST}\`"
+            echo
+            echo "Deploy: \`scripts/deploy/deploy.sh ${DIGEST}\`"
+            echo
+            echo "Tags:"
+            echo "${TAGS}" | sed 's/^/- /'
+          } >> "${GITHUB_STEP_SUMMARY}"

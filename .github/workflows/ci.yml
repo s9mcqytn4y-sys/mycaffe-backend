@@ -106,6 +106,12 @@ jobs:
           sh -n deploy/postgres/00-init-roles.sh
           sh -n deploy/nginx/entrypoint-tls-bootstrap.sh
 
+      - name: Validate Alloy Config and Unit-Test Alert Rules
+        run: |
+          docker run --rm -v "$PWD/deploy/monitoring:/m:ro" grafana/alloy:v1.21.2 fmt /m/config.alloy >/dev/null
+          docker run --rm -v "$PWD/deploy/monitoring:/m:ro" -w /m --entrypoint promtool prom/prometheus:v3.13.5 check rules alert-rules.yml
+          docker run --rm -v "$PWD/deploy/monitoring:/m:ro" -w /m --entrypoint promtool prom/prometheus:v3.13.5 test rules alert-rules.test.yml
+
   database-migration-test:
     name: PostgreSQL 18 Triple-Role, Migrator CLI, RLS, Direct mycaffe_app Login & Seed
     runs-on: ubuntu-latest
@@ -250,8 +256,10 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ci-not-a-secret
           AWS_DEFAULT_REGION: us-east-1
           BACKUP_ENCRYPTION_PASSPHRASE: ci-only-throwaway-passphrase
+          METRICS_TEXTFILE_DIR: ${{ runner.temp }}/textfile
         run: |
           set -euo pipefail
+          mkdir -p "$METRICS_TEXTFILE_DIR"
           docker run -d --name s3mock -p 127.0.0.1:9090:9090 adobe/s3mock:4.7.0
           aws configure set default.s3.addressing_style path
           for i in $(seq 1 60); do curl -sf http://127.0.0.1:9090/ >/dev/null && break; sleep 1; done
@@ -268,6 +276,10 @@ jobs:
           # Drill: restore the newest backup into a throwaway PG18, prove mycaffe_app can read it, compare with the source.
           SOURCE_CONTAINER="$PG" SOURCE_DB=mycaffe_test ./scripts/backup/restore_drill.sh | tee drill.log
           grep -q '^RESULT PASS' drill.log
+
+          # Both scripts leave textfile metrics for the backup/drill freshness alerts.
+          grep -E '^mycaffe_backup_last_success_timestamp_seconds [0-9]+$' "$METRICS_TEXTFILE_DIR/backup.prom"
+          grep -E '^mycaffe_restore_drill_last_success_timestamp_seconds [0-9]+$' "$METRICS_TEXTFILE_DIR/restore_drill.prom"
 
           # Restoring over a non-disposable database without explicit confirmation must be refused.
           if DB_CONTAINER="$PG" DB_NAME=mycaffe_prod DB_MIGRATOR_USER=mycaffe_migrator BACKUP_OBJECT=latest \

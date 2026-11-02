@@ -27,7 +27,7 @@ Both are installed from [`deploy/backup/mycaffe-backup.cron`](../../deploy/backu
    | `backups/monthly/` | 365 days |
 
 3. Host packages: `docker`, `gpg`, `awscli` (v2), `openssl`, `util-linux` (`flock`).
-4. OS user `mycaffe` in the `docker` group; `/opt/mycaffe` = files of the released tag (`deploy/`, `scripts/`); `mkdir -p /var/log/mycaffe && chown mycaffe /var/log/mycaffe`.
+4. OS user `mycaffe` in the `docker` group; `/opt/mycaffe` = files of the released tag (`deploy/`, `scripts/`); `mkdir -p /var/log/mycaffe /var/lib/mycaffe/metrics && chown mycaffe /var/log/mycaffe /var/lib/mycaffe/metrics` (the metrics directory feeds the backup alerts, see [monitoring.md](monitoring.md)).
 5. `/etc/mycaffe/backup.env` (owner `mycaffe`, mode `600`), values from the password manager, never committed:
 
    ```bash
@@ -71,5 +71,4 @@ The `mycaffe_backup` role is created by `deploy/postgres/00-init-roles.sh` on th
 
 ## 5. Not covered yet
 
-- Alert when the newest backup is older than 2 hours or a drill fails: ticket P0-04 (Grafana Cloud, IN3).
 - RPO below 1 hour (WAL archiving): ticket P2-08, only if a client contract requires it.

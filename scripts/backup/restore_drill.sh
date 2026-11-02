@@ -85,4 +85,11 @@ fi
 
 DURATION=$(( $(date -u +%s) - STARTED_AT ))
 echo "RESULT ${STATUS} at=$(date -u +%Y-%m-%dT%H:%M:%SZ) object=${BACKUP_OBJECT:-latest} duration_s=${DURATION} migrations=${R_MIG} orders=${R_ORDERS}"
+
+# Only a passing drill moves the MyCaffeRestoreDrillStale clock (Alloy textfile collector).
+METRICS_DIR="${METRICS_TEXTFILE_DIR:-/var/lib/mycaffe/metrics}"
+if [[ "${STATUS}" == "PASS" && -d "${METRICS_DIR}" ]]; then
+  printf '# TYPE mycaffe_restore_drill_last_success_timestamp_seconds gauge\nmycaffe_restore_drill_last_success_timestamp_seconds %s\n' \
+    "$(date -u +%s)" > "${METRICS_DIR}/restore_drill.prom.$$" && mv "${METRICS_DIR}/restore_drill.prom.$$" "${METRICS_DIR}/restore_drill.prom"
+fi
 [[ "${STATUS}" == "PASS" ]]

@@ -12,6 +12,7 @@ import (
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/domain"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/database"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/mailer"
+	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/metrics"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/repository/postgres"
 )
 
@@ -106,8 +107,10 @@ func (s *EmailService) recordOutcome(ctx context.Context, e domain.EmailOutbox, 
 			return s.repo.MarkEmailSent(ctx, tx, e.StoreID, e.ID, now)
 		case errors.Is(sendErr, mailer.ErrPermanent) || e.Attempts > len(emailRetrySchedule):
 			log.Printf("[EMAIL WORKER] email_id=%s template=%s failed permanently after %d attempt(s): %v", e.ID, e.Template, e.Attempts, sendErr)
+			metrics.EmailSendFailures.WithLabelValues("true").Inc()
 			return s.repo.MarkEmailFailed(ctx, tx, e.StoreID, e.ID, sendErr.Error())
 		default:
+			metrics.EmailSendFailures.WithLabelValues("false").Inc()
 			next := now.Add(emailRetrySchedule[e.Attempts-1])
 			return s.repo.MarkEmailRetry(ctx, tx, e.StoreID, e.ID, next, sendErr.Error())
 		}
@@ -123,8 +126,12 @@ func (s *EmailService) StartWorker(ctx context.Context, interval time.Duration) 
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if _, err := s.DeliverDue(ctx, 20); err != nil && !errors.Is(err, context.Canceled) {
-				log.Printf("[EMAIL WORKER] cycle error: %v", err)
+			if _, err := s.DeliverDue(ctx, 20); err != nil {
+				if !errors.Is(err, context.Canceled) {
+					log.Printf("[EMAIL WORKER] cycle error: %v", err)
+				}
+			} else {
+				metrics.WorkerSucceeded("email")
 			}
 		}
 	}

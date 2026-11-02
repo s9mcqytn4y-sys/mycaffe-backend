@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -16,6 +18,7 @@ import (
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/handler"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/database"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/mailer"
+	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/metrics"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/midtrans"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/rbac"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/realtime"
@@ -28,6 +31,9 @@ import (
 // @description Backend API untuk Multi-Tenant QR Ordering, POS, KDS, & TV Queue Display (MyCaffe Platform).
 // @BasePath /
 func main() {
+	// JSON logs; slog.SetDefault also routes every existing log.Printf through this handler.
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, nil)))
+
 	cfg, err := config.LoadConfig()
 	if err != nil {
 		log.Fatalf("[FATAL CONFIG] %v", err)
@@ -72,7 +78,8 @@ func main() {
 		gin.SetMode(gin.DebugMode)
 	}
 
-	router := gin.Default()
+	router := gin.New()
+	router.Use(handler.Recover(), handler.AccessLog())
 	// Without this Gin trusts X-Forwarded-For from any peer, so ClientIP() is spoofable.
 	// Empty TRUSTED_PROXIES trusts none; set it to the Nginx network CIDR behind the reverse proxy.
 	if err := router.SetTrustedProxies(cfg.TrustedProxies); err != nil {
@@ -306,6 +313,22 @@ func main() {
 		// keep this above that budget and at or below Nginx proxy_read_timeout (30s) for /api.
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  60 * time.Second,
+	}
+
+	// Internal metrics listener (IN3): separate port, not routed by Nginx, scraped by Grafana Alloy.
+	if cfg.MetricsAddr != "" {
+		var sqlDB *sql.DB
+		if db != nil {
+			sqlDB = db.DB
+		}
+		metricsSrv := &http.Server{Addr: cfg.MetricsAddr, Handler: metrics.Handler(sqlDB), ReadHeaderTimeout: 5 * time.Second}
+		go func() {
+			log.Printf("[METRICS] Serving /metrics on %s", cfg.MetricsAddr)
+			if err := metricsSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				log.Printf("[METRICS] listener stopped: %v", err)
+			}
+		}()
+		defer metricsSrv.Close()
 	}
 
 	// Graceful shutdown setup

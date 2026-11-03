@@ -21,6 +21,7 @@ import (
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/metrics"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/midtrans"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/rbac"
+	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/storage"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/realtime"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/repository/postgres"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/service"
@@ -135,6 +136,7 @@ func main() {
 	var kdsHandler *handler.KDSHandler
 	var receiptHandler *handler.ReceiptHandler
 	var reportHandler *handler.ReportHandler
+	var mediaHandler *handler.MediaHandler
 	if db != nil {
 		emailService := newEmailService(cfg, db, workerCtx)
 		authPolicy := service.AuthPolicy{
@@ -169,6 +171,12 @@ func main() {
 		kdsHandler = handler.NewKDSHandler(service.NewKDSService(db))
 		receiptHandler = handler.NewReceiptHandler(service.NewReceiptService(db, cfg.AppPublicURL))
 		reportHandler = handler.NewReportHandler(service.NewReportService(db))
+		mediaStore, err := storage.NewR2(storage.R2Config{AccountID: cfg.R2AccountID, AccessKeyID: cfg.R2AccessKeyID,
+			SecretAccessKey: cfg.R2SecretAccessKey, Bucket: cfg.R2BucketName, PublicURL: cfg.R2PublicURL})
+		if err != nil {
+			log.Printf("[MEDIA] uploads disabled: %v", err) // /media/uploads answers 503 MEDIA_UNAVAILABLE
+		}
+		mediaHandler = handler.NewMediaHandler(service.NewMediaService(db, mediaStore))
 		realtimeService := service.NewRealtimeService(db)
 		realtimeHandler = handler.NewRealtimeHandler(hub, realtimeService)
 		// Outbox relay (iteration 5c): LISTEN outbox + 2 s polling, at-least-once, ordered per store.
@@ -243,6 +251,11 @@ func main() {
 			reports := v1.Group("/reports", authHandler.RequirePermission(rbac.ReportFinanceRead))
 			reports.GET("/sales", reportHandler.Sales)
 			reports.GET("/summary", reportHandler.Summary)
+
+			// Media uploads (B3, K9): presigned PUT to R2, then verify + JPEG variants + link to the product.
+			media := v1.Group("/media", handler.LimitBody(4<<10), authHandler.RequirePermission(rbac.CatalogManage))
+			media.POST("/uploads", mediaHandler.CreateUpload)
+			media.POST("/uploads/:id/complete", mediaHandler.Complete)
 
 			// Tables & table sessions (iteration 5a): table board for staff, CRUD for the owner (QR3).
 			pos.GET("/tables", authHandler.RequireStaff(), tableHandler.ListTables)

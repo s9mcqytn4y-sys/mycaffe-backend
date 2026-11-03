@@ -355,6 +355,14 @@ BEGIN
     IF has_table_privilege('mycaffe_app', 'public.kds_tickets', 'DELETE') THEN
         RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may DELETE kds_tickets!';
     END IF;
+    -- 10F-8. Refund ledger (migration 000023): RLS on, insert-only for the app role.
+    IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.payment_refunds'::regclass) THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: payment_refunds does not have row-level security enabled!';
+    END IF;
+    IF has_table_privilege('mycaffe_app', 'public.payment_refunds', 'UPDATE')
+       OR has_table_privilege('mycaffe_app', 'public.payment_refunds', 'DELETE') THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may UPDATE or DELETE payment_refunds!';
+    END IF;
     -- 10F-7. Media uploads (migration 000022): RLS on, no DELETE for the app role.
     IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.media_uploads'::regclass) THEN
         RAISE EXCEPTION 'SECURITY FAILURE: media_uploads does not have row-level security enabled!';

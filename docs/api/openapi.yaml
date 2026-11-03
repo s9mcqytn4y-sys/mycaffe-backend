@@ -1991,11 +1991,15 @@ paths:
     post:
       tags: [POS Operational]
       operationId: refundPayment
-      summary: Refund one settled cash payment or split from the open drawer (Iteration 4d, hotfix v0.4.3)
+      summary: Refund one settled payment or split, in cash from the drawer or by the owner's bank transfer (4d, RF1-c, RF1-e)
       description: >-
-        Full refund of one cash payment once the order is paid or partially refunded. Non-cash
-        methods answer 409 REFUND_METHOD_NOT_SUPPORTED until the non-cash refund policy (decision
-        register RF1) is approved. restore_stock is required: for a by_item split it restores only that
+        Full refund of one payment of any method once the order is paid or partially refunded (RF1-c).
+        refund_method=cash (default) pays back from the actor's open drawer; bank_transfer is recorded by
+        the owner only, with bank name, the last 4 account digits and the transfer reference, and does not
+        touch the drawer. The payment keeps its original method; each refund is one row of the append-only
+        payment_refunds ledger. Refund windows (RF1-e, store settings, business days in the store time
+        zone from paid_at): past refund_window_cashier_days a cashier needs owner_pin; past
+        refund_window_owner_days nobody can refund in the system. restore_stock is required: for a by_item split it restores only that
         split's lines; otherwise the whole order is restored once, when this refund makes the order
         fully refunded. Updates payments.refunded_amount, orders.refunded_amount and the split status.
       x-implementation-status: implemented
@@ -2034,6 +2038,22 @@ paths:
                 restore_stock:
                   type: boolean
                   description: true returns the goods to stock; false records them as waste. No default.
+                refund_method:
+                  type: string
+                  enum: [cash, bank_transfer]
+                  default: cash
+                bank_name:
+                  type: string
+                  maxLength: 100
+                  description: Required for bank_transfer.
+                account_last4:
+                  type: string
+                  pattern: "^[0-9]{4}$"
+                  description: Required for bank_transfer; the full account number is never stored.
+                transfer_reference:
+                  type: string
+                  maxLength: 100
+                  description: Required for bank_transfer.
       responses:
         "200":
           description: Refund processed successfully
@@ -2059,9 +2079,14 @@ paths:
         "409":
           description: >-
             NO_OPEN_SHIFT, INSUFFICIENT_DRAWER_CASH, PAYMENT_ALREADY_REFUNDED, NOT_REFUNDABLE (payment not
-            paid or order not fully paid yet) or REFUND_METHOD_NOT_SUPPORTED (non-cash)
+            paid or order not fully paid yet), or REFUND_WINDOW_EXCEEDED (paid before the owner window)
+        "403":
+          description: FORBIDDEN (lacks payment.refund, or bank_transfer by anyone but the owner)
         "422":
-          description: VALIDATION_FAILED (reason, restore_stock, pin) or OWNER_PIN_REQUIRED
+          description: >-
+            VALIDATION_FAILED (reason, restore_stock, pin, refund_method, bank_name, account_last4,
+            transfer_reference) or OWNER_PIN_REQUIRED (above void_refund_owner_threshold, or a cashier past
+            the cashier refund window)
         "429":
           description: PIN_LOCKED, PIN_ATTEMPTS_EXCEEDED or OWNER_PIN_STORE_LIMIT
 
@@ -4570,6 +4595,16 @@ components:
           type: string
           enum: ["off", auto, forced]
           description: Static QRIS fallback when Midtrans fails (K8). Default auto.
+        refund_window_cashier_days:
+          type: integer
+          minimum: 0
+          maximum: 30
+          description: Business days after paid_at a cashier may refund alone (RF1-e). Default 0 (same day).
+        refund_window_owner_days:
+          type: integer
+          minimum: 0
+          maximum: 30
+          description: Business days after paid_at the owner (or a cashier with owner PIN) may refund; at least the cashier window. Default 7.
 
     InitiatePaymentResponse:
       type: object

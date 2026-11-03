@@ -31,7 +31,7 @@ gap not yet confirmed).
 
 | ID | Title | Status | Evidence / next step |
 |----|-------|--------|----------------------|
-| P1-01 | RF1 non-cash refunds | Planned | PR B4 (RF1-c, -e, -f first; RF1-a/b after sandbox test) |
+| P1-01 | RF1 non-cash refunds | In progress | RF1-c, RF1-e done (B4, migration 000023); RF1-a/b/d/f after sandbox test |
 | P1-02 | Daily sales report | Done | PR B2, migration 000021; calendar business day until PD5 (04:00 cutoff) is approved |
 | P1-03 | Owner notifications (void/refund/cash variance/lockout) | Planned | Lockout warning starts in PR A F1 |
 | P1-04 | Remote approval (single-use `approval_requests`) | Planned | — |

@@ -148,7 +148,7 @@ ADR: [adr-005-offline-cash-sync.md](adr-005-offline-cash-sync.md). Status: decid
 
 ## Non-cash refunds (recorded 2026-11-02, ninth interview)
 
-Status: approved, implementation planned. Until built, non-cash refunds still return 409 `REFUND_METHOD_NOT_SUPPORTED` and nothing is marked refunded.
+Status: **RF1-c and RF1-e implemented** (B4, migration 000023, 2026-11-04): full refunds of any method in cash from the drawer or by the owner's manual bank transfer, ledger `payment_refunds`, per-role windows in `store_settings`; a cashier past the cashier window needs the owner PIN. Partial refunds (RF1-b), Midtrans Direct Refund (RF1-a), EDC reversal (RF1-d) and `refund_pending` (RF1-f, moves with RF1-a) are still planned.
 Midtrans facts checked against docs.midtrans.com on 2026-11-02: QRIS is charged with acquirer `gopay` (`internal/pkg/midtrans/midtrans.go`); GoPay QRIS refund window is 45 days on-us and 7 days off-us; Direct Refund returns 200 (approved) or 202 (denied by bank); the final signal is the refund notification carrying `bank_confirmed_at`; `refund_key` retries are honoured for 7 days. Partial refund support for GoPay QRIS is not stated in the docs.
 
 | ID | Decision | Approved option |

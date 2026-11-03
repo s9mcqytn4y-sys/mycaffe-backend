@@ -37,6 +37,8 @@ tags:
     description: Outbox relay over WebSocket with single-use tickets, per-store sequence and replay (iteration 5c)
   - name: Receipts
     description: Snapshot-only sale, refund and void receipts (JSON or ESC/POS) and 90-day digital receipt links (B1, decision R1)
+  - name: Reports
+    description: Read-only owner sales reports per business day, method, category, item and hour, JSON or CSV (B2)
 
 paths:
   /health:
@@ -2268,6 +2270,83 @@ paths:
         "404":
           description: RECEIPT_LINK_INVALID
 
+  /api/v1/reports/sales:
+    get:
+      tags: [Reports]
+      operationId: getSalesReport
+      summary: Sales grouped by day, hour, payment method, category or item (B2)
+      description: >-
+        Read-only, from snapshots. Dates are business days in the store time zone (calendar day, no cutoff
+        yet). day, hour, category and item use the order creation time of orders that took money (paid,
+        partially_refunded, refunded; voided orders are excluded); method uses payments.paid_at. Category
+        comes from the sale-time snapshot (order_items.snapshot_category_name). Category and item rows carry
+        quantities and line amounts only: order-level discount, tax and service are not split per line.
+        Range at most 92 days; from defaults to today and to defaults to from.
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - $ref: "#/components/parameters/ReportFrom"
+        - $ref: "#/components/parameters/ReportTo"
+        - name: group
+          in: query
+          schema:
+            type: string
+            enum: [day, hour, method, category, item]
+            default: day
+        - $ref: "#/components/parameters/ReportFormat"
+      responses:
+        "200":
+          description: Sales report (JSON) or CSV download (comma-separated, integer rupiah, Indonesian headers)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SalesReport"
+            text/csv:
+              schema:
+                type: string
+        "403":
+          description: Forbidden - lacks report.finance.read (owner only)
+        "422":
+          description: VALIDATION_FAILED (from, to, group, format)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationErrorResponse"
+  /api/v1/reports/summary:
+    get:
+      tags: [Reports]
+      operationId: getReportSummary
+      summary: Range totals, voids, refunds by method and cash figures matching the Z-reports (B2)
+      description: >-
+        cash_sales and cash_refunds sum cash_movements in the range, so cash_net equals the sum of
+        cash_sales - cash_refunds over the Z-reports of the shifts in it. Voids and refunds count by the
+        time they happened (audit log), totals by the order creation time.
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - $ref: "#/components/parameters/ReportFrom"
+        - $ref: "#/components/parameters/ReportTo"
+        - $ref: "#/components/parameters/ReportFormat"
+      responses:
+        "200":
+          description: Summary (JSON) or CSV download (komponen,nilai)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportSummary"
+            text/csv:
+              schema:
+                type: string
+        "403":
+          description: Forbidden - lacks report.finance.read (owner only)
+        "422":
+          description: VALIDATION_FAILED (from, to, format)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationErrorResponse"
   /api/v1/store/settings:
     get:
       tags: [Staff]
@@ -2830,6 +2909,27 @@ components:
       description: Signed HMAC token binding a public dine-in/takeaway session to a specific `store_id` and `table_number`.
 
   parameters:
+    ReportFrom:
+      name: from
+      in: query
+      description: First business day (YYYY-MM-DD, store time zone); defaults to today.
+      schema:
+        type: string
+        format: date
+    ReportTo:
+      name: to
+      in: query
+      description: Last business day, inclusive; defaults to from. At most 92 days after from.
+      schema:
+        type: string
+        format: date
+    ReportFormat:
+      name: format
+      in: query
+      schema:
+        type: string
+        enum: [json, csv]
+        default: json
     IfNoneMatch:
       name: If-None-Match
       in: header
@@ -3617,7 +3717,7 @@ components:
                 items: {type: string}
               notes: {type: string}
               quantity: {type: integer}
-              unit_price: {type: integer, format: int64, description: Snapshot unit price incl. modifiers (IDR)}
+              unit_price: {type: integer, format: int64, description: "Snapshot unit price incl. modifiers (IDR)"}
               amount: {type: integer, format: int64}
         subtotal_amount: {type: integer, format: int64}
         discount_amount: {type: integer, format: int64}
@@ -3648,6 +3748,62 @@ components:
             reason: {type: string}
             stock_returned: {type: boolean}
         void_reason: {type: string}
+    SalesReport:
+      type: object
+      required: [from, to, group, rows]
+      properties:
+        from: {type: string, format: date}
+        to: {type: string, format: date}
+        group:
+          type: string
+          enum: [day, hour, method, category, item]
+        rows:
+          type: array
+          items:
+            type: object
+            required: [key, gross_sales, discount_amount, tax_amount, service_charge_amount, total_amount, refunded_amount, net_amount]
+            properties:
+              key:
+                type: string
+                description: Date (YYYY-MM-DD), local hour (00-23), payment method, category name ("Tanpa kategori" when none) or "item (variant)".
+              orders: {type: integer, format: int64, description: "Orders (day, hour, category, item)"}
+              payments: {type: integer, format: int64, description: Payments (method)}
+              quantity: {type: integer, format: int64, description: "Units sold (category, item)"}
+              gross_sales: {type: integer, format: int64, description: "Subtotal before discount (orders) or payment amount (method)"}
+              discount_amount: {type: integer, format: int64}
+              tax_amount: {type: integer, format: int64}
+              service_charge_amount: {type: integer, format: int64}
+              total_amount: {type: integer, format: int64}
+              refunded_amount: {type: integer, format: int64}
+              net_amount: {type: integer, format: int64}
+    ReportSummary:
+      type: object
+      required: [from, to, orders, gross_sales, discount_amount, tax_amount, service_charge_amount, total_amount, refunded_amount, net_amount, void_count, void_amount, refunds_by_method, cash_sales, cash_refunds, cash_net]
+      properties:
+        from: {type: string, format: date}
+        to: {type: string, format: date}
+        orders: {type: integer, format: int64}
+        gross_sales: {type: integer, format: int64}
+        discount_amount: {type: integer, format: int64}
+        tax_amount: {type: integer, format: int64}
+        service_charge_amount: {type: integer, format: int64}
+        total_amount: {type: integer, format: int64}
+        refunded_amount: {type: integer, format: int64}
+        net_amount: {type: integer, format: int64}
+        void_count: {type: integer, format: int64}
+        void_amount: {type: integer, format: int64}
+        refunds_by_method:
+          type: array
+          items:
+            type: object
+            required: [method, count, amount]
+            properties:
+              method: {type: string}
+              count: {type: integer, format: int64}
+              amount: {type: integer, format: int64}
+        cash_sales: {type: integer, format: int64}
+        cash_refunds: {type: integer, format: int64}
+        cash_net: {type: integer, format: int64}
     ErrorResponse:
       type: object
       required: [error]

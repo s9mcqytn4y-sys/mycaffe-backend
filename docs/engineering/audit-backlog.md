@@ -32,7 +32,7 @@ gap not yet confirmed).
 | ID | Title | Status | Evidence / next step |
 |----|-------|--------|----------------------|
 | P1-01 | RF1 non-cash refunds | Planned | PR B4 (RF1-c, -e, -f first; RF1-a/b after sandbox test) |
-| P1-02 | Daily sales report | Planned | PR B2 |
+| P1-02 | Daily sales report | Done | PR B2, migration 000021; calendar business day until PD5 (04:00 cutoff) is approved |
 | P1-03 | Owner notifications (void/refund/cash variance/lockout) | Planned | Lockout warning starts in PR A F1 |
 | P1-04 | Remote approval (single-use `approval_requests`) | Planned | — |
 | P1-05 | Emergency staff revoke | To verify | `staff_admin.go` deactivates staff; WebSocket disconnect added in PR A |

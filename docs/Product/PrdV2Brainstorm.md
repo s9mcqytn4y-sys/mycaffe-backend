@@ -25,19 +25,25 @@ menjaga **waktu owner dan staf**.
 
 | Fase | Isi | Gate |
 |------|-----|------|
-| **v0.7 Demo-ready** | G-1 daftar/detail pesanan, G-2 daftar tab, L-1..L-3 kebocoran demo, docs | Demo frontend end-to-end |
-| **v0.8 Owner-remote** | Remote approval, notifikasi owner, audit log viewer, PATCH staf, kick laci, TV antrean | Owner menyetujui void dari HP |
+| **v0.7 Demo-ready** | G-1 daftar/detail pesanan, G-2 daftar tab, G-5 remote approval dengan PIN di HP (DM7, DM8), L-1..L-3 kebocoran demo | Demo tatap muka end-to-end; owner menyetujui void dari HP |
+| **v0.8 Owner-remote** | Notifikasi owner, audit log viewer, PATCH staf, kick laci, TV antrean | Owner tahu kejadian penting tanpa membuka backoffice |
 | **v0.9 Go-live** | P0-07/08/09, RF1-a/b/d/f setelah sandbox, Named Tunnel, Grafana, backup drill di VPS | Checklist go-live hijau; owner menandatangani |
 | **v1.0** | Satu kafe live ±2 minggu tanpa insiden P1 | Stabil |
 | **v1.x** | Cairkan satu fitur beku per rilis sesuai data (kandidat pertama: offline tunai atau inventaris) | Persetujuan owner per fitur |
 
-## 4. Pertanyaan terbuka (dibahas di sesi wawancara)
+## 4. Keputusan dan pertanyaan terbuka
 
-1. Siapa target demo pertama: investor, calon klien kafe, atau staf internal?
-2. Apakah demo memakai perangkat nyata (printer, laci, tablet), atau cukup simulasi?
-3. Remote approval: PIN di HP owner, biometrik, atau cukup tombol setuju dari sesi owner yang sudah login?
-4. Ambang void/refund yang realistis per kafe?
-5. Aplikasi frontend pertama: POS kasir, PWA tamu, atau backoffice?
-6. Native Android/iOS sekarang, atau PWA dulu?
-7. Klien kedua: kapan, dan apakah perlu branding sendiri?
-8. Anggaran bulanan infrastruktur maksimum?
+Sudah diputuskan pada wawancara 2026-11-04 (DM1–DM8 di [DecisionRegister.md](../Architecture/DecisionRegister.md)):
+
+- audiens: calon klien kafe;
+- format: tatap muka;
+- perangkat: paket minimal;
+- printer: PWA + RawBT;
+- persetujuan owner: dari HP dengan PIN, dibangun sebelum demo.
+
+Masih terbuka:
+
+1. Ambang void/refund yang realistis per kafe?
+2. Klien kedua: kapan, dan apakah perlu branding sendiri?
+3. Anggaran bulanan infrastruktur maksimum?
+4. Native Android/iOS kapan (setelah PWA)?

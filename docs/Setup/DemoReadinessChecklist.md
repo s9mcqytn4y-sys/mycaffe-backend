@@ -18,14 +18,17 @@ lalu memakai jalur yang sama untuk produksi. Runbook stack demo:
 
 ## 2. Yang masih terbuka minimal untuk demo
 
+Keputusan demo DM1–DM8 ada di [DecisionRegister.md](../Architecture/DecisionRegister.md).
+
 | Item | Pemilik | Gate |
 |------|---------|------|
-| G-1 `GET /pos/orders` + `GET /pos/orders/:id` | Backend | Tanpa ini POS tidak bisa menunjukkan riwayat dan koreksi |
-| G-2 daftar tab terbuka | Backend | Alur dine-in kasir |
-| G-3 layar antrean TV | Backend | Hanya bila TV ikut demo |
+| G-1 `GET /pos/orders` + `GET /pos/orders/:id` | Backend | Kontrak API disetujui owner |
+| G-2 daftar tab terbuka (DM5) | Backend | Kontrak API disetujui owner |
+| G-5 persetujuan owner dari HP dengan PIN (DM7, DM8) | Backend + frontend | Desain auth disetujui owner |
 | L-1, L-2, L-3 | Backend | Sebelum URL dibagikan |
-| Named Tunnel + domain | Owner (beli domain) | URL stabil untuk frontend dan webhook Midtrans |
-| Docs `DemoStagingEnvironment.md` diperbarui | Backend | Selesai di PR ini |
+| Printer Bluetooth 58 mm + RawBT diuji dengan struk asli (DM3, DM6) | Owner + frontend | H-7 |
+| Video cadangan alur lengkap (DM2) | Owner | H-2 |
+| G-3 TV antrean, G-6 kick laci | — | Tidak ikut demo (DM3) |
 
 ## 3. Strategi Git, versioning, dan penamaan
 
@@ -103,15 +106,18 @@ simulator Midtrans dashboard ke `<host>/api/v1/payments/midtrans/webhook`.
 
 ## 8. Strategi server demo
 
-Rekomendasi bertahap, dengan biaya minimum:
+Diputuskan (DM4): **laptop + Quick Tunnel** untuk demo tatap muka. Urutan pada hari demo:
 
-1. **Sekarang: laptop + Quick Tunnel.** Biaya nol, cocok untuk demo internal. Batasan: laptop harus
-   menyala dan URL berganti.
-2. **Demo ke calon klien: VPS KVM 2 yang sama dengan produksi, profil `staging`.** Pakai image digest,
-   `deploy.sh`, Named Tunnel, dan Cloudflare Access. Demo sekaligus menjadi gladi bersih produksi
-   (backup drill, monitoring, deploy, rollback). Subdomain `demo.<domain>`.
-3. **Produksi:** VPS dan pipeline yang sama, DB terpisah (atau VPS kedua bila klien membayar).
-   Demo tidak boleh berbagi DB dengan produksi.
+1. Laptop disambungkan ke charger, sleep dimatikan, dan semua perangkat terhubung ke hotspot HP owner
+   (bukan Wi-Fi kafe).
+2. Jalankan `docker compose -f deploy/docker/docker-compose.demo.yml up -d` dan frontend di `:3000`.
+3. Ambil URL tunnel, set `APP_PUBLIC_URL`/CORS, dan Payment Notification URL Midtrans sandbox.
+4. Cetak QR meja. **Setelah ini tunnel tidak boleh di-restart**, karena URL dan semua QR akan mati.
+5. Jalankan smoke test §4. Bila gagal, putar video cadangan.
+
+VPS + domain + Named Tunnel ditunda sampai ada klien yang membayar. Saat itu demo pindah ke
+`demo.<domain>` di VPS yang sama dengan produksi (DB terpisah), dan menjadi gladi bersih deploy,
+backup, dan monitoring.
 
 ## 9. Yang butuh persetujuan owner
 

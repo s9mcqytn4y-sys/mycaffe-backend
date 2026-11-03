@@ -171,9 +171,31 @@ Status: decided, implementation planned ([audit tickets](../Engineering/AuditBac
 | IN3 | Monitoring & alerting | **Grafana Cloud free tier**: external uptime check on `/health/ready` plus metrics via remote write; technical alerts to the operator's Telegram group and email. Store owners get business notifications from MyCaffe only, not technical alerts |
 | IN4 | Accounting export | **Neutral CSV first**: generic journal columns (date, account, debit, credit, reference) with configurable account mapping; adapters for Jurnal/Accurate only when a client uses one |
 
+## Demo v0.7 (recorded 2026-11-04, eleventh interview)
+
+Status: decided. Scope and checklist: [DemoReadinessChecklist.md](../Setup/DemoReadinessChecklist.md);
+gaps: [FrontendIntegrationContract.md](FrontendIntegrationContract.md) §5.
+
+| ID | Decision | Approved option |
+|----|----------|-----------------|
+| DM1 | First demo audience | **Prospective cafe client**: shows the full operational flow, not investor dashboards |
+| DM2 | Demo format | **On site at the client's cafe**, with a recorded video as fallback |
+| DM3 | Hardware | **Minimal kit**: Android tablet (POS), second tablet or laptop (KDS), client's phone (QR guest), Bluetooth 58 mm thermal printer. Not brought: cash drawer (G-6), EDC, queue TV (G-3) |
+| DM4 | Demo server | **Laptop + Cloudflare Quick Tunnel** (no cost). The tunnel is not restarted after the table QR codes are printed; the devices use the owner's phone hotspot. Domain and VPS purchase are deferred; IN1/P0-07 stays planned |
+| DM5 | Demo flows | Core flows **plus dine-in tab and split bill**: QR order + QRIS sandbox, KDS, cashier shift + cash + receipt, void with owner approval, Z report and sales report, tab + split. Not shown: refund, media upload |
+| DM6 | Printing | **PWA + RawBT**: the frontend sends `GET /pos/orders/:id/receipt?format=escpos` bytes to RawBT; no backend change. A native wrapper (Capacitor) waits for a paying client |
+| DM7 | Remote owner approval (P1-04, G-5) | **Built before the demo.** Single-use, bound to action + order + amount, expires in 2 minutes, audited; the tablet `owner_pin` stays as fallback. Design and API contract need owner approval before coding (auth/permission gate) |
+| DM8 | Approval confirmation on the owner's phone | **Owner PIN entered on the phone**, verified by the existing PIN check and shop-wide guess limit (HF5). WebAuthn biometrics deferred until a stable domain exists |
+
+Backend v0.7 scope from DM5/DM7: G-1 order list/detail, G-2 open tab list, G-5 remote approval, and
+demo leak fixes L-1..L-3.
+
 ## Awaiting owner approval
 
-None.
+| Item | Needed for |
+|------|-----------|
+| API contract for G-1, G-2 (new endpoints) | v0.7 PR 1 |
+| Design and API contract for G-5 remote approval (`approval_requests`, WebSocket channel) | v0.7 PR 3 |
 
 ## Resolved from existing sources (not re-asked)
 

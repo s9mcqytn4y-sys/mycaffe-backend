@@ -8,9 +8,9 @@ lalu memakai jalur yang sama untuk produksi. Runbook stack demo:
 
 | # | Temuan | Risiko | Tindakan sebelum demo publik |
 |---|--------|--------|------------------------------|
-| L-1 | Demo menjalankan seed development: semua akun memakai **PIN `482913`**, termasuk owner. Email dan slug seed tercatat di repo. URL tunnel bersifat publik. | Siapa pun yang tahu URL dan email bisa masuk sebagai owner. | Seed demo terpisah: PIN acak per akun, disimpan di `.env` lokal (bukan repo). Atau `bootstrap-store` tanpa seed dev. |
-| L-2 | `JWT_SECRET_KEY` di compose demo punya nilai bawaan publik. Pemeriksaan placeholder hanya berlaku di `production`. | Token bisa dipalsukan bila validasi sesi lolos. Token staf terikat ke `auth_sessions`, jadi risikonya lebih kecil, tetapi tetap tidak boleh. | Wajibkan secret ≥ 32 karakter bukan placeholder untuk `staging` juga (perubahan config kecil), atau hapus nilai bawaan di compose. |
-| L-3 | Seed berisi alamat Gmail pribadi. | Data pribadi muncul di demo dan email undangan. Repo `PRIVATE`. | Ganti dengan alamat `@example.com` atau alias khusus demo. |
+| L-1 | Demo menjalankan seed development: semua akun memakai **PIN `482913`**, termasuk owner. Email dan slug seed tercatat di repo. URL tunnel bersifat publik. | Siapa pun yang tahu URL dan email bisa masuk sebagai owner. | **Ditutup (PR #54):** `migrate -action=demo-pins` mengganti PIN seed dengan `DEMO_OWNER_PIN` / `DEMO_STAFF_PIN` dari `.env.demo`. |
+| L-2 | `JWT_SECRET_KEY` di compose demo punya nilai bawaan publik. Pemeriksaan placeholder hanya berlaku di `production`. | Token bisa dipalsukan bila validasi sesi lolos. Token staf terikat ke `auth_sessions`, jadi risikonya lebih kecil, tetapi tetap tidak boleh. | **Ditutup (PR #54):** `staging` menolak secret lemah, dan compose demo gagal start tanpa `JWT_SECRET_KEY`. |
+| L-3 | Seed berisi alamat Gmail pribadi. | Data pribadi muncul di demo dan email undangan. Repo `PRIVATE`. | **Ditutup (PR #54):** `owner.central@mycaffe.local`. |
 | L-4 | Quick Tunnel: URL berganti setiap restart, dan tidak ada akses terbatas. | Link demo lama mati; bot memindai URL. | Named Tunnel + Cloudflare Access (email OTP) untuk backoffice dan POS. Rute tamu (`/api/v1/public/*`) tetap publik. |
 | L-5 | Midtrans sandbox key ada di `.env` lokal. | Aman selama `.env` tidak di-commit (`.gitignore` sudah mengecualikan). | Pakai key sandbox saja. Jangan pernah key produksi di mesin demo. |
 | L-6 | Metrik (`METRICS_ADDR`) hanya internal, dan DB tidak dipublikasikan. | — | OK, sudah ditutup. |

@@ -62,11 +62,19 @@ errors are never echoed to clients.
 
 ## 4. Uploads (catalog C4, owner decision K9)
 
-Files never pass through the API body limit. `POST /api/v1/media/uploads` validates kind, MIME
-(JPEG/PNG/WebP), size ≤ 5 MB and permission, then returns a presigned R2 PUT (5 min). `POST
-/api/v1/media/uploads/{id}/complete` re-reads the object, checks magic bytes and dimensions, strips
-EXIF, writes WebP 200/600/1200 + blurhash, and links it (`image_url`). Errors: 413 too large, 415
-unsupported type, 422 dimensions, 409 already completed. Blocked until the R2 bucket exists.
+Files never pass through the API body limit. `POST /api/v1/media/uploads` (`catalog.manage`) checks
+kind (`product_image`), product (this store, not archived), MIME (JPEG/PNG/WebP) and size ≤ 5 MB, then
+returns a presigned R2 PUT (5 min) to `uploads/<store>/<id>`. `POST /api/v1/media/uploads/{id}/complete`
+(within 15 min) re-reads the object, checks its real size, magic bytes against the declared type and
+dimensions (≥ 200 × 200, ≤ 25 MP), applies the JPEG EXIF orientation, drops every metadata block by
+re-encoding, writes **JPEG** q80 variants 200/600/1200 px (never upscaled) to
+`products/<store>/<id>/<width>.jpg`, deletes the raw upload, sets `products.image_url` to the 600 px
+variant and audits `PRODUCT_IMAGE_CHANGED`. Rejected files are deleted. Errors: 413 too large, 415
+unsupported or spoofed type, 422 dimensions, 409 already completed / not uploaded yet, 410 expired,
+503 bucket not configured. `image_url` cannot be written through the catalog API (422).
+
+Deviation from K9 (approved 2026-11-04): variants are JPEG, not WebP (lossy WebP encoding needs CGO),
+and no blurhash yet. At most two images are processed at once (memory bound on the VPS).
 
 ## 5. Network & performance notes
 

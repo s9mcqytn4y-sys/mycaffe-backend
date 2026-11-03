@@ -39,6 +39,8 @@ tags:
     description: Snapshot-only sale, refund and void receipts (JSON or ESC/POS) and 90-day digital receipt links (B1, decision R1)
   - name: Reports
     description: Read-only owner sales reports per business day, method, category, item and hour, JSON or CSV (B2)
+  - name: Media
+    description: Presigned product image uploads to R2, verified and resized into metadata-free JPEG variants (B3, decision K9)
 
 paths:
   /health:
@@ -2347,6 +2349,151 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ValidationErrorResponse"
+  /api/v1/media/uploads:
+    post:
+      tags: [Media]
+      operationId: createMediaUpload
+      summary: Start a product image upload; returns a 5-minute presigned PUT to the media bucket (B3)
+      description: >-
+        The browser PUTs the file directly to upload_url with the returned headers; the API never receives
+        the bytes. Then it calls /complete within 15 minutes. Only image/jpeg, image/png and image/webp up
+        to 5 MB, for a product of the caller's store that is not archived.
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind, product_id, content_type, size]
+              properties:
+                kind:
+                  type: string
+                  enum: [product_image]
+                product_id:
+                  type: string
+                  format: uuid
+                content_type:
+                  type: string
+                  enum: [image/jpeg, image/png, image/webp]
+                size:
+                  type: integer
+                  format: int64
+                  minimum: 1
+                  maximum: 5242880
+      responses:
+        "201":
+          description: Upload ticket
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, upload_url, method, headers, expires_at]
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                  upload_url:
+                    type: string
+                  method:
+                    type: string
+                    enum: [PUT]
+                  headers:
+                    type: object
+                    additionalProperties:
+                      type: string
+                  expires_at:
+                    type: string
+                    format: date-time
+        "400":
+          description: INVALID_REQUEST
+        "403":
+          description: Forbidden - lacks catalog.manage
+        "404":
+          description: NOT_FOUND (product not in this store or archived)
+        "413":
+          description: MEDIA_TOO_LARGE (over 5 MB)
+        "415":
+          description: MEDIA_UNSUPPORTED (type other than JPEG, PNG or WebP)
+        "422":
+          description: VALIDATION_FAILED (kind, product_id, size)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationErrorResponse"
+        "503":
+          description: MEDIA_UNAVAILABLE (R2 media bucket not configured)
+  /api/v1/media/uploads/{id}/complete:
+    post:
+      tags: [Media]
+      operationId: completeMediaUpload
+      summary: Verify the uploaded file, write JPEG variants and link the product image (B3)
+      description: >-
+        Re-reads the object from the bucket and checks its real size (5 MB), its magic bytes against the
+        declared type and its dimensions (at least 200 x 200, at most 25 megapixels). JPEG EXIF orientation
+        is applied, then every metadata block is dropped by re-encoding. Writes JPEG (quality 80) variants
+        200, 600 and 1200 px wide (never upscaled), deletes the raw upload, sets products.image_url to the
+        600 px variant and audits PRODUCT_IMAGE_CHANGED. A rejected file is deleted from the bucket.
+        products.image_url cannot be set through the catalog API.
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Linked
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, product_id, image_url, variants]
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                  product_id:
+                    type: string
+                    format: uuid
+                  image_url:
+                    type: string
+                  variants:
+                    type: array
+                    items:
+                      type: object
+                      required: [width, height, url]
+                      properties:
+                        width:
+                          type: integer
+                        height:
+                          type: integer
+                        url:
+                          type: string
+        "400":
+          description: INVALID_ID
+        "403":
+          description: Forbidden - lacks catalog.manage
+        "404":
+          description: NOT_FOUND
+        "409":
+          description: MEDIA_ALREADY_COMPLETED or MEDIA_NOT_UPLOADED (no object in the bucket yet)
+        "410":
+          description: MEDIA_UPLOAD_EXPIRED (15-minute window passed; start a new upload)
+        "413":
+          description: MEDIA_TOO_LARGE (the stored object exceeds 5 MB)
+        "415":
+          description: MEDIA_UNSUPPORTED (content is not the declared image type)
+        "422":
+          description: MEDIA_DIMENSIONS
+        "503":
+          description: MEDIA_UNAVAILABLE
   /api/v1/store/settings:
     get:
       tags: [Staff]
@@ -3528,6 +3675,7 @@ components:
           maximum: 10000
     ProductInput:
       type: object
+      description: image_url is not accepted here (422 on field image_url); product images are set by POST /api/v1/media/uploads and /complete.
       properties:
         category_id:
           type: string

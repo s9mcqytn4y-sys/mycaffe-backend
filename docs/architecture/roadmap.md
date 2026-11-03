@@ -50,7 +50,7 @@ guest); Midtrans webhook. Metrics on the internal `METRICS_ADDR` only.
 | Step | Item | Acceptance criteria | Ticket |
 | ------ | ------ | --------------------- | -------- |
 | 0 | **Housekeeping**: this roadmap, [audit-backlog.md](../engineering/audit-backlog.md); then promote `staging` → `main` | docs match the code | P0-12 (part) |
-| A | **Review debt v0.5.1**: F1 shop-wide owner-PIN guess limit (HF5), F2 PIN policy from config, F3 by-item refund stock release/waste, WebSocket revocation + connection caps, at-least-once delivery docs | named tests per item | 4d review |
+| A | **Review debt v0.5.2**: F1 shop-wide owner-PIN guess limit (HF5), F2 PIN policy from config, F3 by-item refund stock release/waste, WebSocket revocation + connection caps, at-least-once delivery docs | named tests per item | 4d review |
 | B1 | **Receipts** (R1): structured payload, ESC/POS 58/80 mm, 90-day digital link, void/refund receipts | snapshot-only, no recalculation | P0-11 |
 | B2 | **Owner reports**: per business day (store time zone), payment method, category/item, hour, void/refund, discount, tax & service; date range; CSV | consistent with Z-report; read-only with indexes | P1-02 |
 | B3 | **Media C4**: presigned PUT to `mycaffe-media`, magic bytes, size, EXIF strip, WebP variants | `product.image_url` only from verified objects | R8 |

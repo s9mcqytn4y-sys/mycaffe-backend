@@ -35,7 +35,7 @@ Nothing here claims the system is "secure"; it lists what is controlled and what
 | R5 | **Duplicate settlement only emits an event**; nobody is alerted yet | `flagDuplicateSettlementTx` | Open — owner email + refund queue UI (backlog 8, 11) |
 | R6 | Sentry captures startup errors only; **HTTP panics are not reported** (gin Recovery logs them) | `cmd/api/main.go` | Open — add Sentry middleware (module `sentry-go/gin`) with PII scrubbing |
 | R7 | **No metrics/tracing** (latency, error rate, worker lag, email backlog) | — | Open — Prometheus-style `/metrics` on an internal port or Sentry performance (backlog) |
-| R8 | **Media upload not implemented**; R2 keys exist only as config | `internal/config` | Open — K9 design: presigned PUT, magic-byte check, EXIF strip, WebP variants |
+| R8 | **Media upload** (was: not implemented) | `internal/service/media_service.go`, `internal/pkg/imaging` | Mitigated (B3): presigned PUT, server-side size and magic-byte check, dimension cap, EXIF stripped by re-encoding, JPEG variants, image_url only from verified uploads; real R2 presign untested until credentials are set |
 | R9 | **Email failures are invisible** to the owner (`email_outbox.status='failed'`) | `email_outbox` | Open — backoffice view + alert (backlog 11) |
 | R10 | Production Nginx has no `client_max_body_size` override (nginx default 1 MB) and no CSP | `deploy/nginx/nginx.prod.conf` | Accepted for API-only host; add CSP on the frontend host |
 | R11 | **Guest ordering not authenticated yet** | `POST /api/v1/orders` | Mitigated by containment (503 in staging/production); 02.01-D/E |

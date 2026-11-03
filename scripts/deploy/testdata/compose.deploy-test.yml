@@ -1,0 +1,15 @@
+# Stand-in for docker-compose.prod.yml used by scripts/deploy/test_deploy_rollback.sh: same image
+# variables and an api healthcheck, images served from a throwaway local registry.
+services:
+  api:
+    image: 127.0.0.1:5005/mycaffe-api@${API_IMAGE_DIGEST:?}
+    command: ["sleep", "3600"]
+    healthcheck:
+      # The "broken" test image contains /unhealthy.
+      test: ["CMD", "sh", "-c", "! test -e /unhealthy"]
+      interval: 2s
+      timeout: 2s
+      retries: 2
+  web:
+    image: 127.0.0.1:5005/mycaffe-web@${WEB_IMAGE_DIGEST:?}
+    command: ["sleep", "3600"]

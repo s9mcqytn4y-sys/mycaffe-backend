@@ -10,6 +10,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/domain"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/database"
+	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/metrics"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/midtrans"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/repository/postgres"
 )
@@ -243,8 +244,12 @@ func (s *PaymentService) StartReconciliationWorker(
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if err := s.RunReconciliationCycle(ctx, olderThan, batchLimit); err != nil && !errors.Is(err, context.Canceled) {
-				log.Printf("[RECONCILIATION WORKER] cycle error: %v", err)
+			if err := s.RunReconciliationCycle(ctx, olderThan, batchLimit); err != nil {
+				if !errors.Is(err, context.Canceled) {
+					log.Printf("[RECONCILIATION WORKER] cycle error: %v", err)
+				}
+			} else {
+				metrics.WorkerSucceeded("reconciliation")
 			}
 		}
 	}

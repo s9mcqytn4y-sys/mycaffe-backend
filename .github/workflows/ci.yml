@@ -72,7 +72,7 @@ jobs:
   docker-build:
     name: Docker, Compose, Nginx TLS Bootstrap & Backup/Restore Script Verification
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 15
     steps:
       - name: Checkout code
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -80,6 +80,17 @@ jobs:
       - name: Build Production Docker Image (API + Migrator)
         run: |
           docker build -t mycaffe-api:ci -f deploy/docker/Dockerfile .
+
+      # P0-06: fail on CRITICAL OS/Go-module CVEs that have a fix; HIGH is reported only.
+      # Pinned binary with a hard-coded checksum instead of trivy-action (compromised in March 2026).
+      - name: Scan Image for Vulnerabilities (Trivy v0.76.0, checksum-pinned)
+        run: |
+          curl -sSL -o trivy.tgz https://github.com/aquasecurity/trivy/releases/download/v0.76.0/trivy_0.76.0_Linux-64bit.tar.gz
+          echo "e24b1c51293c1b15e4ba8d45bbc7891ba053f90278ec2698f3562c993e145fe7  trivy.tgz" | sha256sum --check
+          sudo tar -xz -C /usr/local/bin -f trivy.tgz trivy
+          rm -f trivy.tgz
+          trivy image --quiet --scanners vuln --ignore-unfixed --severity HIGH --exit-code 0 mycaffe-api:ci
+          trivy image --quiet --scanners vuln --ignore-unfixed --severity CRITICAL --exit-code 1 mycaffe-api:ci
 
       - name: Validate Docker Compose Configurations (Dev & Production)
         run: |
@@ -101,14 +112,27 @@ jobs:
         run: |
           bash -n scripts/backup/backup_to_r2.sh
           bash -n scripts/backup/restore_from_r2.sh
+          bash -n scripts/backup/restore_drill.sh
           bash -n scripts/deploy/init-letsencrypt.sh
+          bash -n scripts/deploy/deploy.sh
+          bash -n scripts/deploy/compose.sh
+          bash -n scripts/deploy/test_deploy_rollback.sh
           sh -n deploy/postgres/00-init-roles.sh
           sh -n deploy/nginx/entrypoint-tls-bootstrap.sh
+
+      - name: Deploy by Digest with Automatic Rollback (local registry)
+        run: ./scripts/deploy/test_deploy_rollback.sh
+
+      - name: Validate Alloy Config and Unit-Test Alert Rules
+        run: |
+          docker run --rm -v "$PWD/deploy/monitoring:/m:ro" grafana/alloy:v1.21.2 fmt /m/config.alloy >/dev/null
+          docker run --rm -v "$PWD/deploy/monitoring:/m:ro" -w /m --entrypoint promtool prom/prometheus:v3.13.5 check rules alert-rules.yml
+          docker run --rm -v "$PWD/deploy/monitoring:/m:ro" -w /m --entrypoint promtool prom/prometheus:v3.13.5 test rules alert-rules.test.yml
 
   database-migration-test:
     name: PostgreSQL 18 Triple-Role, Migrator CLI, RLS, Direct mycaffe_app Login & Seed
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 15
     services:
       postgres:
         image: postgres:18-alpine
@@ -230,8 +254,53 @@ jobs:
           TEST_APP_DATABASE_URL: postgres://mycaffe_app:mycaffe_app_password@localhost:5432/mycaffe_test?sslmode=disable
           TEST_MIGRATOR_DATABASE_URL: postgres://mycaffe_migrator:mycaffe_migrator_password@localhost:5432/mycaffe_test?sslmode=disable
         run: |
-          go test -v -race -run TestDirectAppRoleLoginAndTenantRLS ./internal/pkg/database/...
-          go test -v -race -run 'TestRBACRoutesIntegration|TestCatalogIntegration|TestIteration4aIntegration|TestShiftLifecycleIntegration|TestPOSCashTenderIntegration|TestTabLifecycleIntegration' ./internal/handler/...
-          go test -v -race -run TestOrderServiceIntegration_EndToEnd ./internal/service/...
-          go test -v -race -run TestPaymentServiceIntegration_EndToEnd ./internal/service/...
-          go test -v -race -run 'TestAuthServiceIntegration_EndToEnd|TestStaffAdminIntegration|TestStaffLifecycleIntegration' ./internal/service/...
+          # Same command as ./scripts/dev.ps1 test-int: every package, so a new integration test cannot be left out.
+          set -o pipefail
+          go test -v -race -count=1 -timeout 10m ./... | tee go-test.log
+          # With a database available, a skipped DB test means its env wiring broke: fail instead of passing silently.
+          if grep -E -- '--- SKIP: Test[A-Za-z0-9_]*(Integration|RLS)' go-test.log; then
+            echo "Integration tests were skipped although TEST_APP_DATABASE_URL is set." >&2
+            exit 1
+          fi
+          echo "Integration tests run: $(grep -cE -- '^--- PASS: Test[A-Za-z0-9_]*(Integration|RLS)' go-test.log)"
+
+      - name: Backup to S3 (R2 stand-in) and Restore Drill Round-Trip
+        env:
+          R2_ENDPOINT: http://127.0.0.1:9090
+          R2_BACKUP_BUCKET: mycaffe-backups
+          R2_BACKUP_PREFIX: backups
+          AWS_ACCESS_KEY_ID: ci-not-a-secret
+          AWS_SECRET_ACCESS_KEY: ci-not-a-secret
+          AWS_DEFAULT_REGION: us-east-1
+          BACKUP_ENCRYPTION_PASSPHRASE: ci-only-throwaway-passphrase
+          METRICS_TEXTFILE_DIR: ${{ runner.temp }}/textfile
+        run: |
+          set -euo pipefail
+          mkdir -p "$METRICS_TEXTFILE_DIR"
+          docker run -d --name s3mock -p 127.0.0.1:9090:9090 adobe/s3mock:4.7.0
+          aws configure set default.s3.addressing_style path
+          for i in $(seq 1 60); do curl -sf http://127.0.0.1:9090/ >/dev/null && break; sleep 1; done
+          aws --endpoint-url "$R2_ENDPOINT" s3 mb "s3://$R2_BACKUP_BUCKET"
+          PG="$(docker ps -q --filter ancestor=postgres:18-alpine | head -n 1)"
+
+          # Two backups of the integration-test database: both land in hourly/, only the first is promoted.
+          DB_CONTAINER="$PG" DB_NAME=mycaffe_test ./scripts/backup/backup_to_r2.sh
+          sleep 2
+          DB_CONTAINER="$PG" DB_NAME=mycaffe_test ./scripts/backup/backup_to_r2.sh
+          count() { aws --endpoint-url "$R2_ENDPOINT" s3 ls "s3://$R2_BACKUP_BUCKET/backups/$1/" | grep -c '\.dump\.gpg$' || true; }
+          test "$(count hourly)" = 2 && test "$(count daily)" = 1 && test "$(count monthly)" = 1
+
+          # Drill: restore the newest backup into a throwaway PG18, prove mycaffe_app can read it, compare with the source.
+          SOURCE_CONTAINER="$PG" SOURCE_DB=mycaffe_test ./scripts/backup/restore_drill.sh | tee drill.log
+          grep -q '^RESULT PASS' drill.log
+
+          # Both scripts leave textfile metrics for the backup/drill freshness alerts.
+          grep -E '^mycaffe_backup_last_success_timestamp_seconds [0-9]+$' "$METRICS_TEXTFILE_DIR/backup.prom"
+          grep -E '^mycaffe_restore_drill_last_success_timestamp_seconds [0-9]+$' "$METRICS_TEXTFILE_DIR/restore_drill.prom"
+
+          # Restoring over a non-disposable database without explicit confirmation must be refused.
+          if DB_CONTAINER="$PG" DB_NAME=mycaffe_prod DB_MIGRATOR_USER=mycaffe_migrator BACKUP_OBJECT=latest \
+               ./scripts/backup/restore_from_r2.sh; then
+            echo "Restore guard did not block a production-named database." >&2
+            exit 1
+          fi

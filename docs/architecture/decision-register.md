@@ -130,11 +130,50 @@ Plan: [iteration-5-table-qr-kds-plan.md](iteration-5-table-qr-kds-plan.md).
 | QR6 | Public order tracker | Link valid until 24 h after the order completes; the R1 digital receipt keeps its own 90-day token |
 | QR7 | Table session auto-close | Lazy: status derived at read time, session closed on the next read/scan after `settled_at + table_idle_close_minutes`; no worker |
 
+## Offline cash & static QRIS (recorded 2026-11-02, eighth interview)
+
+ADR: [adr-005-offline-cash-sync.md](adr-005-offline-cash-sync.md). Status: decided, implementation planned.
+
+| ID | Decision | Approved option |
+|----|----------|-----------------|
+| OF1 | Offline scope | Fully paid `takeaway`/`dine_in` orders by cash or static QRIS only; no tabs, splits, void, refund, gateway payments |
+| OF2 | Offline identity | Owner-registered POS device + local PIN against a per-device verifier (72 h expiry, wiped on revoke, 5-fail local lockout, failures uploaded and audited) |
+| OF3 | Offline pricing | Server re-prices from its stored snapshot of the device's `catalog_version`; older than 24 h → accepted and flagged `stale_catalog`; delta reported |
+| OF4 | Offline shift | Order stays in the shift open when it was taken; shift close refused while the device reports unsynced orders (owner force-close allowed); late orders mark the Z-report `amended` |
+| OF5 | Offline stock | Never rejected for stock; balance may go negative, line flagged `oversold` (stock CHECK change needs its own approval) |
+| OF6 | Offline numbering | Device-prefixed local queue number on the receipt; official number assigned by the server at sync |
+| OF7 | Offline limits | 12 h or 300 orders since last sync, per-store settings |
+| OF8 | Offline static QRIS | Amount + reference required; stored `offline_unreconciled` until settlement matching |
+| OF9 | Failed sync | Never discarded: stored as `rejected` with a reason, owner accepts or rejects, both audited |
+
+## Non-cash refunds (recorded 2026-11-02, ninth interview)
+
+Status: approved, implementation planned. Until built, non-cash refunds still return 409 `REFUND_METHOD_NOT_SUPPORTED` and nothing is marked refunded.
+Midtrans facts checked against docs.midtrans.com on 2026-11-02: QRIS is charged with acquirer `gopay` (`internal/pkg/midtrans/midtrans.go`); GoPay QRIS refund window is 45 days on-us and 7 days off-us; Direct Refund returns 200 (approved) or 202 (denied by bank); the final signal is the refund notification carrying `bank_confirmed_at`; `refund_key` retries are honoured for 7 days. Partial refund support for GoPay QRIS is not stated in the docs.
+
+| ID | Decision | Approved option |
+|----|----------|-----------------|
+| RF1-a | Dynamic QRIS | Midtrans Direct Refund first, within the provider window, with a deterministic `refund_key` per refund; denied (202) or out of window → fallback RF1-c |
+| RF1-b | Partial QRIS refund | API for full refunds only; partial refunds use RF1-c until partial support is proven in sandbox (then enabled per acquirer by configuration) |
+| RF1-c | Fallback (also static QRIS, EDC, partial) | Either cash from the open drawer as a `refund` cash movement keeping the original method and reference, or a manual bank transfer by the **owner only**, recorded with bank name, last 4 account digits and transfer reference (no full account number stored); the transfer does not touch the drawer |
+| RF1-d | EDC | Void/reversal on the EDC terminal allowed when the approval code / trace number is recorded; status stays pending reconciliation until matched to the bank settlement report |
+| RF1-e | Refund time window (closes gap P5) | Cashier: same business day only. Owner: up to 7 days. Older: no refund in the system. Values in `store_settings` |
+| RF1-f | Provider confirmation | API 200 → `refund_pending`; `refunded` only after the `bank_confirmed_at` notification or a confirming status check. Existing `void_refund_owner_threshold` applies to every method |
+
+## Infrastructure & operations (recorded 2026-11-02, tenth interview)
+
+Status: decided, implementation planned ([audit tickets](../engineering/audit-backlog.md) P0-03, P0-04, P0-07, P2-04; P0-03 and P0-04 done).
+
+| ID | Decision | Approved option |
+|----|----------|-----------------|
+| IN1 | Production ingress | **Named Cloudflare Tunnel** per client VPS, same pattern as the demo (I2): no inbound ports except SSH from admin IPs, TLS at the Cloudflare edge, client IP from `CF-Connecting-IP` (Nginx `real_ip_header` + `set_real_ip_from` the cloudflared container network; `TRUSTED_PROXIES` set), certbot removed. Changing `docker-compose.prod.yml` and `nginx.prod.conf` still needs approval as a deployment change. If the tunnel is down, cash and static QRIS continue through ADR-005 offline mode |
+| IN2 | Branch protection | **Stay on the free plan; manual discipline.** No technical branch protection (private repo, API 403). Rules in [git-workflow-and-releases.md](../engineering/git-workflow-and-releases.md) §3 apply; the risk of a merge without approval (PR #23) is accepted by the owner |
+| IN3 | Monitoring & alerting | **Grafana Cloud free tier**: external uptime check on `/health/ready` plus metrics via remote write; technical alerts to the operator's Telegram group and email. Store owners get business notifications from MyCaffe only, not technical alerts |
+| IN4 | Accounting export | **Neutral CSV first**: generic journal columns (date, account, debit, credit, reference) with configurable account mapping; adapters for Jurnal/Accurate only when a client uses one |
+
 ## Awaiting owner approval
 
-| ID | Proposal | Until approved |
-|----|----------|----------------|
-| RF1 | **Non-cash refunds.** (a) Dynamic QRIS paid through Midtrans: call the Midtrans refund API when it supports that transaction, record the provider refund id, mark refunded only on the provider's success (webhook/status check). (b) Fallback for any non-cash payment, and for (a) when the API refuses: cash from the open drawer as a `refund` movement whose reason and audit metadata keep the original method and reference. (c) EDC: cash refund as in (b), or manual reversal on the EDC terminal recorded with its reference number and reconciled later. Static QRIS: (b) only (no provider API). | Non-cash refund → 409 `REFUND_METHOD_NOT_SUPPORTED`; nothing is marked refunded |
+None.
 
 ## Resolved from existing sources (not re-asked)
 
@@ -147,5 +186,5 @@ Plan: [iteration-5-table-qr-kds-plan.md](iteration-5-table-qr-kds-plan.md).
 
 | Topic | Needed for | Default until decided |
 | ------- | ----------- | ----------------------- |
-| Production domain name & DNS | Named Cloudflare Tunnel / TLS, cookie domain (O2) | Quick Tunnel URL for demo only |
+| Production domain name | Tunnel hostname (IN1), cookie domain (O2) | Quick Tunnel URL for demo only |
 | Midtrans production credentials & VPS provisioning | Production cutover | Sandbox only |

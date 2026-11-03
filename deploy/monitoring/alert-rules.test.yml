@@ -1,0 +1,146 @@
+# promtool test rules deploy/monitoring/alert-rules.test.yml  (run in CI, docker-build job)
+# Input samples are 1m apart: sparser samples go stale after the 5m lookback and reset `for`.
+rule_files:
+  - alert-rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: api down, 5xx with traffic floor, slow requests excluding /ws, stalled worker
+    interval: 1m
+    input_series:
+      - series: 'up{job="mycaffe-api",client="a",instance="api:9091"}'
+        values: '0x20'
+      # client a: 60 ok + 10 failed per minute -> 14% 5xx
+      - series: 'mycaffe_http_requests_total{client="a",method="GET",route="/pos/orders",status="200"}'
+        values: '0+60x20'
+      - series: 'mycaffe_http_requests_total{client="a",method="GET",route="/pos/orders",status="500"}'
+        values: '0+10x20'
+      # client b: 1 ok + 1 failed per minute -> 50% 5xx but under the 3 req/min floor
+      - series: 'mycaffe_http_requests_total{client="b",method="GET",route="/pos/orders",status="200"}'
+        values: '0+1x20'
+      - series: 'mycaffe_http_requests_total{client="b",method="GET",route="/pos/orders",status="500"}'
+        values: '0+1x20'
+      # client a: fast requests plus a long-lived /ws connection that must not count as latency
+      - series: 'mycaffe_http_request_duration_seconds_bucket{client="a",method="GET",route="/pos/orders",le="1"}'
+        values: '0+10x20'
+      - series: 'mycaffe_http_request_duration_seconds_bucket{client="a",method="GET",route="/pos/orders",le="5"}'
+        values: '0+10x20'
+      - series: 'mycaffe_http_request_duration_seconds_bucket{client="a",method="GET",route="/pos/orders",le="+Inf"}'
+        values: '0+10x20'
+      - series: 'mycaffe_http_request_duration_seconds_bucket{client="a",method="GET",route="/ws",le="1"}'
+        values: '0x20'
+      - series: 'mycaffe_http_request_duration_seconds_bucket{client="a",method="GET",route="/ws",le="5"}'
+        values: '0x20'
+      - series: 'mycaffe_http_request_duration_seconds_bucket{client="a",method="GET",route="/ws",le="+Inf"}'
+        values: '0+10x20'
+      # client b: genuinely slow requests (1-5 s)
+      - series: 'mycaffe_http_request_duration_seconds_bucket{client="b",method="GET",route="/pos/orders",le="1"}'
+        values: '0x20'
+      - series: 'mycaffe_http_request_duration_seconds_bucket{client="b",method="GET",route="/pos/orders",le="5"}'
+        values: '0+10x20'
+      - series: 'mycaffe_http_request_duration_seconds_bucket{client="b",method="GET",route="/pos/orders",le="+Inf"}'
+        values: '0+10x20'
+      # email stopped at t=0; outbox_relay keeps succeeding (value = sample time)
+      - series: 'mycaffe_worker_last_success_timestamp_seconds{client="a",worker="email"}'
+        values: '0x20'
+      - series: 'mycaffe_worker_last_success_timestamp_seconds{client="a",worker="outbox_relay"}'
+        values: '0+60x20'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: MyCaffeAPIDown
+        exp_alerts:
+          - exp_labels: {severity: critical, job: mycaffe-api, client: a, instance: "api:9091"}
+            exp_annotations:
+              summary: "API a tidak bisa di-scrape selama 2 menit."
+      - eval_time: 15m
+        alertname: MyCaffeMetricsMissing
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: MyCaffeHigh5xxRate
+        exp_alerts:
+          - exp_labels: {severity: critical, client: a}
+            exp_annotations:
+              summary: "Lebih dari 5% request API a gagal 5xx selama 5 menit."
+      - eval_time: 15m
+        alertname: MyCaffeSlowRequests
+        exp_alerts:
+          - exp_labels: {severity: warning, client: b}
+            exp_annotations:
+              summary: "p95 latensi API b di atas 1 detik selama 10 menit."
+      - eval_time: 15m
+        alertname: MyCaffeWorkerStalled
+        exp_alerts:
+          - exp_labels: {severity: critical, client: a, worker: email}
+            exp_annotations:
+              summary: "Worker email di a tidak menyelesaikan siklus selama lebih dari 5 menit."
+
+  - name: no api metrics at all
+    interval: 1m
+    input_series:
+      - series: 'up{job="integrations/unix",client="a",instance="host"}'
+        values: '1x20'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: MyCaffeMetricsMissing
+        exp_alerts:
+          - exp_labels: {severity: critical, job: mycaffe-api}
+            exp_annotations:
+              summary: "Tidak ada metrik API masuk selama 10 menit (Alloy mati, VPS mati, atau kredensial Grafana salah)."
+
+  - name: backups, drill, disk
+    interval: 1m
+    input_series:
+      - series: 'up{job="integrations/unix",client="a",instance="host"}'
+        values: '1x200'
+      # last backup at t=0, never again
+      - series: 'mycaffe_backup_last_success_timestamp_seconds{client="a",instance="host",job="integrations/unix"}'
+        values: '0x200'
+      # drill passed at t=0
+      - series: 'mycaffe_restore_drill_last_success_timestamp_seconds{client="a",instance="host",job="integrations/unix"}'
+        values: '0x200'
+      - series: 'node_filesystem_avail_bytes{client="a",mountpoint="/",fstype="ext4",device="/dev/sda1"}'
+        values: '10x200'
+      - series: 'node_filesystem_size_bytes{client="a",mountpoint="/",fstype="ext4",device="/dev/sda1"}'
+        values: '100x200'
+    alert_rule_test:
+      - eval_time: 1h
+        alertname: MyCaffeBackupStale
+        exp_alerts: []
+      - eval_time: 2h30m
+        alertname: MyCaffeBackupStale
+        exp_alerts:
+          - exp_labels: {severity: critical, client: a, instance: host, job: integrations/unix}
+            exp_annotations:
+              summary: "Backup terakhir a sudah lebih dari 2 jam (RPO 1 jam terlampaui)."
+      - eval_time: 2h30m
+        alertname: MyCaffeBackupMetricMissing
+        exp_alerts: []
+      - eval_time: 2h30m
+        alertname: MyCaffeRestoreDrillStale
+        exp_alerts: []
+      - eval_time: 1h
+        alertname: MyCaffeDiskLow
+        exp_alerts:
+          - exp_labels: {severity: warning, client: a, mountpoint: /, fstype: ext4, device: /dev/sda1}
+            exp_annotations:
+              summary: "Disk / di a tersisa di bawah 15%."
+      - eval_time: 1h
+        alertname: MyCaffeDiskCritical
+        exp_alerts: []
+
+  - name: backup never recorded since install
+    interval: 1m
+    input_series:
+      - series: 'up{job="integrations/unix",client="a",instance="host"}'
+        values: '1x200'
+    alert_rule_test:
+      - eval_time: 1h
+        alertname: MyCaffeBackupMetricMissing
+        exp_alerts: []
+      - eval_time: 2h30m
+        alertname: MyCaffeBackupMetricMissing
+        exp_alerts:
+          - exp_labels: {severity: critical}
+            exp_annotations:
+              summary: "Belum ada catatan backup sukses selama 2 jam sejak monitoring host aktif."

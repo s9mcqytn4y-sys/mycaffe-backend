@@ -17,10 +17,19 @@ jobs:
   publish-ghcr:
     name: Build & Push ghcr.io/s9mcqytn4y-sys/mycaffe-api
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
+    permissions:
+      contents: write # GitHub Release for v* tags
+      packages: write
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/mycaffe-api
     steps:
       - name: Checkout code
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      # The default docker driver cannot store provenance/SBOM attestations.
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
 
       - name: Log in to GitHub Container Registry (GHCR)
         uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
@@ -33,18 +42,72 @@ jobs:
         id: meta
         uses: docker/metadata-action@902fa8ec7d6ecbf8d84d538b9b233a880e428804 # v5.7.0
         with:
-          images: ghcr.io/${{ github.repository_owner }}/mycaffe-api
+          images: ${{ env.IMAGE }}
           tags: |
             type=sha,prefix=sha-
             type=ref,event=branch
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
 
+      # Provenance (SLSA, mode=max) and an SPDX SBOM are pushed with the image as BuildKit
+      # attestations (P0-06). GitHub artifact attestations need a public or Enterprise repo.
       - name: Build and push Docker image to GHCR
+        id: build
         uses: docker/build-push-action@14487ce63c7a62a4a324b0bfb37086795e31c6c1 # v6.15.0
         with:
           context: .
           file: deploy/docker/Dockerfile
           push: true
+          provenance: mode=max
+          sbom: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+      # Production deploys pin this digest (scripts/deploy/deploy.sh); tags are only for humans.
+      - name: Publish image digest to the run summary
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          {
+            echo "### ${IMAGE}"
+            echo
+            echo "Digest: \`${DIGEST}\`"
+            echo
+            echo "Deploy: \`scripts/deploy/deploy.sh ${DIGEST}\`"
+            echo
+            echo "Tags:"
+            echo "${TAGS}" | sed 's/^/- /'
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: GitHub Release with digest, SBOM and provenance (v* tags)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          SBOM="mycaffe-api-${TAG}.spdx.json"
+          PROV="mycaffe-api-${TAG}.provenance.json"
+          docker buildx imagetools inspect "${IMAGE}@${DIGEST}" --format '{{ json .SBOM.SPDX }}' > "${SBOM}"
+          docker buildx imagetools inspect "${IMAGE}@${DIGEST}" --format '{{ json .Provenance.SLSA }}' > "${PROV}"
+          jq -e '.spdxVersion' "${SBOM}" >/dev/null
+          jq -e '.buildDefinition' "${PROV}" >/dev/null
+
+          SECTION="$(printf '## Container image\n\n- Image: `%s@%s`\n- Deploy: `scripts/deploy/deploy.sh %s`\n- SBOM (SPDX) and SLSA provenance are attached and stored as attestations in GHCR (`docker buildx imagetools inspect %s@%s`).\n' \
+            "${IMAGE}" "${DIGEST}" "${DIGEST}" "${IMAGE}" "${DIGEST}")"
+
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            gh release upload "${TAG}" "${SBOM}" "${PROV}" --clobber
+            BODY="$(gh release view "${TAG}" --json body --jq .body)"
+            if [[ "${BODY}" != *"${DIGEST}"* ]]; then
+              printf '%s\n\n%s\n' "${BODY}" "${SECTION}" > notes.md
+              gh release edit "${TAG}" --notes-file notes.md
+            fi
+          else
+            printf '%s\n' "${SECTION}" > notes.md
+            PRERELEASE=()
+            [[ "${TAG}" == *-* ]] && PRERELEASE=(--prerelease)
+            gh release create "${TAG}" "${SBOM}" "${PROV}" --verify-tag --title "${TAG}" --notes-file notes.md "${PRERELEASE[@]}"
+          fi

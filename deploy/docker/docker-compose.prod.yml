@@ -1,7 +1,7 @@
 # MyCaffe POS Platform - Production Docker Compose
 # Architecture: Single-VPS Modular Monolith (Hostinger KVM 2: 2 vCPU, 8 GB RAM, 100 GB NVMe)
 # Target OS: Ubuntu 24.04 LTS
-# Pulls immutable GHCR images built in CI (no source code compilation on VPS).
+# Pulls GHCR images by digest (immutable) via scripts/deploy/deploy.sh; no source compilation on the VPS.
 
 services:
   postgres:
@@ -53,7 +53,7 @@ services:
           memory: 1024M
 
   migrate:
-    image: ghcr.io/s9mcqytn4y-sys/mycaffe-api:${API_IMAGE_TAG:?API_IMAGE_TAG must be pinned}
+    image: ghcr.io/s9mcqytn4y-sys/mycaffe-api@${API_IMAGE_DIGEST:?API_IMAGE_DIGEST must be set (use scripts/deploy/deploy.sh)}
     container_name: mycaffe-migrate
     restart: "no"
     depends_on:
@@ -69,7 +69,7 @@ services:
       - mycaffe-data
 
   api:
-    image: ghcr.io/s9mcqytn4y-sys/mycaffe-api:${API_IMAGE_TAG:?API_IMAGE_TAG must be pinned}
+    image: ghcr.io/s9mcqytn4y-sys/mycaffe-api@${API_IMAGE_DIGEST:?API_IMAGE_DIGEST must be set (use scripts/deploy/deploy.sh)}
     container_name: mycaffe-api
     restart: unless-stopped
     depends_on:
@@ -113,9 +113,12 @@ services:
       R2_PUBLIC_URL: ${R2_PUBLIC_URL:-}
       SENTRY_DSN: ${SENTRY_DSN:-}
       SENTRY_ENVIRONMENT: "production"
+      # Scraped by alloy over mycaffe-metrics; no host port and no Nginx route.
+      METRICS_ADDR: ":9091"
     networks:
       - mycaffe-edge
       - mycaffe-data
+      - mycaffe-metrics
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health/ready"]
       interval: 15s
@@ -132,7 +135,7 @@ services:
           memory: 128M
 
   web:
-    image: ghcr.io/s9mcqytn4y-sys/mycaffe-web:${WEB_IMAGE_TAG:?WEB_IMAGE_TAG must be pinned}
+    image: ghcr.io/s9mcqytn4y-sys/mycaffe-web@${WEB_IMAGE_DIGEST:?WEB_IMAGE_DIGEST must be set (use scripts/deploy/deploy.sh)}
     container_name: mycaffe-web
     restart: unless-stopped
     depends_on:
@@ -191,9 +194,38 @@ services:
       - mycaffe-edge
     entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot --quiet; sleep 12h & wait $${!}; done;'"
 
+  # Metrics shipper (decision IN3, docs/setup/monitoring.md): API + host metrics to Grafana Cloud.
+  # Host paths are read-only; no docker.sock.
+  alloy:
+    image: grafana/alloy:v1.21.2
+    container_name: mycaffe-alloy
+    restart: unless-stopped
+    command: ["run", "--storage.path=/var/lib/alloy/data", "/etc/alloy/config.alloy"]
+    environment:
+      MYCAFFE_CLIENT: ${MYCAFFE_CLIENT:?MYCAFFE_CLIENT must be set}
+      GRAFANA_CLOUD_PROM_URL: ${GRAFANA_CLOUD_PROM_URL:?GRAFANA_CLOUD_PROM_URL must be set}
+      GRAFANA_CLOUD_PROM_USER: ${GRAFANA_CLOUD_PROM_USER:?GRAFANA_CLOUD_PROM_USER must be set}
+      GRAFANA_CLOUD_API_KEY: ${GRAFANA_CLOUD_API_KEY:?GRAFANA_CLOUD_API_KEY must be set}
+    volumes:
+      - ../monitoring/config.alloy:/etc/alloy/config.alloy:ro
+      - alloy-data:/var/lib/alloy/data
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/host/root:ro,rslave
+      - /var/lib/mycaffe/metrics:/host/textfile:ro
+    networks:
+      - mycaffe-metrics
+      - mycaffe-monitor-egress
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+
 volumes:
   pgdata:
     driver: local
+  alloy-data:
   certbot-etc:
   certbot-var:
   web-root:
@@ -209,3 +241,10 @@ networks:
   mycaffe-data:
     driver: bridge
     internal: true
+  # api <-> alloy only, so the scrape never crosses the edge or data networks.
+  mycaffe-metrics:
+    driver: bridge
+    internal: true
+  # alloy's outbound HTTPS to Grafana Cloud.
+  mycaffe-monitor-egress:
+    driver: bridge

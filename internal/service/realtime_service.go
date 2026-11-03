@@ -112,30 +112,37 @@ func (s *RealtimeService) issue(ctx context.Context, storeID uuid.UUID, channels
 
 // Redeem consumes a ticket once and re-checks its subject: the staff session must still be live
 // and the user active, or the guest session still valid.
-func (s *RealtimeService) Redeem(ctx context.Context, ticket string) (uuid.UUID, []string, error) {
+// WSGrant is what a redeemed ticket grants: the store, the channels and the session behind them.
+type WSGrant struct {
+	StoreID        uuid.UUID
+	Channels       []string
+	UserID         *uuid.UUID
+	AuthSessionID  *uuid.UUID
+	GuestSessionID *uuid.UUID
+}
+
+func (s *RealtimeService) Redeem(ctx context.Context, ticket string) (*WSGrant, error) {
 	parts := strings.SplitN(ticket, ".", 3)
 	if len(parts) != 3 {
-		return uuid.Nil, nil, ErrInvalidWSTicket
+		return nil, ErrInvalidWSTicket
 	}
 	storeID, err1 := uuid.Parse(parts[0])
 	ticketID, err2 := uuid.Parse(parts[1])
 	if err1 != nil || err2 != nil || storeID == uuid.Nil {
-		return uuid.Nil, nil, ErrInvalidWSTicket
+		return nil, ErrInvalidWSTicket
 	}
 	sum := sha256.Sum256([]byte(parts[2]))
-	var channels []string
+	grant := &WSGrant{StoreID: storeID}
 	err := database.WithTenantTx(ctx, s.db, storeID, func(tx *sqlx.Tx) error {
 		var row struct {
-			TokenHash      []byte     `db:"token_hash"`
-			AuthSessionID  *uuid.UUID `db:"auth_session_id"`
-			UserID         *uuid.UUID `db:"user_id"`
-			GuestSessionID *uuid.UUID `db:"guest_session_id"`
-			Channels       string     `db:"channels"`
-			ExpiresAt      time.Time  `db:"expires_at"`
-			UsedAt         *time.Time `db:"used_at"`
+			TokenHash []byte     `db:"token_hash"`
+			Channels  string     `db:"channels"`
+			ExpiresAt time.Time  `db:"expires_at"`
+			UsedAt    *time.Time `db:"used_at"`
 		}
-		err := tx.GetContext(ctx, &row, `SELECT token_hash, auth_session_id, user_id, guest_session_id, array_to_string(channels, ',') AS channels, expires_at, used_at
-			FROM ws_tickets WHERE store_id = $1 AND id = $2 FOR UPDATE`, storeID, ticketID)
+		err := tx.QueryRowxContext(ctx, `SELECT token_hash, auth_session_id, user_id, guest_session_id, array_to_string(channels, ',') AS channels, expires_at, used_at
+			FROM ws_tickets WHERE store_id = $1 AND id = $2 FOR UPDATE`, storeID, ticketID).
+			Scan(&row.TokenHash, &grant.AuthSessionID, &grant.UserID, &grant.GuestSessionID, &row.Channels, &row.ExpiresAt, &row.UsedAt)
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrInvalidWSTicket
 		}
@@ -149,34 +156,56 @@ func (s *RealtimeService) Redeem(ctx context.Context, ticket string) (uuid.UUID,
 		if _, err := tx.ExecContext(ctx, `UPDATE ws_tickets SET used_at = $3 WHERE store_id = $1 AND id = $2`, storeID, ticketID, now); err != nil {
 			return err
 		}
-		if row.GuestSessionID != nil {
-			g, err := s.guests.GetGuestSession(ctx, tx, storeID, *row.GuestSessionID, false)
-			if err != nil || g.EndedAt != nil || !now.Before(g.ExpiresAt) || g.TableSessionStatus != "open" {
-				return ErrInvalidWSTicket
-			}
-		} else {
-			var live bool
-			if err := tx.GetContext(ctx, &live, `
-				SELECT EXISTS (
-					SELECT 1 FROM auth_sessions a JOIN users u ON u.store_id = a.store_id AND u.id = a.user_id
-					WHERE a.store_id = $1 AND a.id = $2 AND a.user_id = $3
-					  AND a.revoked_at IS NULL AND a.expires_at > $4 AND u.is_active)`,
-				storeID, row.AuthSessionID, row.UserID, now); err != nil {
-				return err
-			}
-			if !live {
-				return ErrInvalidWSTicket
-			}
+		live, err := s.grantAliveTx(ctx, tx, grant, now)
+		if err != nil {
+			return err
 		}
-		channels = strings.Split(row.Channels, ",")
+		if !live {
+			return ErrInvalidWSTicket
+		}
+		grant.Channels = strings.Split(row.Channels, ",")
 		return nil
 	})
 	if err != nil {
 		// A rejected ticket is still marked used only if the transaction committed; on rejection it rolled back,
 		// which is fine: an invalid ticket stays invalid.
-		return uuid.Nil, nil, err
+		return nil, err
 	}
-	return storeID, channels, nil
+	return grant, nil
+}
+
+// Alive reports whether the session behind an open WebSocket still holds: staff session not revoked
+// or expired and the account active and unlocked, or the guest session not ended.
+func (s *RealtimeService) Alive(ctx context.Context, grant *WSGrant) (bool, error) {
+	var live bool
+	err := database.WithTenantTx(ctx, s.db, grant.StoreID, func(tx *sqlx.Tx) error {
+		var err error
+		live, err = s.grantAliveTx(ctx, tx, grant, s.nowFunc().UTC())
+		return err
+	})
+	return live, err
+}
+
+func (s *RealtimeService) grantAliveTx(ctx context.Context, tx *sqlx.Tx, grant *WSGrant, now time.Time) (bool, error) {
+	if grant.GuestSessionID != nil {
+		g, err := s.guests.GetGuestSession(ctx, tx, grant.StoreID, *grant.GuestSessionID, false)
+		if errors.Is(err, postgres.ErrGuestSessionNotFound) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		return g.EndedAt == nil && now.Before(g.ExpiresAt) && g.TableSessionStatus == "open", nil
+	}
+	var live bool
+	err := tx.GetContext(ctx, &live, `
+		SELECT EXISTS (
+			SELECT 1 FROM auth_sessions a JOIN users u ON u.store_id = a.store_id AND u.id = a.user_id
+			WHERE a.store_id = $1 AND a.id = $2 AND a.user_id = $3
+			  AND a.revoked_at IS NULL AND a.expires_at > $4 AND u.is_active
+			  AND (u.locked_until IS NULL OR u.locked_until <= $4))`,
+		grant.StoreID, grant.AuthSessionID, grant.UserID, now)
+	return live, err
 }
 
 // outboxRow is an outbox event joined with the order it is about (all aggregates are orders today).

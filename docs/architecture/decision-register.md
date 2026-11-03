@@ -162,7 +162,7 @@ Midtrans facts checked against docs.midtrans.com on 2026-11-02: QRIS is charged 
 
 ## Infrastructure & operations (recorded 2026-11-02, tenth interview)
 
-Status: decided, implementation planned (audit tickets P0-03, P0-04, P0-07, P2-04).
+Status: decided, implementation planned ([audit tickets](../engineering/audit-backlog.md) P0-03, P0-04, P0-07, P2-04; P0-03 and P0-04 done).
 
 | ID | Decision | Approved option |
 |----|----------|-----------------|

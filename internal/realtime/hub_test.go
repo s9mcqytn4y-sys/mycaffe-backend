@@ -100,19 +100,22 @@ func TestHubConnectionCaps(t *testing.T) {
 	alive.Store(true)
 	srv := serveTestWS(t, hub, alive)
 
-	// expect retries briefly: a connection is counted once the hub loop has registered it.
+	// expect dials once; an accepted connection is awaited until the hub loop has registered it, so the
+	// next cap check sees it (registration is asynchronous to the handshake).
 	expect := func(query string, want int) {
 		t.Helper()
-		deadline := time.Now().Add(time.Second)
-		for {
-			_, code := dialTestWS(t, srv, query)
-			if code == want || time.Now().After(deadline) {
-				if code != want {
-					t.Fatalf("%s: got %d, want %d", query, code, want)
-				}
-				return
+		store := strings.TrimPrefix(strings.Split(query, "&")[0], "store=")
+		before := hub.Connections(store)
+		if _, code := dialTestWS(t, srv, query); code != want {
+			t.Fatalf("%s: got %d, want %d", query, code, want)
+		}
+		if want != http.StatusSwitchingProtocols {
+			return
+		}
+		for deadline := time.Now().Add(time.Second); hub.Connections(store) == before; time.Sleep(5 * time.Millisecond) {
+			if time.Now().After(deadline) {
+				t.Fatalf("%s: connection was never registered", query)
 			}
-			time.Sleep(20 * time.Millisecond)
 		}
 	}
 	expect("store=s1&ip=10.0.0.1&guest=g1", http.StatusSwitchingProtocols)

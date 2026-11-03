@@ -30,7 +30,7 @@ import (
 // 3. Void order > threshold with owner PIN -> 200 OK, audit log includes owner_override_by.
 // 4. Cash refund <= threshold with active cashier shift -> 200 OK, open_drawer: true, cash movement refund, audit log REFUND.
 // 5. Cash refund when drawer balance insufficient -> 409 INSUFFICIENT_DRAWER_CASH.
-// 6. Non-cash (EDC) refund -> 409 REFUND_METHOD_NOT_SUPPORTED until a non-cash policy is approved.
+// 6. Non-cash (EDC) refund in cash from the drawer (RF1-c) -> 200, waste keeps stock untouched.
 // 7. Stock override with invalid owner PIN -> 401 INVALID_OWNER_PIN.
 // 8. Stock override with valid owner PIN -> 200 OK, product stock_quantity updated, audit log STOCK_OVERRIDE.
 func TestVoidRefundStockOverrideIntegration(t *testing.T) {
@@ -437,9 +437,9 @@ func TestVoidRefundStockOverrideIntegration(t *testing.T) {
 	})
 
 	// =========================================================================
-	// Scenario 6: Non-cash refund is refused (hotfix 4d-1)
+	// Scenario 6: Non-cash refund paid back in cash from the drawer (RF1-c)
 	// =========================================================================
-	t.Run("EDC refund is refused with REFUND_METHOD_NOT_SUPPORTED", func(t *testing.T) {
+	t.Run("EDC refund paid back in cash from the drawer", func(t *testing.T) {
 		orderID, _ := createTestOrder(1)
 		payRes := call("POST", fmt.Sprintf("/pos/orders/%s/payments", orderID), cashierResp.AccessToken, map[string]any{
 			"idempotency_key":    "pay-edc-" + uuid.New().String(),
@@ -464,11 +464,11 @@ func TestVoidRefundStockOverrideIntegration(t *testing.T) {
 			"pin":           "482913",
 			"restore_stock": false,
 		})
-		if refundRes.Code != http.StatusConflict || !strings.Contains(refundRes.Body.String(), "REFUND_METHOD_NOT_SUPPORTED") {
-			t.Fatalf("expected 409 REFUND_METHOD_NOT_SUPPORTED, got %d: %s", refundRes.Code, refundRes.Body.String())
+		if refundRes.Code != http.StatusOK || !strings.Contains(refundRes.Body.String(), `"open_drawer":true`) {
+			t.Fatalf("EDC refund in cash must succeed and open the drawer, got %d: %s", refundRes.Code, refundRes.Body.String())
 		}
 		if stockAfter := getProductStock(croissantProdID); stockAfter != stockBefore {
-			t.Fatalf("refused refund must not touch stock, before=%d, after=%d", stockBefore, stockAfter)
+			t.Fatalf("a waste refund must not touch stock, before=%d, after=%d", stockBefore, stockAfter)
 		}
 	})
 

@@ -10,7 +10,7 @@
 # APP_ENV=staging: every route is live and Midtrans stays in sandbox. The stack refuses to start
 # without JWT_SECRET_KEY, DEMO_OWNER_PIN and DEMO_STAFF_PIN in .env.demo (leaks L-1, L-2).
 #
-# Usage: see docs/setup/demo-staging-environment.md
+# Usage: see docs/Setup/DemoStagingEnvironment.md
 
 name: mycaffe-demo
 

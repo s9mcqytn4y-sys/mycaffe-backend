@@ -7,7 +7,7 @@
 # A digest is sha256:<64 hex>, printed in the summary of the "Release - Publish" workflow run.
 # Steps: backup -> pull -> up (migrate runs first) -> wait for a healthy api -> record digests.
 # If pull, migrate, start or health fails, the previous digests are redeployed (migrations are
-# additive, so the previous image still works on the migrated schema). Runbook: docs/setup/deploy.md.
+# additive, so the previous image still works on the migrated schema). Runbook: docs/Setup/Deploy.md.
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -100,5 +100,5 @@ if apply "${CUR_API}" "${CUR_WEB}"; then
   die "Rolled back to the previous deployment."
 fi
 history "${ACTION} FAILED api=${NEW_API}; ROLLBACK FAILED to api=${CUR_API}"
-echo "[DEPLOY ERROR] Rollback failed too. See docs/setup/deploy.md (manual recovery)." >&2
+echo "[DEPLOY ERROR] Rollback failed too. See docs/Setup/Deploy.md (manual recovery)." >&2
 exit 2

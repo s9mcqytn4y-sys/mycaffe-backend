@@ -2,7 +2,7 @@
 
 Diperbarui 2026-10-31 setelah Phase 02.01-C. Menggantikan versi lama yang mendahului autentikasi.
 Status: ✅ Implemented & Tested · 🔒 Guarded (503 di staging/produksi) · ⏳ Planned.
-Kontrak HTTP: [docs/api/openapi.yaml](../api/openapi.yaml). Izin: `internal/pkg/rbac`.
+Kontrak HTTP: [docs/Api/OpenApi.yaml](../Api/OpenApi.yaml). Izin: `internal/pkg/rbac`.
 
 ## 1. Aktor & kelas rute (ADR-003 D8)
 
@@ -131,7 +131,7 @@ sequenceDiagram
 | Shift: buka modal → transaksi → blind count → selisih > toleransi = PIN owner → Z | `store_settings.cash_variance_tolerance` | C1 |
 | Void/refund: alasan + PIN sendiri; di atas ambang PIN owner; refund tunai dari laci aktif | `void_refund_owner_threshold` | O1, C2 |
 | Fallback QRIS statis | gagal 2× / forced → gambar QRIS statis → konfirmasi kasir + ref | K8 |
-| Katalog, varian, resep, stok bahan, promo | lihat catalog-inventory-design.md | K1, K2, K7 |
+| Katalog, varian, resep, stok bahan, promo | lihat [CatalogInventoryDesign.md](CatalogInventoryDesign.md) | K1, K2, K7 |
 
 ## 5. Ketergantungan modul
 

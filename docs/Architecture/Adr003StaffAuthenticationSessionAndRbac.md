@@ -5,7 +5,7 @@
 **PROPOSED** — owner decisions recorded on 2026-10-31; awaiting owner approval of this document before increment 02.01-B (implementation) starts.
 
 - **Baseline:** PR #5 head `19bd992` (`feature/phase-01-subtask-04-payment-ledger`).
-- **Companion:** Phase 02 design review draft (PR #6, `docs/architecture/phase-02-subtask-01-auth-rbac-signed-qr-design-review.md`).
+- **Companion:** Phase 02 design review draft (PR #6; file tidak lagi ada di repo).
 - **Scope of this ADR:** staff identity, staff sessions, RBAC permission policy, route authentication classes. Table QR credentials and guest table sessions (increments 02.01-D/E) are referenced only where they constrain staff-auth design; they get their own ADR.
 - **Not authorized by this ADR:** schema changes, new routes, token-key rotation, or opening any contained route in staging/production. Those happen in 02.01-B/C after approval.
 
@@ -114,7 +114,7 @@ Three layers, outermost first:
 
 ### D6 — Sensitive-action PIN re-authentication *(owner decision O1, 2026-10-31)*
 
-The design review flagged a conflict between Module 3 ("cashier must not void/refund without the configured authorization flow") and the brand guide ("cashier can void/refund with mandatory reason"). `docs/architecture/decisions-before-code.md` §6 (already approved) resolves it: *"Sensitive cashier actions require a PIN and mandatory reason logged to append-only `audit_logs`."* Proposed contract:
+The design review flagged a conflict between Module 3 ("cashier must not void/refund without the configured authorization flow") and the brand guide ("cashier can void/refund with mandatory reason"). `docs/Archive/DecisionsBeforeCode.md` §6 (already approved) resolves it: *"Sensitive cashier actions require a PIN and mandatory reason logged to append-only `audit_logs`."* Proposed contract:
 
 - Void/refund/stock override/price override/shift-close discrepancy require the **acting user to re-enter their own PIN** plus a non-empty reason in the same request.
 - No owner approval step, no second actor (preserves the "no multi-step approval" rule).
@@ -225,7 +225,7 @@ Down migration drops the new objects and columns, restores the previous audit CH
 | O2 | POS frontend and API share one registrable domain; refresh via HttpOnly cookie |
 | O3 | Max 3 active sessions per staff, idle timeout 2 h, absolute 12 h |
 | O4 | Cashier discount up to `cashier_max_discount_bps` (default 10%) with reason; above that and every stock override need owner PIN |
-| O5–O8 | Printed QR: no time expiry, version rotation + per-store emergency pause. Guest: one session per device, 3 h. Recorded in `docs/architecture/decision-register.md`; detailed in ADR-004 (02.01-D/E) |
+| O5–O8 | Printed QR: no time expiry, version rotation + per-store emergency pause. Guest: one session per device, 3 h. Recorded in `docs/Architecture/DecisionRegister.md`; detailed in ADR-004 (02.01-D/E) |
 
 ## 8. Rollback
 

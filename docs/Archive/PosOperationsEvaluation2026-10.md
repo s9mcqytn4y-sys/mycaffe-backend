@@ -1,7 +1,7 @@
 # Evaluasi Operasional POS End-to-End & Backlog
 
 Disusun 2026-10-31 setelah wawancara owner (keputusan E1–E5, T1–T2, C1–C3, H1, R1, N1, S1 di
-[decision-register.md](decision-register.md)). Status memakai empat kategori `AGENTS.md`.
+[DecisionRegister.md](../Architecture/DecisionRegister.md)). Status memakai empat kategori `AGENTS.md`.
 
 ## 1. Review sistem autentikasi
 

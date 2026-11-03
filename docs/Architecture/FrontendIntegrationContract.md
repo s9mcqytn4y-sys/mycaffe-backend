@@ -1,0 +1,129 @@
+# Frontend Integration Contract (v0.6.0)
+
+Panduan untuk tim frontend (Next.js PWA, Android/iOS) sebelum mulai integrasi. Sumber kebenaran
+kontrak adalah [OpenApi.yaml](../Api/OpenApi.yaml); format error dan CRUD ada di
+[ApiConventions.md](ApiConventions.md). Dokumen ini memetakan **endpoint ke aplikasi**, **FSM yang
+boleh dirender**, dan **celah yang harus ditutup backend**.
+
+## 1. Aturan dasar: backend adalah sumber kebenaran
+
+1. Frontend **tidak menghitung** total, pajak, service, diskon, atau stok. Tampilkan hasil
+   `POST /pos/orders/quote` (POS) atau `POST /public/stores/:slug/orders/quote` (tamu). Kirim nilai `quote_fingerprint` dari quote sebagai
+   `expected_quote_fingerprint` saat membuat pesanan. Respons `409 QUOTE_CHANGED` berarti harga berubah, jadi
+   tampilkan quote baru.
+2. Frontend **tidak memutuskan transisi status**. Tombol ditampilkan berdasarkan status dari server
+   (tabel FSM di bawah). Server tetap menolak transisi ilegal dengan `409`.
+3. **Redirect atau layar sukses bukan bukti pembayaran.** Status `paid` hanya datang dari server, lewat
+   WebSocket atau polling pesanan.
+4. Setiap POST yang membuat pesanan, ronde, atau pembayaran wajib membawa `idempotency_key` (UUID dari
+   klien, disimpan sampai respons diterima). Retry memakai key yang sama.
+5. Izin UI diambil dari `GET /auth/staff/me` → `permissions`. Jangan hardcode peran.
+6. Uang: integer rupiah. Jangan memakai float. Format tampilan memakai `Intl.NumberFormat('id-ID')`.
+
+## 2. Autentikasi dan realtime
+
+| Langkah | Endpoint | Catatan |
+|---------|----------|---------|
+| Login staf | `POST /api/v1/auth/staff/login` | `store_slug + email + PIN 6 digit` → access token 15 menit dan refresh cookie HttpOnly |
+| Refresh | `POST /api/v1/auth/staff/refresh` | Rotasi; reuse terdeteksi akan mencabut sesi. Panggil sekali per tab (gunakan lock agar tidak paralel). |
+| Profil + izin | `GET /api/v1/auth/staff/me` | |
+| Logout | `POST /api/v1/auth/staff/logout` | |
+| Sesi tamu | `POST /api/v1/public/qr/:token/session` | Dari QR meja; cookie `__Secure-mc_guest` (HttpOnly, path `/api/v1/public`) untuk `/public/guest/*` |
+| Tiket WS | `POST /api/v1/pos/ws-ticket` (staf), `POST /api/v1/public/guest/ws-ticket` (tamu) | Tiket sekali pakai, lalu `GET /ws?ticket=…` |
+| WebSocket | `GET /ws` | Kanal: `pos`, `kds.bar`, `kds.kitchen`, `guest.<session>`. At-least-once: simpan `seq` tertinggi, abaikan event dengan `seq` ≤ nilai itu, kirim `last_seq` saat reconnect, dan muat ulang lewat REST saat menerima `resync_required` (ApiConventions §6). Batas koneksi menghasilkan `429 WS_CONNECTION_LIMIT`. |
+
+## 3. Endpoint per aplikasi
+
+### POS kasir
+
+- **Katalog:** `GET /pos/catalog` (ETag).
+- **Pesanan:** `POST /pos/orders/quote`, `POST /pos/orders`, `POST /pos/orders/:id/payments`.
+- **Tab dan meja:**
+  - tab: `POST /pos/tabs`, `POST /pos/tabs/:id/rounds`, `GET /pos/tabs/:id`, `POST /pos/tabs/:id/close` (split bill di body), `POST /pos/tabs/:id/reopen`;
+  - meja: `GET /pos/tables`, `POST /pos/tables/:id/sessions`, `POST /pos/table-sessions/:id/close`.
+- **Shift:**
+  - shift: `POST /pos/shifts`, `GET /pos/shifts/current`, `POST /pos/shifts/:id/close`, `GET /pos/shifts/:id/x-report`, `GET /pos/shifts/:id/z-report`;
+  - kas: `POST /pos/shifts/movements`.
+- **Koreksi:** `POST /pos/orders/:id/void`, `POST /pos/orders/:id/payments/:payment_id/refund`, `POST /pos/products/:id/stock-override`.
+- **Struk:** `GET /pos/orders/:id/receipt?kind=&format=json|escpos&width=58|80`, `POST /pos/orders/:id/receipt-link`.
+
+### KDS
+
+`GET /kds/tickets`, `POST /kds/tickets/:id/transition` (`expected_status` untuk optimistic
+concurrency; `409` berarti layar lain sudah mengubah status), `PATCH /catalog/products/:id/availability`.
+
+### PWA tamu (QR meja)
+
+`GET /public/qr/:token`, `POST /public/qr/:token/session`, `GET /public/guest/session`,
+`GET /public/stores/:slug/catalog`, `POST /public/stores/:slug/orders/quote`, `GET|POST /public/guest/orders`,
+`POST /public/guest/orders/:id/payments`, `GET /public/orders/track/:token`, `GET /public/receipts/:token`.
+
+### Backoffice owner
+
+- **Katalog CRUD:** `/catalog/*`.
+- **Media:** `POST /media/uploads` → PUT ke R2 → `POST /media/uploads/:id/complete`.
+- **Laporan:** `GET /reports/sales`, `GET /reports/summary` (JSON/CSV).
+- **Pengaturan:** `GET|PATCH /store/settings`.
+- **Staf:** `GET|POST /staff`, `POST /staff/:id/pin-reset`, `POST /staff/:id/temporary-pin`.
+- **Laci kas:** `/pos/drawers`.
+- **Meja dan QR:** `/pos/tables*`, `POST /pos/tables/:id/rotate-qr`.
+
+## 4. FSM yang dirender frontend
+
+Konstanta Go sama 1:1 dengan `CHECK` PostgreSQL. Status di luar tabel ini adalah bug server.
+
+### 4.1 `order_status` (persiapan, `internal/domain/order.go`)
+
+| Dari | Ke |
+|------|----|
+| `pending_payment` | `queued`, `cancelled` |
+| `open` (tab) | `queued`, `preparing`, `ready`, `served`, `completed`, `cancelled` |
+| `queued` | `preparing`, `cancelled` |
+| `preparing` | `ready` |
+| `ready` | `served`, `completed` |
+| `served` | `completed` |
+| `completed`, `cancelled` | terminal |
+
+### 4.2 `payment_status` pesanan (terpisah dari persiapan)
+
+Nilai: `unpaid`, `pending`, `partially_paid`, `paid`, `failed`, `cancelled`, `expired`,
+`partially_refunded`, `refunded`, `chargeback`, `partial_chargeback`.
+
+Aturan UI:
+
+- tombol bayar hanya untuk `unpaid`, `failed`, `expired`, dan `partially_paid`;
+- tombol refund hanya untuk `paid` dan `partially_refunded`;
+- `pending` berarti tunggu event, jangan buat attempt baru.
+
+### 4.3 Payment attempt
+
+`pending`, `authorized` → `paid` | `failed` | `cancelled` | `expired`; `paid` → `partially_refunded` →
+`refunded`; `chargeback` dan `partial_chargeback` berasal dari webhook. Event `pending` atau `cancelled`
+yang datang terlambat tidak menimpa `paid`.
+
+### 4.4 Lainnya
+
+| Entitas | Status |
+|---------|--------|
+| Split bill | `unpaid` → `pending` → `partially_paid` → `paid`; `cancelled`, `refunded`. Terkunci setelah pembayaran split pertama. |
+| Ronde tab | `queued` → `preparing` → `ready` → `served`; `cancelled` |
+| Tiket KDS | `queued` → `preparing` → `ready` → `served`; `cancelled`. Status ronde dan pesanan diturunkan server dari tiket. |
+| Shift | `open` → `closed` atau `force_closed` |
+| Meja | `available` → `occupied` → `settled` (hitung mundur auto-close) → `available` |
+| Stok pesanan | `not_tracked`, `reserved` → `committed` atau `released` |
+
+## 5. Celah backend sebelum integrasi frontend
+
+| # | Celah | Dampak ke frontend | Prioritas |
+|---|-------|--------------------|-----------|
+| G-1 | Tidak ada `GET /pos/orders` (daftar, filter status/tanggal/shift, paginasi) dan `GET /pos/orders/:id` | POS tidak bisa menampilkan riwayat, cetak ulang, void, atau refund dari daftar | **Wajib sebelum demo** |
+| G-2 | Tidak ada daftar tab terbuka | Kasir tidak bisa memilih tab tanpa id | Wajib sebelum demo |
+| G-3 | Tidak ada endpoint layar antrean TV | Modul "Queue Display" tidak bisa dibangun | Wajib bila TV ikut demo |
+| G-4 | Tidak ada `GET /audit-logs` dan `PATCH /staff/:id` (nonaktif/ganti peran) | Backoffice tidak lengkap | Sebelum go-live |
+| G-5 | Remote approval owner (P1-04) | Persetujuan masih memakai `owner_pin` di layar kasir | Sebelum go-live |
+| G-6 | Tidak ada perintah buka laci di ESC/POS | Laci dibuka manual | Kecil |
+| G-7 | Branding toko (logo, warna, footer struk) belum ada di settings | White-label belum bisa diatur | Sebelum klien kedua |
+
+Untuk mobile native (Android/iOS): kontrak HTTP sama. Refresh token memakai cookie HttpOnly, jadi
+klien native memerlukan cookie jar (OkHttp/URLSession). Jika tidak memakai cookie jar, perlu keputusan
+kontrak baru (refresh token di body untuk klien native). Itu perubahan auth dan butuh persetujuan.

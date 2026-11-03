@@ -6,7 +6,8 @@ Production runs images pinned by digest (`ghcr.io/...@sha256:...`), never by a m
 
 1. A merge to `main` (or a `v*.*.*` tag) runs **Release - Publish Immutable Container Image to GHCR**.
 2. The run summary shows `Digest: sha256:...` and the exact `deploy.sh` command. Copy the digest from there, not from a tag.
-3. The web image digest comes from the frontend repository's release run the same way.
+3. For a `v*` tag the GitHub Release lists the same digest, with the SBOM and SLSA provenance attached.
+4. The web image digest comes from the frontend repository's release run the same way.
 
 ## 2. Deploy
 

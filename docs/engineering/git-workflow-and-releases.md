@@ -60,6 +60,8 @@ main (branch produksi + Immutable GHCR Image; tanpa proteksi teknis, lihat §3)
    git push origin vX.Y.Z
    ```
 
+8. Push tag memicu **Release - Publish** yang membuat (atau melengkapi) GitHub Release untuk tag itu: digest image, perintah `scripts/deploy/deploy.sh <digest>`, serta lampiran SBOM (`*.spdx.json`) dan provenance SLSA (`*.provenance.json`). Tag dengan `-` (misal `v0.6.0-rc.1`) menjadi prerelease. Image yang punya CVE CRITICAL dengan fix sudah ditolak di CI (Trivy) sebelum sampai ke sini (P0-06).
+
 ---
 
 ## 3. Tanpa Branch Protection Teknis (keputusan IN2, 2026-11-02)

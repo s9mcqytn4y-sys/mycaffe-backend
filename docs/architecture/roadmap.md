@@ -1,19 +1,29 @@
 # Roadmap, Iterations & Checklist
 
-Reviewed 2026-10-31 (iteration 3). Status uses the four-tier classification from `AGENTS.md`; a
-module counts as done only when its route, authorization, tests, and docs exist. MVP scope: **one
-cafe (single tenant)**, multi-tenant schema kept for future branches (owner decision M3).
+Reviewed 2026-11-03 against `staging` `acb3dee` (after iteration 5 and audit tickets P0-01..P0-06);
+`main` is at v0.5.0. Status uses the four-tier classification from `AGENTS.md`; a module counts as done
+only when its route, authorization, tests, and docs exist. MVP scope: **one cafe (single tenant)**,
+multi-tenant schema kept for future branches (owner decision M3). Audit tickets and their status:
+[audit-backlog.md](../engineering/audit-backlog.md).
 
-**Schema (23 tables):** stores, users, auth_sessions, account_tokens, email_outbox, store_settings,
-categories, products, product_variants, modifier_groups, modifier_options, product_modifier_groups,
-option_modifier_groups, store_daily_sequences, orders, order_items, order_item_options, payment_splits,
-payment_split_items, payments, payment_notification_logs, outbox_events, audit_logs.
+**Owner direction (2026-11-03): large new features are frozen until go-live**: ADR-005 offline cash
+sync, inventory (C5), promotions/loyalty, delivery channels. Only the go-live plan below is in scope.
 
-**Live HTTP surface:** health; staff auth (login/refresh/logout/me/pin forgot·setup·change); staff
-management; store settings; POS orders + payments; catalog read (staff + public, ETag) and catalog CRUD;
-Midtrans webhook. Contained (503 in staging/production): guest `POST /api/v1/orders`, `GET /ws`.
+**Schema (33 tables, 19 migrations):** stores, users, auth_sessions, account_tokens, email_outbox,
+store_settings, audit_logs; categories, products, product_variants, modifier_groups, modifier_options,
+product_modifier_groups, option_modifier_groups; store_daily_sequences, orders, order_items,
+order_item_options, order_rounds, payment_splits, payment_split_items, payments,
+payment_notification_logs; shifts, cash_drawers, cash_movements; tables, table_sessions, guest_sessions;
+outbox_events, store_event_sequences, ws_tickets; kds_tickets.
 
-## Done (iterations 1–3)
+**Live HTTP surface:** health (live/ready); staff auth (login/refresh/logout/me, PIN forgot·setup·change);
+staff management; store settings; catalog read (staff + public, ETag) and catalog CRUD incl. modifiers;
+POS quote, orders, payments, void, refund, stock override; shifts, drawers, cash movements, X/Z reports;
+tabs, rounds, split bill; tables, table sessions, QR rotate; guest QR session, guest orders and payments,
+public order tracker; KDS tickets and transitions; WebSocket `GET /ws` with single-use tickets (staff and
+guest); Midtrans webhook. Metrics on the internal `METRICS_ADDR` only.
+
+## Done
 
 | Area | Status | Evidence |
 | ------ | -------- | ---------- |
@@ -23,60 +33,52 @@ Midtrans webhook. Contained (503 in staging/production): guest `POST /api/v1/ord
 | 02.01-A/B Auth design, staff login, rotating sessions, lockout, operator CLI | Implemented & Tested | migration 000005, ADR-003, auth tests |
 | 02 Email outbox, invite/reset PIN, 6-digit PIN | Implemented & Tested | migration 000006, lifecycle tests |
 | 02.01-C RBAC, store settings, token-bound POS routes | Implemented & Tested | migration 000007, RBAC HTTP tests |
-| Infra: trusted proxies, timeouts, request id, body cap, demo tunnel, dev.ps1 | Implemented & Tested | PR #8, #9, #13 |
+| 3 Catalog C1–C3, variants, standard error contract, R2 buckets provisioned | Implemented & Tested | migration 000008, [api-conventions.md](api-conventions.md) |
+| 4a Modifier groups/options CRUD, quote API (P8) | Implemented & Tested | iteration 4 design |
+| 4b Shift & cash drawer, X/Z report (P6, P7, C1, H1) | Implemented & Tested | [iteration-4b-shift-drawer-design.md](iteration-4b-shift-drawer-design.md) |
+| 4c Open tab, rounds, split bill (P2, P3, P10–P14) | Implemented & Tested | [iteration-4c2-split-bill-plan.md](iteration-4c2-split-bill-plan.md) |
+| 4d Void / refund, hotfix v0.4.3 | Implemented & Tested | [iteration-4d-void-refund-stock-plan.md](iteration-4d-void-refund-stock-plan.md); review follow-ups F1–F3 open (PR A) |
+| ADR-004 Catalog cleanup (variant-only pricing) | Implemented & Tested | [adr-004-catalog-schema-modernization.md](adr-004-catalog-schema-modernization.md) |
+| 5a Tables, table sessions, QR resolve | Implemented & Tested | migration 000016 |
+| 5b Guest session, QR pay-first orders, tracker | Implemented & Tested | migration 000017 |
+| 5c Outbox relay → WebSocket, WS tickets | Implemented & Tested | migration 000018 |
+| 5d KDS tickets, late-payment flag (Q7) | Implemented & Tested | migration 000019; Q7 integration test open (P1-12) |
+| Audit P0-01..P0-06: CI integration tests, backups, logs/metrics, alerting, deploy by digest, supply chain | Implemented & Tested | PR #38–#43 |
 
-## Iteration 3 checklist (this PR)
+## Go-live plan (ordered; each PR waits for owner approval before merge)
 
-- [x] Supabase removed: repo MCP example, local `.env` (DB URL → local PostgreSQL, `SUPABASE_*` keys dropped), local MCP config, global CLI and `~/.supabase` (owner decision M2). Claude Supabase connector: owner to disconnect in Settings → Connectors.
-- [x] Docker cleanup, MyCaffe + safe garbage only (M1): ~4.4 GB reclaimed; other projects' volumes kept.
-- [x] Demo owner account email → `abdulaziz543333@gmail.com` (seed upserts email).
-- [x] Single-cafe login: optional `DEFAULT_STORE_SLUG` (M3).
-- [x] Refactor: `payment_service.go` (1,539 lines) split into service/webhook/settlement/initiate/reconcile/helpers files, no logic change (29 functions before/after).
-- [x] Catalog C1: staff + public catalog read model with ETag/304.
-- [x] Catalog C2: migration 000008 — `product_variants` (SKU, price, default), product type, prep station, archive; order lines snapshot the variant; pricing uses the variant.
-- [x] Catalog C3: CRUD categories/products/variants, station availability toggles, price-change audit, archive rules.
-- [x] Standard CRUD/error contract (422 `fields`, 409 `field`) — [api-conventions.md](api-conventions.md).
-- [x] OpenAPI: catalog paths and shared responses; Redocly lint clean.
-- [x] Modifier group/option CRUD (C3b) + POS/Public Quote API + optimistic conflict (QUOTE_CHANGED) → Iteration 4a completed.
-- [x] Cloudflare R2 Triple-Bucket Provisioning (`mycaffe-media`, `mycaffe-private-media`, `mycaffe-backups`) + CORS + backup/restore prefix bugfix → completed.
-- [ ] Media upload handler / presigned PUT service (C4) → iteration 4b / 5.
+| Step | Item | Acceptance criteria | Ticket |
+| ------ | ------ | --------------------- | -------- |
+| 0 | **Housekeeping**: this roadmap, [audit-backlog.md](../engineering/audit-backlog.md); then promote `staging` → `main` | docs match the code | P0-12 (part) |
+| A | **Review debt v0.5.1**: F1 shop-wide owner-PIN guess limit (HF5), F2 PIN policy from config, F3 by-item refund stock release/waste, WebSocket revocation + connection caps, at-least-once delivery docs | named tests per item | 4d review |
+| B1 | **Receipts** (R1): structured payload, ESC/POS 58/80 mm, 90-day digital link, void/refund receipts | snapshot-only, no recalculation | P0-11 |
+| B2 | **Owner reports**: per business day (store time zone), payment method, category/item, hour, void/refund, discount, tax & service; date range; CSV | consistent with Z-report; read-only with indexes | P1-02 |
+| B3 | **Media C4**: presigned PUT to `mycaffe-media`, magic bytes, size, EXIF strip, WebP variants | `product.image_url` only from verified objects | R8 |
+| B4 | **RF1 staged**: RF1-c manual cash/transfer, RF1-e window per role, RF1-f `refund_pending`; RF1-a/b Midtrans refund in a separate PR after sandbox test | per decision register RF1 | P1-01 |
 
-## Next iterations (ordered; each item = one PR with migration, tests, OpenAPI, docs)
-
-| Iter | Item | Acceptance criteria | Depends on / blocker |
-| ------ | ------ | --------------------- | ---------------------- |
-| 4a | **C3b Modifier groups & options CRUD** + product↔group links + Quote APIs | 422/409 contract, negative delta P1, nested sub-addon depth 1, cycle protection, POS quote RBAC (order.pos.create), quote fingerprint anti-compensating check (P8) | Implemented & Tested ✅ |
-| 4b | **Shift & cash drawer (P6, P7, C1, H1)** | open with float, cash payments require an open shift, paid-out, blind close, variance > tolerance needs owner PIN, X/Z report, audit | store_settings ✅ |
-| 4c | **Open tab, rounds, split bill (P2, P3, T2)** | split by equal N or items; server recomputes shares; deterministic rupiah rounding remainder to split 1 (equal N) or last split (by item); locked after first payment | 4a, 4b |
-| 4d | **Void / refund (P4, P5, O1, C2)** + split rework (R4) | void before paid, refund after paid (cash from open drawer), owner PIN above threshold, `commitPaidOrderTx` settles one split | shift |
-| 4 | **ADR-004 catalog cleanup** (done before iteration 5, owner 2026-11-01) | variant-only pricing, `single ⇒ max_select = 1` CHECK, unit stock stays on products | — |
-| 5 | **5a Tables, table sessions, QR resolve** (plan: [iteration-5-table-qr-kds-plan.md](iteration-5-table-qr-kds-plan.md)) | tables CRUD, opaque rotatable QR (QR1), derived occupancy (T1), emergency pause honoured | implemented (migration 000016) |
-| 5 | **5b Guest session + QR pay-first orders + tracker** (T2, Q6, QR5, QR6) | cookie guest session, own-orders isolation, unpaid caps, QRIS, 24 h tracker | implemented (migration 000017); email/consent (E4) deferred |
-| 5 | **5c Outbox relay → WebSocket + WS ticket** (risk R2) | per-store `store_seq`, LISTEN/NOTIFY + polling relay, replay by `last_seq`, `resync_required`, POS/KDS/guest channels, single-use 30 s tickets | implemented (migration 000018); TV queue display channel later |
-| 5 | **5d KDS tickets** (station routing, preparing/ready/served, recall, late-payment flag Q7) | ticket per (order/round) × station, barista/kitchen permissions, SLA timestamps, derived order/round status, table `settled_at`, void restock vs waste | implemented (migration 000019) |
-| 6 | **Receipts (R1)**: ESC/POS payload + digital receipt link + email | snapshot-only amounts, 90-day token | void/refund |
-| 6 | **Inventory (C5)**: ingredients, recipes, movements, opname, low-stock email; HPP snapshot (C7) | gross profit only for recipe-backed items | variants ✅ |
-| 7 | Promotions & bundles (K7), loyalty stamps (K6), static QRIS fallback flow (K8) | single best promo per line, snapshot on order | catalog |
-| 7 | Reports: sales, shift, settlement estimate + CSV import (K5), subscription reminders (K4) | — | shift, payments |
-| 7 | **C4 Media upload (R2)** | presigned PUT, magic bytes, EXIF strip, WebP variants | R2 bucket (owner) |
+Frozen until go-live: ADR-005 offline cash sync (P0-10), inventory C5 (P1-07..P1-10, P2-06),
+promotions & bundles (K7), loyalty (K6), static QRIS fallback (K8), delivery channels.
 
 ## Production readiness (prepare now, cut over when the client buys domain + VPS)
 
 | Item | Status |
 | ------ | -------- |
-| Immutable GHCR images, prod compose with fail-fast required secrets | Implemented (CI) |
-| Nginx TLS bootstrap, HSTS, request id, rate limits | Implemented |
-| Edge subnet + `TRUSTED_PROXIES`, internal-only DB network | Implemented |
-| Encrypted R2 backup/restore scripts | Implemented; **restore drill blocked (no VPS)** |
+| CI runs every integration test on PostgreSQL 18 (P0-01) | Implemented |
+| Immutable GHCR images with provenance + SBOM, Trivy gate, GitHub Release on `v*` tags (P0-06) | Implemented; Release path first runs on the next tag |
+| Deploy by digest with pre-deploy backup and automatic rollback (P0-05) | Implemented; first VPS run pending |
+| Hourly encrypted R2 backups, retention tiers, `mycaffe_backup` role, restore drill script (P0-02) | Implemented; **drill on the production VPS pending** |
+| JSON logs with request id, internal Prometheus metrics (P0-03) | Implemented |
+| Grafana Cloud metrics and tested alert rules (P0-04) | Implemented; Grafana Cloud account pending (owner) |
+| Nginx TLS bootstrap, HSTS, request id, rate limits; internal-only DB network | Implemented |
+| Real client IP + Named Cloudflare Tunnel + VPS firewall (P0-07, IN1) | Planned (deployment change, needs approval) |
+| Outbox dead-letter and purge (P0-08) | Planned |
+| Provisioning and incident runbook (P0-09) | Planned |
 | Hostinger SMTP + SPF/DKIM/DMARC runbook | Documented ([email.md](../setup/email.md)); blocked (no domain) |
 | Operator bootstrap (`bootstrap-store`) + `DEFAULT_STORE_SLUG` | Implemented |
-| Sentry HTTP middleware (R6), metrics (R7), failed-email alert (R9) | Planned (iteration 5–6) |
-| VPS hardening runbook (SSH key-only, ufw 22/80/443, unattended upgrades, docker log rotation) | Planned — write before cut-over |
-| Promote `staging` → `main` (PR #10 pattern) after each iteration | Owner merges |
+| Promote `staging` → `main` with a merge commit + semver tag | Owner approves each promotion |
 
 ## Open blockers (owner)
 
-1. Buy domain + Hostinger KVM 2 + mailbox → unblocks TLS, SMTP, restore drill, Named Tunnel.
-2. Create a Cloudflare R2 bucket (media) → unblocks C4.
+1. Buy domain + Hostinger KVM 2 + mailbox → unblocks Named Tunnel, SMTP, restore drill on the VPS.
+2. Grafana Cloud stack ([monitoring.md](../setup/monitoring.md) §2).
 3. Midtrans production keys → unblocks live payments.
-4. Disconnect the Supabase connector in Claude Settings → Connectors (account level).

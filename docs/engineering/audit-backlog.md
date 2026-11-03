@@ -24,7 +24,7 @@ gap not yet confirmed).
 | P0-08 | Outbox dead-letter and purge of technical tables | Planned | `attempts`, `last_error`, `dead_at`; purge `outbox_events`, `ws_tickets`, `guest_sessions`, `payment_notification_logs` |
 | P0-09 | Provisioning and incident runbook per client | Planned | Go-live gate |
 | P0-10 | ADR-005 offline cash sync | **Frozen** | Owner freeze 2026-11-03 |
-| P0-11 | Receipts (ESC/POS + digital) | Planned | PR B1 |
+| P0-11 | Receipts (ESC/POS + digital) | Done (printer QR untested on real hardware) | PR B1, migration 000020 |
 | P0-12 | Refresh risk register and release notes | Planned | R2 (WebSocket) and R8 (media) are stale |
 
 ## P1: first weeks after go-live

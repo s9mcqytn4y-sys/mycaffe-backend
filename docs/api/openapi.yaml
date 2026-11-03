@@ -35,6 +35,8 @@ tags:
     description: QR guest sessions, pay-first guest orders and the public order tracker (iteration 5b)
   - name: Realtime
     description: Outbox relay over WebSocket with single-use tickets, per-store sequence and replay (iteration 5c)
+  - name: Receipts
+    description: Snapshot-only sale, refund and void receipts (JSON or ESC/POS) and 90-day digital receipt links (B1, decision R1)
 
 paths:
   /health:
@@ -2128,6 +2130,144 @@ paths:
         "429":
           description: PIN_LOCKED, PIN_ATTEMPTS_EXCEEDED or OWNER_PIN_STORE_LIMIT
 
+  /api/v1/pos/orders/{id}/receipt:
+    get:
+      tags: [Receipts]
+      operationId: getReceipt
+      summary: Sale, refund or void receipt from the order snapshots, as JSON or ESC/POS bytes (B1)
+      description: >-
+        Amounts come only from the order, item, option and payment snapshots; nothing is recalculated
+        from the catalog or current store rates. Tax and service are shown as amounts (no percent) until
+        rates are frozen per order (DB0). format=escpos returns raw bytes for 58 mm (32 columns) or 80 mm
+        (48 columns) printers; for kind=sale it also issues a new 90-day digital receipt link and prints it
+        as a QR code (GS ( k). Non-ASCII characters print as "?". A by-item split refund lists only the
+        lines of that split.
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: kind
+          in: query
+          schema:
+            type: string
+            enum: [sale, refund, void]
+            default: sale
+        - name: payment_id
+          in: query
+          description: Required for kind=refund; the refunded payment.
+          schema:
+            type: string
+            format: uuid
+        - name: format
+          in: query
+          schema:
+            type: string
+            enum: [json, escpos]
+            default: json
+        - name: width
+          in: query
+          description: Paper width in mm (ESC/POS only).
+          schema:
+            type: integer
+            enum: [58, 80]
+            default: 58
+      responses:
+        "200":
+          description: Receipt
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Receipt"
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "400":
+          description: INVALID_ID
+        "403":
+          description: Forbidden - lacks order.read.store
+        "404":
+          description: NOT_FOUND (order or payment)
+        "409":
+          description: RECEIPT_NOT_AVAILABLE (refund receipt of an unrefunded payment, void receipt of an order that was not voided)
+        "422":
+          description: VALIDATION_FAILED (kind, payment_id, format, width)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationErrorResponse"
+  /api/v1/pos/orders/{id}/receipt-link:
+    post:
+      tags: [Receipts]
+      operationId: issueReceiptLink
+      summary: Issue a 90-day digital receipt link (decision R1)
+      description: >-
+        The token (store_id.token_id.secret) is returned once; only the SHA-256 of the secret is stored.
+        Every call issues a new token and older ones stay valid until they expire. url is
+        APP_PUBLIC_URL/receipts/{token}.
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "201":
+          description: Link issued
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [token, url, expires_at]
+                properties:
+                  token:
+                    type: string
+                  url:
+                    type: string
+                    format: uri
+                  expires_at:
+                    type: string
+                    format: date-time
+        "400":
+          description: INVALID_ID
+        "403":
+          description: Forbidden - lacks order.read.store
+        "404":
+          description: NOT_FOUND
+  /api/v1/public/receipts/{token}:
+    get:
+      security: []
+      tags: [Receipts]
+      operationId: getPublicReceipt
+      summary: Digital receipt behind a link token (sale receipt with current refund totals)
+      description: No customer or staff names. Unknown, tampered, expired or other-store tokens all answer 404.
+      x-implementation-status: implemented
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Receipt
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Receipt"
+        "404":
+          description: RECEIPT_LINK_INVALID
+
   /api/v1/store/settings:
     get:
       tags: [Staff]
@@ -3431,6 +3571,83 @@ components:
           type: string
           example: mycaffe-api
 
+    Receipt:
+      type: object
+      description: Receipt built only from order, item, option and payment snapshots (B1).
+      required: [kind, store, order_id, order_number, queue_number, order_type, status, payment_status, issued_at, local_time, lines, subtotal_amount, discount_amount, tax_amount, service_charge_amount, total_amount, paid_amount, refunded_amount, payments]
+      properties:
+        kind:
+          type: string
+          enum: [sale, refund, void]
+        store:
+          type: object
+          required: [name]
+          properties:
+            name: {type: string}
+            address: {type: string}
+            phone: {type: string}
+        order_id: {type: string, format: uuid}
+        order_number: {type: string}
+        queue_number: {type: string}
+        table_number: {type: string}
+        order_type: {type: string}
+        status: {type: string}
+        payment_status: {type: string}
+        issued_at:
+          type: string
+          format: date-time
+          description: Order time (sale), refund time (refund) or void time (void).
+        local_time:
+          type: string
+          description: issued_at in the store time zone, dd/mm/yyyy hh:mm.
+        staff_name:
+          type: string
+          description: Cashier (sale), refunding or voiding staff; omitted on the public receipt.
+        lines:
+          type: array
+          items:
+            type: object
+            required: [name, quantity, unit_price, amount]
+            properties:
+              name: {type: string}
+              variant: {type: string}
+              options:
+                type: array
+                description: Option names; nested sub-options start with "- ".
+                items: {type: string}
+              notes: {type: string}
+              quantity: {type: integer}
+              unit_price: {type: integer, format: int64, description: Snapshot unit price incl. modifiers (IDR)}
+              amount: {type: integer, format: int64}
+        subtotal_amount: {type: integer, format: int64}
+        discount_amount: {type: integer, format: int64}
+        tax_amount: {type: integer, format: int64}
+        service_charge_amount: {type: integer, format: int64}
+        total_amount: {type: integer, format: int64}
+        paid_amount: {type: integer, format: int64}
+        refunded_amount: {type: integer, format: int64}
+        payments:
+          type: array
+          items:
+            type: object
+            required: [method, amount, status]
+            properties:
+              split_label: {type: string}
+              method: {type: string}
+              amount: {type: integer, format: int64}
+              cash_tendered_amount: {type: integer, format: int64}
+              change_amount: {type: integer, format: int64}
+              status: {type: string}
+        refund:
+          type: object
+          required: [payment_id, method, amount, reason, stock_returned]
+          properties:
+            payment_id: {type: string, format: uuid}
+            method: {type: string}
+            amount: {type: integer, format: int64}
+            reason: {type: string}
+            stock_returned: {type: boolean}
+        void_reason: {type: string}
     ErrorResponse:
       type: object
       required: [error]

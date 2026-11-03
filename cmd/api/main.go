@@ -21,6 +21,7 @@ import (
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/metrics"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/midtrans"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/rbac"
+	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/storage"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/realtime"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/repository/postgres"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/service"
@@ -133,15 +134,20 @@ func main() {
 	var guestHandler *handler.GuestHandler
 	var realtimeHandler *handler.RealtimeHandler
 	var kdsHandler *handler.KDSHandler
+	var receiptHandler *handler.ReceiptHandler
+	var reportHandler *handler.ReportHandler
+	var mediaHandler *handler.MediaHandler
 	if db != nil {
-		authService := service.NewAuthService(db, postgres.NewAuthRepository(), cfg.JWTSecret, service.AuthPolicy{
+		emailService := newEmailService(cfg, db, workerCtx)
+		authPolicy := service.AuthPolicy{
 			AccessTokenTTL:     cfg.StaffAccessTokenTTL,
 			RefreshTokenTTL:    cfg.StaffRefreshTokenTTL,
 			SessionIdleTimeout: cfg.StaffSessionIdleTimeout,
 			MaxSessions:        cfg.StaffMaxSessions,
 			PINMaxFailures:     cfg.StaffPINMaxFailures,
 			PINLockout:         cfg.StaffPINLockout,
-		}, service.WithAuthEmail(newEmailService(cfg, db, workerCtx), cfg.AppPublicURL, ""))
+		}
+		authService := service.NewAuthService(db, postgres.NewAuthRepository(), cfg.JWTSecret, authPolicy, service.WithAuthEmail(emailService, cfg.AppPublicURL, ""))
 		authHandler = handler.NewAuthHandler(authService)
 		authHandler.DefaultStoreSlug = cfg.DefaultStoreSlug
 
@@ -153,13 +159,24 @@ func main() {
 		midtransHandler.SetPaymentService(paymentService)
 		posHandler = handler.NewPOSHandler(orderService, paymentService, service.NewSettingsService(db))
 		operationalService := service.NewOperationalService(db, orderRepo, paymentRepo, postgres.NewShiftRepository(), postgres.NewAuthRepository(), postgres.NewSettingsRepository())
+		operationalService.SetPINPolicy(authPolicy, emailService)
 		posHandler.SetOperational(operationalService)
 		catalogHandler = handler.NewCatalogHandler(service.NewCatalogService(db))
-		shiftHandler = handler.NewShiftHandler(service.NewShiftService(db))
+		shiftService := service.NewShiftService(db)
+		shiftService.SetPINPolicy(authPolicy, emailService)
+		shiftHandler = handler.NewShiftHandler(shiftService)
 		tabHandler = handler.NewTabHandler(service.NewTabService(db, postgres.NewTabRepository(), orderRepo))
 		tableHandler = handler.NewTableHandler(service.NewTableService(db))
 		guestHandler = handler.NewGuestHandler(service.NewGuestService(db, orderService, paymentService))
 		kdsHandler = handler.NewKDSHandler(service.NewKDSService(db))
+		receiptHandler = handler.NewReceiptHandler(service.NewReceiptService(db, cfg.AppPublicURL))
+		reportHandler = handler.NewReportHandler(service.NewReportService(db))
+		mediaStore, err := storage.NewR2(storage.R2Config{AccountID: cfg.R2AccountID, AccessKeyID: cfg.R2AccessKeyID,
+			SecretAccessKey: cfg.R2SecretAccessKey, Bucket: cfg.R2BucketName, PublicURL: cfg.R2PublicURL})
+		if err != nil {
+			log.Printf("[MEDIA] uploads disabled: %v", err) // /media/uploads answers 503 MEDIA_UNAVAILABLE
+		}
+		mediaHandler = handler.NewMediaHandler(service.NewMediaService(db, mediaStore))
 		realtimeService := service.NewRealtimeService(db)
 		realtimeHandler = handler.NewRealtimeHandler(hub, realtimeService)
 		// Outbox relay (iteration 5c): LISTEN outbox + 2 s polling, at-least-once, ordered per store.
@@ -224,6 +241,21 @@ func main() {
 			pos.POST("/orders/:id/void", authHandler.RequirePermission(rbac.OrderVoid), posHandler.VoidOrder)
 			pos.POST("/orders/:id/payments/:payment_id/refund", authHandler.RequirePermission(rbac.PaymentRefund), posHandler.RefundPayment)
 			pos.POST("/products/:id/stock-override", authHandler.RequirePermission(rbac.StockOverride), posHandler.OverrideStock)
+
+			// Receipts (B1, decision R1): snapshot-only JSON or ESC/POS, 90-day digital link.
+			pos.GET("/orders/:id/receipt", authHandler.RequirePermission(rbac.OrderReadStore), receiptHandler.GetReceipt)
+			pos.POST("/orders/:id/receipt-link", authHandler.RequirePermission(rbac.OrderReadStore), receiptHandler.IssueLink)
+			v1.GET("/public/receipts/:token", receiptHandler.PublicReceipt)
+
+			// Owner reports (B2): read-only, business day in the store time zone, JSON or CSV.
+			reports := v1.Group("/reports", authHandler.RequirePermission(rbac.ReportFinanceRead))
+			reports.GET("/sales", reportHandler.Sales)
+			reports.GET("/summary", reportHandler.Summary)
+
+			// Media uploads (B3, K9): presigned PUT to R2, then verify + JPEG variants + link to the product.
+			media := v1.Group("/media", handler.LimitBody(4<<10), authHandler.RequirePermission(rbac.CatalogManage))
+			media.POST("/uploads", mediaHandler.CreateUpload)
+			media.POST("/uploads/:id/complete", mediaHandler.Complete)
 
 			// Tables & table sessions (iteration 5a): table board for staff, CRUD for the owner (QR3).
 			pos.GET("/tables", authHandler.RequireStaff(), tableHandler.ListTables)

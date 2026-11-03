@@ -381,12 +381,14 @@ func TestVoidRefundHotfix4d1Integration(t *testing.T) {
 
 		edcOrder, edcTotal := createOrder(line(1, false))
 		edcPayment := pay(edcOrder, nil, "edc", edcTotal)
-		res = refund(edcOrder, edcPayment, map[string]any{"restore_stock": true})
-		if res.Code != http.StatusConflict || !strings.Contains(res.Body.String(), "REFUND_METHOD_NOT_SUPPORTED") {
-			t.Fatalf("expected 409 REFUND_METHOD_NOT_SUPPORTED, got %d: %s", res.Code, res.Body.String())
+		// RF1-c: a manual bank transfer is the owner's alone; a cashier is refused and nothing changes.
+		res = refund(edcOrder, edcPayment, map[string]any{"restore_stock": true, "refund_method": "bank_transfer",
+			"bank_name": "BCA", "account_last4": "1234", "transfer_reference": "TRF-1"})
+		if res.Code != http.StatusForbidden {
+			t.Fatalf("cashier bank-transfer refund must be 403, got %d: %s", res.Code, res.Body.String())
 		}
 		if _, ps, _, refunded := orderRow(edcOrder); ps != "paid" || refunded != 0 {
-			t.Fatalf("refused non-cash refund must leave the order paid, got %s/%d", ps, refunded)
+			t.Fatalf("refused refund must leave the order paid, got %s/%d", ps, refunded)
 		}
 	})
 
@@ -430,7 +432,7 @@ func TestVoidRefundHotfix4d1Integration(t *testing.T) {
 		}
 	})
 
-	t.Run("ByItemSplitRefundRestoresOnlyThatSplitsItems", func(t *testing.T) {
+	t.Run("ByItemTwoSplitsReleaseStockAndAuditWaste", func(t *testing.T) {
 		tabID := openTab(line(2, true), line(1, false))
 		detail := call("GET", fmt.Sprintf("/pos/tabs/%s", tabID), cashierToken, nil)
 		var tab struct {
@@ -457,7 +459,7 @@ func TestVoidRefundHotfix4d1Integration(t *testing.T) {
 			{"label": "Tamu 2", "items": []map[string]any{{"order_item_id": withOption, "quantity": 1}, {"order_item_id": plain, "quantity": 1}}},
 		}})
 		first := pay(tabID, &splits[0], "cash", splits[0].TotalAmount)
-		pay(tabID, &splits[1], "cash", splits[1].TotalAmount)
+		secondPayment := pay(tabID, &splits[1], "cash", splits[1].TotalAmount)
 
 		p0, o0 := stock()
 		if res := refund(tabID, first, map[string]any{"restore_stock": true}); res.Code != http.StatusOK {
@@ -468,8 +470,36 @@ func TestVoidRefundHotfix4d1Integration(t *testing.T) {
 		if p, o := stock(); p != p0+1 || o != o0+1 {
 			t.Fatalf("by-item refund must restore 1/1, got %d/%d from %d/%d", p, o, p0, o0)
 		}
-		if _, ps, _, refunded := orderRow(tabID); ps != "partially_refunded" || refunded != splits[0].TotalAmount {
-			t.Fatalf("expected partially_refunded/%d, got %s/%d", splits[0].TotalAmount, ps, refunded)
+		if _, ps, ss, refunded := orderRow(tabID); ps != "partially_refunded" || ss != "committed" || refunded != splits[0].TotalAmount {
+			t.Fatalf("expected partially_refunded/committed/%d, got %s/%s/%d", splits[0].TotalAmount, ps, ss, refunded)
+		}
+
+		// F3: the last split is wasted; the order is then fully refunded with every split processed, so
+		// stock_status is released without restocking again, and the audit lists the wasted lines.
+		second := secondPayment
+		if res := refund(tabID, second, map[string]any{"restore_stock": false}); res.Code != http.StatusOK {
+			t.Fatalf("by-item waste refund failed: %d: %s", res.Code, res.Body.String())
+		}
+		cashInDrawer -= splits[1].TotalAmount
+		refundsMade++
+		if p, o := stock(); p != p0+1 || o != o0+1 {
+			t.Fatalf("waste refund must not restock, got %d/%d want %d/%d", p, o, p0+1, o0+1)
+		}
+		if _, ps, ss, _ := orderRow(tabID); ps != "refunded" || ss != "released" {
+			t.Fatalf("expected refunded/released after every split, got %s/%s", ps, ss)
+		}
+		var wasted map[string]int
+		var stockAfter string
+		inStore(storeID, func(tx *sqlx.Tx) error {
+			var raw []byte
+			if err := tx.QueryRowxContext(ctx, `SELECT metadata->'wasted_lines', metadata->>'stock_after' FROM audit_logs
+				WHERE store_id = $1 AND action = 'REFUND' AND reference_id = $2`, storeID, second.String()).Scan(&raw, &stockAfter); err != nil {
+				return err
+			}
+			return json.Unmarshal(raw, &wasted)
+		})
+		if wasted[withOption.String()] != 1 || wasted[plain.String()] != 1 || stockAfter != "released" {
+			t.Fatalf("audit must record wasted lines and released stock, got %v / %s", wasted, stockAfter)
 		}
 	})
 
@@ -513,7 +543,7 @@ func TestVoidRefundHotfix4d1Integration(t *testing.T) {
 	})
 
 	// Brute force runs in the second seeded store so the central owner and cashier stay usable.
-	t.Run("PINBruteForceLocksStaffAndOwner", func(t *testing.T) {
+	t.Run("PINBruteForceLocksStaffNotOwner", func(t *testing.T) {
 		expressID := uuid.MustParse("22222222-2222-4222-8222-222222222222")
 		suffix := uuid.NewString()[:8]
 		ownerID, cashierID, expressProduct := uuid.New(), uuid.New(), uuid.New()
@@ -538,7 +568,8 @@ func TestVoidRefundHotfix4d1Integration(t *testing.T) {
 		})
 		token := login("express-counter", cashierEmail)
 
-		// Owner PIN: five wrong guesses, then the per-actor cap answers 429 even for the right PIN.
+		// Owner PIN: five wrong guesses, then the per-actor cap answers 429 even for the right PIN. The owner
+		// account is not locked by someone else guessing (HF5, review follow-up F1).
 		override := func(pin string) *httptest.ResponseRecorder {
 			return call("POST", fmt.Sprintf("/pos/products/%s/stock-override", expressProduct), token,
 				map[string]any{"new_quantity": 1, "reason": "Opname", "owner_pin": pin, "enable_tracking": true})
@@ -557,14 +588,12 @@ func TestVoidRefundHotfix4d1Integration(t *testing.T) {
 			if err := tx.GetContext(ctx, &failedAudits, `SELECT COUNT(*) FROM audit_logs WHERE store_id = $1 AND action = 'OWNER_PIN_FAILED' AND actor_id = $2`, expressID, cashierID); err != nil {
 				return err
 			}
-			return tx.GetContext(ctx, &ownerLocked, `SELECT locked_until > NOW() FROM users WHERE store_id = $1 AND id = $2`, expressID, ownerID)
+			return tx.GetContext(ctx, &ownerLocked, `SELECT COALESCE(locked_until > NOW(), false) FROM users WHERE store_id = $1 AND id = $2`, expressID, ownerID)
 		})
-		if failedAudits != 5 || !ownerLocked {
-			t.Fatalf("expected 5 OWNER_PIN_FAILED audits and a locked owner, got %d audits, locked=%v", failedAudits, ownerLocked)
+		if failedAudits != 5 || ownerLocked {
+			t.Fatalf("expected 5 OWNER_PIN_FAILED audits and an unlocked owner, got %d audits, locked=%v", failedAudits, ownerLocked)
 		}
-		if res := call("POST", "/login", "", map[string]string{"store_slug": "express-counter", "email": ownerEmail, "pin": "482913"}); res.Code != http.StatusUnauthorized {
-			t.Fatalf("locked owner must not log in, got %d", res.Code)
-		}
+		login("express-counter", ownerEmail)
 
 		// Own PIN: the same counter as login, so five wrong PINs lock the cashier's account.
 		orderRes := call("POST", "/pos/orders", token, map[string]any{

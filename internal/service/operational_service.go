@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -24,7 +25,7 @@ var (
 	ErrOwnerPINRequired         = errors.New("action amount exceeds store threshold; owner PIN is required")
 	ErrInvalidStaffPIN          = errors.New("invalid staff PIN")
 	ErrInsufficientCashInDrawer = errors.New("insufficient cash in active drawer for cash refund")
-	ErrRefundMethodNotSupported = errors.New("only cash payments can be refunded at the POS until a non-cash refund policy is approved")
+	ErrRefundWindowExceeded     = errors.New("payment is older than the refund window")
 	ErrProductNotTracked        = errors.New("product is not configured for inventory tracking")
 )
 
@@ -76,7 +77,8 @@ func NewOperationalService(
 
 // authorizeAmount enforces decision O1: the actor's own PIN up to void_refund_owner_threshold, an
 // owner PIN above it. It returns the approving owner's id when an owner PIN was used.
-func (s *OperationalService) authorizeAmount(ctx context.Context, tx *sqlx.Tx, actor *AuthenticatedStaff, amount int64, pin string, ownerPIN *string) (*uuid.UUID, error) {
+// requireOwner forces the owner PIN regardless of the amount (a refund past the cashier window, RF1-e).
+func (s *OperationalService) authorizeAmount(ctx context.Context, tx *sqlx.Tx, actor *AuthenticatedStaff, amount int64, pin string, ownerPIN *string, requireOwner bool) (*uuid.UUID, error) {
 	settings, err := s.settings.GetStoreSettings(ctx, tx, actor.Staff.Store.ID)
 	if err != nil {
 		return nil, err
@@ -86,7 +88,7 @@ func (s *OperationalService) authorizeAmount(ctx context.Context, tx *sqlx.Tx, a
 		threshold = 100000 // default Rp 100.000
 	}
 	pin = strings.TrimSpace(pin)
-	if amount > threshold {
+	if amount > threshold || requireOwner {
 		owner := ""
 		if ownerPIN != nil {
 			owner = strings.TrimSpace(*ownerPIN)
@@ -169,7 +171,7 @@ func (s *OperationalService) VoidOrder(
 			return ErrOrderHasPayments
 		}
 
-		ownerOverrideID, err := s.authorizeAmount(ctx, tx, actor, order.TotalAmount, in.PIN, in.OwnerPIN)
+		ownerOverrideID, err := s.authorizeAmount(ctx, tx, actor, order.TotalAmount, in.PIN, in.OwnerPIN, false)
 		if err != nil {
 			return err
 		}
@@ -265,7 +267,20 @@ type RefundPaymentInput struct {
 	OwnerPIN *string `json:"owner_pin"`
 	// RestoreStock must be sent explicitly: true returns the goods to stock, false records them as waste.
 	RestoreStock *bool `json:"restore_stock"`
+	// RefundMethod (RF1-c): "cash" from the actor's open drawer (default) or "bank_transfer" made by the
+	// owner outside the system, recorded with bank, last 4 account digits and the transfer reference.
+	RefundMethod      string `json:"refund_method"`
+	BankName          string `json:"bank_name"`
+	AccountLast4      string `json:"account_last4"`
+	TransferReference string `json:"transfer_reference"`
 }
+
+const (
+	RefundMethodCash         = "cash"
+	RefundMethodBankTransfer = "bank_transfer"
+)
+
+var accountLast4Pattern = regexp.MustCompile(`^[0-9]{4}$`)
 
 type RefundPaymentResult struct {
 	Payment       *domain.Payment `json:"payment"`
@@ -299,8 +314,29 @@ func (s *OperationalService) RefundPayment(
 	if in.RestoreStock == nil {
 		fields["restore_stock"] = "wajib diisi: true untuk mengembalikan stok, false bila barang dibuang (waste)"
 	}
+	bankName, last4, transferRef := strings.TrimSpace(in.BankName), strings.TrimSpace(in.AccountLast4), strings.TrimSpace(in.TransferReference)
+	switch in.RefundMethod {
+	case "", RefundMethodCash:
+		in.RefundMethod = RefundMethodCash
+	case RefundMethodBankTransfer:
+		if bankName == "" || len(bankName) > 100 {
+			fields["bank_name"] = "nama bank wajib diisi (maks. 100 karakter)"
+		}
+		if !accountLast4Pattern.MatchString(last4) {
+			fields["account_last4"] = "4 digit terakhir nomor rekening tujuan (jangan isi nomor lengkap)"
+		}
+		if transferRef == "" || len(transferRef) > 100 {
+			fields["transfer_reference"] = "nomor referensi transfer wajib diisi (maks. 100 karakter)"
+		}
+	default:
+		fields["refund_method"] = "harus cash atau bank_transfer"
+	}
 	if len(fields) > 0 {
 		return nil, &ValidationError{Fields: fields}
+	}
+	// A manual bank transfer is made by the owner personally (RF1-c), not approved by owner PIN.
+	if in.RefundMethod == RefundMethodBankTransfer && actor.Staff.Role != domain.RoleOwner {
+		return nil, ErrForbidden
 	}
 
 	storeID := actor.Staff.Store.ID
@@ -325,40 +361,52 @@ func (s *OperationalService) RefundPayment(
 			(order.PaymentStatus != domain.OrderPaymentStatusPaid && order.PaymentStatus != domain.OrderPaymentStatusPartiallyRefunded) {
 			return ErrOrderNotRefundable
 		}
-		if payment.Method != domain.PaymentMethodCash {
-			return ErrRefundMethodNotSupported
-		}
-
-		ownerOverrideID, err := s.authorizeAmount(ctx, tx, actor, payment.Amount, in.PIN, in.OwnerPIN)
-		if err != nil {
-			return err
-		}
 		now := s.nowFunc().UTC()
-
-		activeShift, err := s.shiftRepo.GetActiveShiftForStaff(ctx, tx, storeID, actor.Staff.UserID, nil)
-		if err != nil || activeShift == nil {
-			return ErrNoOpenShift
-		}
-		summary, err := s.shiftRepo.AggregateCashTotalsByShift(ctx, tx, storeID, activeShift.ID)
+		ownerWindow, err := s.checkRefundWindow(ctx, tx, actor, payment, now)
 		if err != nil {
 			return err
 		}
-		if summary.ExpectedCash(activeShift.OpeningFloat) < payment.Amount {
-			return ErrInsufficientCashInDrawer
+		ownerOverrideID, err := s.authorizeAmount(ctx, tx, actor, payment.Amount, in.PIN, in.OwnerPIN, ownerWindow)
+		if err != nil {
+			return err
 		}
-		if err := s.shiftRepo.InsertCashMovement(ctx, tx, &domain.CashMovement{
-			ID:           uuid.New(),
-			StoreID:      storeID,
-			ShiftID:      activeShift.ID,
-			MovementType: domain.CashMovementRefund,
-			Amount:       payment.Amount,
-			ActorID:      actor.Staff.UserID,
-			Reason:       &reason,
-			OrderID:      &order.ID,
-			PaymentID:    &payment.ID,
-			CreatedAt:    now,
-		}); err != nil {
-			return fmt.Errorf("failed to record cash movement for refund: %w", err)
+
+		// RF1-c: any original method is refunded manually; the payment keeps its method and reference.
+		ledger := &paymentRefund{storeID: storeID, paymentID: payment.ID, orderID: order.ID, amount: payment.Amount,
+			method: in.RefundMethod, reason: reason, actorID: actor.Staff.UserID, approvedBy: ownerOverrideID, at: now}
+		if in.RefundMethod == RefundMethodBankTransfer {
+			ledger.bankName, ledger.accountLast4, ledger.transferReference = &bankName, &last4, &transferRef
+		} else {
+			activeShift, err := s.shiftRepo.GetActiveShiftForStaff(ctx, tx, storeID, actor.Staff.UserID, nil)
+			if err != nil || activeShift == nil {
+				return ErrNoOpenShift
+			}
+			summary, err := s.shiftRepo.AggregateCashTotalsByShift(ctx, tx, storeID, activeShift.ID)
+			if err != nil {
+				return err
+			}
+			if summary.ExpectedCash(activeShift.OpeningFloat) < payment.Amount {
+				return ErrInsufficientCashInDrawer
+			}
+			movementID := uuid.New()
+			if err := s.shiftRepo.InsertCashMovement(ctx, tx, &domain.CashMovement{
+				ID:           movementID,
+				StoreID:      storeID,
+				ShiftID:      activeShift.ID,
+				MovementType: domain.CashMovementRefund,
+				Amount:       payment.Amount,
+				ActorID:      actor.Staff.UserID,
+				Reason:       &reason,
+				OrderID:      &order.ID,
+				PaymentID:    &payment.ID,
+				CreatedAt:    now,
+			}); err != nil {
+				return fmt.Errorf("failed to record cash movement for refund: %w", err)
+			}
+			ledger.cashMovementID = &movementID
+		}
+		if err := ledger.insert(ctx, tx); err != nil {
+			return err
 		}
 
 		if _, err := tx.ExecContext(ctx, `
@@ -391,35 +439,48 @@ func (s *OperationalService) RefundPayment(
 			order.PaymentStatus = domain.OrderPaymentStatusRefunded
 		}
 
+		// restore_stock=false records the refunded lines as waste (order_item_id -> quantity) in the audit.
 		stockRestored := false
-		if *in.RestoreStock {
-			switch {
-			case splitMode == domain.SplitModeByItem:
-				var lines []struct {
-					OrderItemID uuid.UUID `db:"order_item_id"`
-					Quantity    int       `db:"quantity"`
-				}
-				if err := tx.SelectContext(ctx, &lines, `
-					SELECT order_item_id, quantity FROM payment_split_items
-					WHERE store_id = $1 AND split_id = $2
-				`, storeID, *payment.SplitID); err != nil {
-					return fmt.Errorf("failed to load split items for restock: %w", err)
-				}
-				lineQty := make(map[uuid.UUID]int, len(lines))
-				for _, l := range lines {
-					lineQty[l.OrderItemID] += l.Quantity
-				}
+		var wastedLines map[uuid.UUID]int
+		switch {
+		case splitMode == domain.SplitModeByItem:
+			var lines []struct {
+				OrderItemID uuid.UUID `db:"order_item_id"`
+				Quantity    int       `db:"quantity"`
+			}
+			if err := tx.SelectContext(ctx, &lines, `
+				SELECT order_item_id, quantity FROM payment_split_items
+				WHERE store_id = $1 AND split_id = $2
+			`, storeID, *payment.SplitID); err != nil {
+				return fmt.Errorf("failed to load split items for restock: %w", err)
+			}
+			lineQty := make(map[uuid.UUID]int, len(lines))
+			for _, l := range lines {
+				lineQty[l.OrderItemID] += l.Quantity
+			}
+			if *in.RestoreStock {
 				products, options := computeItemStockQuantities(order, lineQty)
 				if err := restoreStockTx(ctx, tx, s.orderRepo, storeID, products, options); err != nil {
 					return err
 				}
 				stockRestored = len(lines) > 0
-			case fullyRefunded:
-				before := order.StockStatus
-				if err := releaseOrderStockTx(ctx, tx, s.orderRepo, order); err != nil {
-					return err
-				}
-				stockRestored = order.StockStatus != before
+			} else {
+				wastedLines = lineQty
+			}
+			// Every split has now been refunded and its lines restocked or wasted (review follow-up F3).
+			if fullyRefunded && (order.StockStatus == domain.OrderStockStatusReserved || order.StockStatus == domain.OrderStockStatusCommitted) {
+				order.StockStatus = domain.OrderStockStatusReleased
+			}
+		case fullyRefunded && *in.RestoreStock:
+			before := order.StockStatus
+			if err := releaseOrderStockTx(ctx, tx, s.orderRepo, order); err != nil {
+				return err
+			}
+			stockRestored = order.StockStatus != before
+		case fullyRefunded:
+			wastedLines = make(map[uuid.UUID]int, len(order.Items))
+			for _, item := range order.Items {
+				wastedLines[item.ID] += item.Quantity
 			}
 		}
 
@@ -439,8 +500,11 @@ func (s *OperationalService) RefundPayment(
 			"split_mode":        splitMode,
 			"amount":            payment.Amount,
 			"method":            payment.Method,
+			"refund_method":     in.RefundMethod,
 			"restore_stock":     *in.RestoreStock,
 			"stock_restored":    stockRestored,
+			"wasted_lines":      wastedLines,
+			"stock_after":       order.StockStatus,
 			"owner_override_by": ownerOverrideID,
 		})
 		if err := postgres.InsertAuditLog(ctx, tx, &domain.AuditLog{
@@ -459,9 +523,12 @@ func (s *OperationalService) RefundPayment(
 		result = &RefundPaymentResult{
 			Payment:       payment,
 			Order:         order,
-			OpenDrawer:    true,
+			OpenDrawer:    in.RefundMethod == RefundMethodCash,
 			StockRestored: stockRestored,
 			Message:       "Pengembalian dana (refund) tunai berhasil diproses.",
+		}
+		if in.RefundMethod == RefundMethodBankTransfer {
+			result.Message = "Pengembalian dana (refund) lewat transfer bank tercatat."
 		}
 		return nil
 	})
@@ -469,6 +536,61 @@ func (s *OperationalService) RefundPayment(
 		return nil, err
 	}
 	return result, nil
+}
+
+// checkRefundWindow applies RF1-e: a payment paid more business days ago (store time zone) than the
+// owner window cannot be refunded; past the cashier window it needs the owner (own login or owner PIN).
+// It reports whether the owner is required.
+func (s *OperationalService) checkRefundWindow(ctx context.Context, tx *sqlx.Tx, actor *AuthenticatedStaff, payment *domain.Payment, now time.Time) (bool, error) {
+	if payment.PaidAt == nil {
+		return false, nil // settled without a timestamp (legacy rows): no window to apply
+	}
+	settings, err := s.settings.GetStoreSettings(ctx, tx, actor.Staff.Store.ID)
+	if err != nil {
+		return false, err
+	}
+	store, err := s.orderRepo.GetStoreForOrder(ctx, tx, actor.Staff.Store.ID)
+	if err != nil {
+		return false, err
+	}
+	loc, err := time.LoadLocation(store.Timezone)
+	if err != nil {
+		loc = time.FixedZone("WIB", 7*3600)
+	}
+	day := func(t time.Time) time.Time {
+		y, m, d := t.In(loc).Date()
+		return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
+	}
+	days := int(day(now).Sub(day(*payment.PaidAt)).Hours() / 24)
+	if days > settings.RefundWindowOwnerDays {
+		return false, ErrRefundWindowExceeded
+	}
+	return days > settings.RefundWindowCashierDays && actor.Staff.Role != domain.RoleOwner, nil
+}
+
+// paymentRefund is one row of the append-only refund ledger (payment_refunds).
+type paymentRefund struct {
+	storeID, paymentID, orderID, actorID      uuid.UUID
+	amount                                    int64
+	method, reason                            string
+	bankName, accountLast4, transferReference *string
+	cashMovementID, approvedBy                *uuid.UUID
+	at                                        time.Time
+}
+
+func (r *paymentRefund) insert(ctx context.Context, tx *sqlx.Tx) error {
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO payment_refunds (store_id, payment_id, order_id, amount, method, bank_name, account_last4,
+			transfer_reference, cash_movement_id, reason, actor_id, approved_by, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+		r.storeID, r.paymentID, r.orderID, r.amount, r.method, r.bankName, r.accountLast4,
+		r.transferReference, r.cashMovementID, r.reason, r.actorID, r.approvedBy, r.at); err != nil {
+		if _, dup := postgres.UniqueViolation(err); dup {
+			return ErrPaymentAlreadyRefunded
+		}
+		return fmt.Errorf("failed to record refund ledger: %w", err)
+	}
+	return nil
 }
 
 type StockOverrideInput struct {
@@ -597,4 +719,9 @@ func (s *OperationalService) OverrideStock(
 		return nil, err
 	}
 	return result, nil
+}
+
+// SetPINPolicy applies the configured PIN lockout policy and the email service for owner alerts.
+func (s *OperationalService) SetPINPolicy(policy AuthPolicy, email *EmailService) {
+	s.pins.setPolicy(policy, email)
 }

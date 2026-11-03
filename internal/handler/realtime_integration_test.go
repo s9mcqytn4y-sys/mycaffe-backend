@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -61,6 +62,8 @@ func TestRealtimeIteration5cIntegration(t *testing.T) {
 	gh := handler.NewGuestHandler(service.NewGuestService(db, orderSvc, paymentSvc))
 	sh := handler.NewShiftHandler(service.NewShiftService(db))
 	hub := realtime.NewHub([]string{"http://localhost:3000"})
+	// Short re-check interval so revocation tests close connections within a second.
+	hub.SetLimits(realtime.DefaultLimits, 200*time.Millisecond)
 	go hub.Run()
 	t.Cleanup(hub.Shutdown)
 	rtSvc := service.NewRealtimeService(db)
@@ -186,6 +189,34 @@ func TestRealtimeIteration5cIntegration(t *testing.T) {
 		return func(ev wsEvent) bool { return ev.Type == typ && ev.Payload["order_id"] == id.String() }
 	}
 
+	// newGuest opens a QR guest session on a new table and returns its cookie.
+	newGuest := func() string {
+		t.Helper()
+		qr := "rt" + strings.ReplaceAll(uuid.NewString(), "-", "")
+		inStore(centralID, func(tx *sqlx.Tx) error {
+			_, err := tx.ExecContext(ctx, `INSERT INTO tables (store_id, table_number, qr_token) VALUES ($1, $2, $3)`, centralID, "RT-"+qr[:6], qr)
+			return err
+		})
+		start := call("POST", "/public/qr/"+qr+"/session", "", "", nil)
+		for _, ck := range start.Result().Cookies() {
+			if ck.Name == handler.GuestCookieName {
+				return ck.Value
+			}
+		}
+		t.Fatalf("guest session failed: %d: %s", start.Code, start.Body.String())
+		return ""
+	}
+	// closesWithin reports whether the server closes conn within d (events received meanwhile are skipped).
+	closesWithin := func(conn *websocket.Conn, d time.Duration) bool {
+		_ = conn.SetReadDeadline(time.Now().Add(d))
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				var netErr interface{ Timeout() bool }
+				return !(errors.As(err, &netErr) && netErr.Timeout())
+			}
+		}
+	}
+
 	cashier := login("central-cafe", "cashier.central@mycaffe.local")
 	kitchen := login("central-cafe", "kitchen.central@mycaffe.local")
 
@@ -291,21 +322,7 @@ func TestRealtimeIteration5cIntegration(t *testing.T) {
 		t.Cleanup(func() {
 			call("POST", fmt.Sprintf("/pos/shifts/%s/force-close", opened.Shift.ID), owner, "", map[string]any{"reason": "Akhir test realtime"})
 		})
-		qr := "rt" + strings.ReplaceAll(uuid.NewString(), "-", "")
-		inStore(centralID, func(tx *sqlx.Tx) error {
-			_, err := tx.ExecContext(ctx, `INSERT INTO tables (store_id, table_number, qr_token) VALUES ($1, $2, $3)`, centralID, "RT-"+qr[:6], qr)
-			return err
-		})
-		start := call("POST", "/public/qr/"+qr+"/session", "", "", nil)
-		var cookie string
-		for _, ck := range start.Result().Cookies() {
-			if ck.Name == handler.GuestCookieName {
-				cookie = ck.Value
-			}
-		}
-		if cookie == "" {
-			t.Fatalf("guest session failed: %d: %s", start.Code, start.Body.String())
-		}
+		cookie := newGuest()
 		tk := ticket("/public/guest/ws-ticket", "", cookie)
 		if len(tk.Channels) != 1 || !strings.HasPrefix(tk.Channels[0], realtime.ChannelGuestPrefix) {
 			t.Fatalf("guest must get only its own channel, got %v", tk.Channels)
@@ -333,6 +350,75 @@ func TestRealtimeIteration5cIntegration(t *testing.T) {
 		}
 		if ev.Payload["status"] != string(domain.OrderStatusPendingPayment) {
 			t.Fatalf("guest payload must carry the order status, got %+v", ev.Payload)
+		}
+	})
+
+	// Review follow-up: open connections close once the session behind them ends (re-check every 200 ms here).
+	t.Run("RevokedStaffSessionClosesOpenConnection", func(t *testing.T) {
+		fresh := login("central-cafe", "cashier.central@mycaffe.local")
+		tk := ticket("/pos/ws-ticket", fresh, "")
+		conn, _ := dial(tk.Ticket, -1)
+		inStore(centralID, func(tx *sqlx.Tx) error {
+			_, err := tx.ExecContext(ctx, `UPDATE auth_sessions SET revoked_at = NOW(), revoked_reason = 'logout'
+				WHERE store_id = $1 AND id = (SELECT auth_session_id FROM ws_tickets WHERE store_id = $1 AND id = $2)`,
+				centralID, strings.Split(tk.Ticket, ".")[1])
+			return err
+		})
+		if !closesWithin(conn, 2*time.Second) {
+			t.Fatal("connection of a revoked staff session must close")
+		}
+	})
+
+	t.Run("DeactivatedStaffClosesOpenConnection", func(t *testing.T) {
+		email := "rt.deactivate." + uuid.NewString()[:8] + "@mycaffe.local"
+		inStore(centralID, func(tx *sqlx.Tx) error {
+			_, err := tx.ExecContext(ctx, `INSERT INTO users (store_id, email, full_name, role, pin_hash, is_active, pin_set_at)
+				SELECT store_id, $2, 'RT Nonaktif', 'cashier', pin_hash, true, NOW() FROM users WHERE store_id = $1 AND email = 'cashier.central@mycaffe.local'`,
+				centralID, email)
+			return err
+		})
+		conn, _ := dial(ticket("/pos/ws-ticket", login("central-cafe", email), "").Ticket, -1)
+		inStore(centralID, func(tx *sqlx.Tx) error {
+			_, err := tx.ExecContext(ctx, `UPDATE users SET is_active = false WHERE store_id = $1 AND email = $2`, centralID, email)
+			return err
+		})
+		if !closesWithin(conn, 2*time.Second) {
+			t.Fatal("connection of a deactivated staff member must close")
+		}
+	})
+
+	t.Run("GuestConnectionCapAndEndedSessionCloses", func(t *testing.T) {
+		cookie := newGuest()
+		var conns []*websocket.Conn
+		for i := 0; i < realtime.DefaultLimits.PerGuest; i++ {
+			conn, code := dial(ticket("/public/guest/ws-ticket", "", cookie).Ticket, -1)
+			if code != http.StatusSwitchingProtocols {
+				t.Fatalf("guest connection %d refused: %d", i+1, code)
+			}
+			conns = append(conns, conn)
+		}
+		// The hub registers a connection asynchronously; retry briefly until the cap applies.
+		deadline := time.Now().Add(time.Second)
+		for {
+			_, code := dial(ticket("/public/guest/ws-ticket", "", cookie).Ticket, -1)
+			if code == http.StatusTooManyRequests {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("connection over the per-guest cap must be 429, got %d", code)
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		inStore(centralID, func(tx *sqlx.Tx) error {
+			_, err := tx.ExecContext(ctx, `UPDATE guest_sessions SET ended_at = NOW()
+				WHERE store_id = $1 AND id = (SELECT guest_session_id FROM ws_tickets WHERE store_id = $1 AND guest_session_id IS NOT NULL ORDER BY created_at DESC LIMIT 1)`,
+				centralID)
+			return err
+		})
+		for i, conn := range conns {
+			if !closesWithin(conn, 2*time.Second) {
+				t.Fatalf("guest connection %d must close after the guest session ended", i+1)
+			}
 		}
 	})
 }

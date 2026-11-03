@@ -892,3 +892,8 @@ func (s *ShiftService) populateUnsettledOpenTabs(
 	}
 	return len(unsettled), total, unsettled, nil
 }
+
+// SetPINPolicy applies the configured PIN lockout policy and the email service for owner alerts.
+func (s *ShiftService) SetPINPolicy(policy AuthPolicy, email *EmailService) {
+	s.pins.setPolicy(policy, email)
+}

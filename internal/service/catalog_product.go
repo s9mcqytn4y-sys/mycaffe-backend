@@ -36,6 +36,8 @@ type ProductInput struct {
 	TrackStock    *bool          `json:"track_stock"`
 	StockQuantity *int           `json:"stock_quantity"`
 	Variants      []VariantInput `json:"variants"` // create only
+	// ImageURL is rejected: product images are set only by a verified media upload (B3).
+	ImageURL json.RawMessage `json:"image_url"`
 }
 
 type ProductWithVariants struct {
@@ -270,6 +272,9 @@ func (s *CatalogService) ArchiveVariant(ctx context.Context, actor *Authenticate
 }
 
 func applyProduct(p *domain.Product, in ProductInput, f fieldErrors) {
+	if in.ImageURL != nil {
+		f.add("image_url", "diatur lewat unggah media (/api/v1/media/uploads)")
+	}
 	if in.Name != nil {
 		p.Name = f.text("name", *in.Name, 1, 120)
 	}

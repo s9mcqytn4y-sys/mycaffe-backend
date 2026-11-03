@@ -355,6 +355,29 @@ BEGIN
     IF has_table_privilege('mycaffe_app', 'public.kds_tickets', 'DELETE') THEN
         RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may DELETE kds_tickets!';
     END IF;
+    -- 10F-8. Refund ledger (migration 000023): RLS on, insert-only for the app role.
+    IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.payment_refunds'::regclass) THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: payment_refunds does not have row-level security enabled!';
+    END IF;
+    IF has_table_privilege('mycaffe_app', 'public.payment_refunds', 'UPDATE')
+       OR has_table_privilege('mycaffe_app', 'public.payment_refunds', 'DELETE') THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may UPDATE or DELETE payment_refunds!';
+    END IF;
+    -- 10F-7. Media uploads (migration 000022): RLS on, no DELETE for the app role.
+    IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.media_uploads'::regclass) THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: media_uploads does not have row-level security enabled!';
+    END IF;
+    IF has_table_privilege('mycaffe_app', 'public.media_uploads', 'DELETE') THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may DELETE media_uploads!';
+    END IF;
+    -- 10F-6. Receipt tokens (migration 000020): RLS on, insert-only for the app role.
+    IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.receipt_tokens'::regclass) THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: receipt_tokens does not have row-level security enabled!';
+    END IF;
+    IF has_table_privilege('mycaffe_app', 'public.receipt_tokens', 'DELETE')
+       OR has_table_privilege('mycaffe_app', 'public.receipt_tokens', 'UPDATE') THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may UPDATE or DELETE receipt_tokens!';
+    END IF;
     IF EXISTS (SELECT 1 FROM outbox_events WHERE store_seq IS NULL) THEN
         RAISE EXCEPTION 'outbox_events rows without store_seq';
     END IF;

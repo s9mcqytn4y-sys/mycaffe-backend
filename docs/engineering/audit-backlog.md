@@ -24,15 +24,15 @@ gap not yet confirmed).
 | P0-08 | Outbox dead-letter and purge of technical tables | Planned | `attempts`, `last_error`, `dead_at`; purge `outbox_events`, `ws_tickets`, `guest_sessions`, `payment_notification_logs` |
 | P0-09 | Provisioning and incident runbook per client | Planned | Go-live gate |
 | P0-10 | ADR-005 offline cash sync | **Frozen** | Owner freeze 2026-11-03 |
-| P0-11 | Receipts (ESC/POS + digital) | Planned | PR B1 |
+| P0-11 | Receipts (ESC/POS + digital) | Done (printer QR untested on real hardware) | PR B1, migration 000020 |
 | P0-12 | Refresh risk register and release notes | Planned | R2 (WebSocket) and R8 (media) are stale |
 
 ## P1: first weeks after go-live
 
 | ID | Title | Status | Evidence / next step |
 |----|-------|--------|----------------------|
-| P1-01 | RF1 non-cash refunds | Planned | PR B4 (RF1-c, -e, -f first; RF1-a/b after sandbox test) |
-| P1-02 | Daily sales report | Planned | PR B2 |
+| P1-01 | RF1 non-cash refunds | In progress | RF1-c, RF1-e done (B4, migration 000023); RF1-a/b/d/f after sandbox test |
+| P1-02 | Daily sales report | Done | PR B2, migration 000021; calendar business day until PD5 (04:00 cutoff) is approved |
 | P1-03 | Owner notifications (void/refund/cash variance/lockout) | Planned | Lockout warning starts in PR A F1 |
 | P1-04 | Remote approval (single-use `approval_requests`) | Planned | — |
 | P1-05 | Emergency staff revoke | To verify | `staff_admin.go` deactivates staff; WebSocket disconnect added in PR A |

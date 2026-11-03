@@ -35,6 +35,12 @@ tags:
     description: QR guest sessions, pay-first guest orders and the public order tracker (iteration 5b)
   - name: Realtime
     description: Outbox relay over WebSocket with single-use tickets, per-store sequence and replay (iteration 5c)
+  - name: Receipts
+    description: Snapshot-only sale, refund and void receipts (JSON or ESC/POS) and 90-day digital receipt links (B1, decision R1)
+  - name: Reports
+    description: Read-only owner sales reports per business day, method, category, item and hour, JSON or CSV (B2)
+  - name: Media
+    description: Presigned product image uploads to R2, verified and resized into metadata-free JPEG variants (B3, decision K9)
 
 paths:
   /health:
@@ -1235,7 +1241,10 @@ paths:
         last_seq, events after it are replayed (filtered to the ticket's channels); more than 500 missed
         events yield a single `resync_required` and the client reloads over REST. Staff channels get the
         full outbox payload; a guest gets only order_id, order_number, queue_number, status and
-        payment_status of its own orders. Origin must be in ALLOWED_ORIGINS.
+        payment_status of its own orders. Origin must be in ALLOWED_ORIGINS. An open connection re-checks
+        its subject every 30 s and is closed once the staff session is revoked, expired or logged out, the
+        account is deactivated or locked, or the guest session ended; the client then needs a new ticket.
+        Concurrent connections are capped per guest session (3), client IP (20) and store (150).
       x-implementation-status: implemented
       parameters:
         - name: ticket
@@ -1255,6 +1264,8 @@ paths:
           description: Switching protocols
         "401":
           description: WS_TICKET_REQUIRED or WS_TICKET_INVALID (unknown, used, expired, or subject no longer valid)
+        "429":
+          description: WS_CONNECTION_LIMIT (a connection cap is reached; the ticket is consumed)
   /api/v1/kds/tickets:
     get:
       tags: [KDS]
@@ -1971,17 +1982,24 @@ paths:
         "422":
           description: VALIDATION_FAILED (reason/pin) or OWNER_PIN_REQUIRED above void_refund_owner_threshold
         "429":
-          description: PIN_LOCKED (actor or every owner locked) or PIN_ATTEMPTS_EXCEEDED (5 wrong owner PINs by this actor in 15 min)
+          description: >-
+            PIN_LOCKED (actor or every owner locked), PIN_ATTEMPTS_EXCEEDED (STAFF_PIN_MAX_FAILURES wrong owner
+            PINs by this actor per STAFF_PIN_LOCKOUT window) or OWNER_PIN_STORE_LIMIT (3x that many from all staff
+            of the store; owners are emailed once)
 
   /api/v1/pos/orders/{id}/payments/{payment_id}/refund:
     post:
       tags: [POS Operational]
       operationId: refundPayment
-      summary: Refund one settled cash payment or split from the open drawer (Iteration 4d, hotfix v0.4.3)
+      summary: Refund one settled payment or split, in cash from the drawer or by the owner's bank transfer (4d, RF1-c, RF1-e)
       description: >-
-        Full refund of one cash payment once the order is paid or partially refunded. Non-cash
-        methods answer 409 REFUND_METHOD_NOT_SUPPORTED until the non-cash refund policy (decision
-        register RF1) is approved. restore_stock is required: for a by_item split it restores only that
+        Full refund of one payment of any method once the order is paid or partially refunded (RF1-c).
+        refund_method=cash (default) pays back from the actor's open drawer; bank_transfer is recorded by
+        the owner only, with bank name, the last 4 account digits and the transfer reference, and does not
+        touch the drawer. The payment keeps its original method; each refund is one row of the append-only
+        payment_refunds ledger. Refund windows (RF1-e, store settings, business days in the store time
+        zone from paid_at): past refund_window_cashier_days a cashier needs owner_pin; past
+        refund_window_owner_days nobody can refund in the system. restore_stock is required: for a by_item split it restores only that
         split's lines; otherwise the whole order is restored once, when this refund makes the order
         fully refunded. Updates payments.refunded_amount, orders.refunded_amount and the split status.
       x-implementation-status: implemented
@@ -2020,6 +2038,22 @@ paths:
                 restore_stock:
                   type: boolean
                   description: true returns the goods to stock; false records them as waste. No default.
+                refund_method:
+                  type: string
+                  enum: [cash, bank_transfer]
+                  default: cash
+                bank_name:
+                  type: string
+                  maxLength: 100
+                  description: Required for bank_transfer.
+                account_last4:
+                  type: string
+                  pattern: "^[0-9]{4}$"
+                  description: Required for bank_transfer; the full account number is never stored.
+                transfer_reference:
+                  type: string
+                  maxLength: 100
+                  description: Required for bank_transfer.
       responses:
         "200":
           description: Refund processed successfully
@@ -2045,11 +2079,16 @@ paths:
         "409":
           description: >-
             NO_OPEN_SHIFT, INSUFFICIENT_DRAWER_CASH, PAYMENT_ALREADY_REFUNDED, NOT_REFUNDABLE (payment not
-            paid or order not fully paid yet) or REFUND_METHOD_NOT_SUPPORTED (non-cash)
+            paid or order not fully paid yet), or REFUND_WINDOW_EXCEEDED (paid before the owner window)
+        "403":
+          description: FORBIDDEN (lacks payment.refund, or bank_transfer by anyone but the owner)
         "422":
-          description: VALIDATION_FAILED (reason, restore_stock, pin) or OWNER_PIN_REQUIRED
+          description: >-
+            VALIDATION_FAILED (reason, restore_stock, pin, refund_method, bank_name, account_last4,
+            transfer_reference) or OWNER_PIN_REQUIRED (above void_refund_owner_threshold, or a cashier past
+            the cashier refund window)
         "429":
-          description: PIN_LOCKED or PIN_ATTEMPTS_EXCEEDED
+          description: PIN_LOCKED, PIN_ATTEMPTS_EXCEEDED or OWNER_PIN_STORE_LIMIT
 
   /api/v1/pos/products/{id}/stock-override:
     post:
@@ -2118,8 +2157,368 @@ paths:
         "422":
           description: VALIDATION_FAILED (negative quantity, missing reason/PIN) or PRODUCT_NOT_TRACKED
         "429":
-          description: PIN_LOCKED or PIN_ATTEMPTS_EXCEEDED
+          description: PIN_LOCKED, PIN_ATTEMPTS_EXCEEDED or OWNER_PIN_STORE_LIMIT
 
+  /api/v1/pos/orders/{id}/receipt:
+    get:
+      tags: [Receipts]
+      operationId: getReceipt
+      summary: Sale, refund or void receipt from the order snapshots, as JSON or ESC/POS bytes (B1)
+      description: >-
+        Amounts come only from the order, item, option and payment snapshots; nothing is recalculated
+        from the catalog or current store rates. Tax and service are shown as amounts (no percent) until
+        rates are frozen per order (DB0). format=escpos returns raw bytes for 58 mm (32 columns) or 80 mm
+        (48 columns) printers; for kind=sale it also issues a new 90-day digital receipt link and prints it
+        as a QR code (GS ( k). Non-ASCII characters print as "?". A by-item split refund lists only the
+        lines of that split.
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: kind
+          in: query
+          schema:
+            type: string
+            enum: [sale, refund, void]
+            default: sale
+        - name: payment_id
+          in: query
+          description: Required for kind=refund; the refunded payment.
+          schema:
+            type: string
+            format: uuid
+        - name: format
+          in: query
+          schema:
+            type: string
+            enum: [json, escpos]
+            default: json
+        - name: width
+          in: query
+          description: Paper width in mm (ESC/POS only).
+          schema:
+            type: integer
+            enum: [58, 80]
+            default: 58
+      responses:
+        "200":
+          description: Receipt
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Receipt"
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "400":
+          description: INVALID_ID
+        "403":
+          description: Forbidden - lacks order.read.store
+        "404":
+          description: NOT_FOUND (order or payment)
+        "409":
+          description: RECEIPT_NOT_AVAILABLE (refund receipt of an unrefunded payment, void receipt of an order that was not voided)
+        "422":
+          description: VALIDATION_FAILED (kind, payment_id, format, width)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationErrorResponse"
+  /api/v1/pos/orders/{id}/receipt-link:
+    post:
+      tags: [Receipts]
+      operationId: issueReceiptLink
+      summary: Issue a 90-day digital receipt link (decision R1)
+      description: >-
+        The token (store_id.token_id.secret) is returned once; only the SHA-256 of the secret is stored.
+        Every call issues a new token and older ones stay valid until they expire. url is
+        APP_PUBLIC_URL/receipts/{token}.
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "201":
+          description: Link issued
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [token, url, expires_at]
+                properties:
+                  token:
+                    type: string
+                  url:
+                    type: string
+                    format: uri
+                  expires_at:
+                    type: string
+                    format: date-time
+        "400":
+          description: INVALID_ID
+        "403":
+          description: Forbidden - lacks order.read.store
+        "404":
+          description: NOT_FOUND
+  /api/v1/public/receipts/{token}:
+    get:
+      security: []
+      tags: [Receipts]
+      operationId: getPublicReceipt
+      summary: Digital receipt behind a link token (sale receipt with current refund totals)
+      description: No customer or staff names. Unknown, tampered, expired or other-store tokens all answer 404.
+      x-implementation-status: implemented
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Receipt
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Receipt"
+        "404":
+          description: RECEIPT_LINK_INVALID
+
+  /api/v1/reports/sales:
+    get:
+      tags: [Reports]
+      operationId: getSalesReport
+      summary: Sales grouped by day, hour, payment method, category or item (B2)
+      description: >-
+        Read-only, from snapshots. Dates are business days in the store time zone (calendar day, no cutoff
+        yet). day, hour, category and item use the order creation time of orders that took money (paid,
+        partially_refunded, refunded; voided orders are excluded); method uses payments.paid_at. Category
+        comes from the sale-time snapshot (order_items.snapshot_category_name). Category and item rows carry
+        quantities and line amounts only: order-level discount, tax and service are not split per line.
+        Range at most 92 days; from defaults to today and to defaults to from.
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - $ref: "#/components/parameters/ReportFrom"
+        - $ref: "#/components/parameters/ReportTo"
+        - name: group
+          in: query
+          schema:
+            type: string
+            enum: [day, hour, method, category, item]
+            default: day
+        - $ref: "#/components/parameters/ReportFormat"
+      responses:
+        "200":
+          description: Sales report (JSON) or CSV download (comma-separated, integer rupiah, Indonesian headers)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SalesReport"
+            text/csv:
+              schema:
+                type: string
+        "403":
+          description: Forbidden - lacks report.finance.read (owner only)
+        "422":
+          description: VALIDATION_FAILED (from, to, group, format)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationErrorResponse"
+  /api/v1/reports/summary:
+    get:
+      tags: [Reports]
+      operationId: getReportSummary
+      summary: Range totals, voids, refunds by method and cash figures matching the Z-reports (B2)
+      description: >-
+        cash_sales and cash_refunds sum cash_movements in the range, so cash_net equals the sum of
+        cash_sales - cash_refunds over the Z-reports of the shifts in it. Voids and refunds count by the
+        time they happened (audit log), totals by the order creation time.
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - $ref: "#/components/parameters/ReportFrom"
+        - $ref: "#/components/parameters/ReportTo"
+        - $ref: "#/components/parameters/ReportFormat"
+      responses:
+        "200":
+          description: Summary (JSON) or CSV download (komponen,nilai)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportSummary"
+            text/csv:
+              schema:
+                type: string
+        "403":
+          description: Forbidden - lacks report.finance.read (owner only)
+        "422":
+          description: VALIDATION_FAILED (from, to, format)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationErrorResponse"
+  /api/v1/media/uploads:
+    post:
+      tags: [Media]
+      operationId: createMediaUpload
+      summary: Start a product image upload; returns a 5-minute presigned PUT to the media bucket (B3)
+      description: >-
+        The browser PUTs the file directly to upload_url with the returned headers; the API never receives
+        the bytes. Then it calls /complete within 15 minutes. Only image/jpeg, image/png and image/webp up
+        to 5 MB, for a product of the caller's store that is not archived.
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind, product_id, content_type, size]
+              properties:
+                kind:
+                  type: string
+                  enum: [product_image]
+                product_id:
+                  type: string
+                  format: uuid
+                content_type:
+                  type: string
+                  enum: [image/jpeg, image/png, image/webp]
+                size:
+                  type: integer
+                  format: int64
+                  minimum: 1
+                  maximum: 5242880
+      responses:
+        "201":
+          description: Upload ticket
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, upload_url, method, headers, expires_at]
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                  upload_url:
+                    type: string
+                  method:
+                    type: string
+                    enum: [PUT]
+                  headers:
+                    type: object
+                    additionalProperties:
+                      type: string
+                  expires_at:
+                    type: string
+                    format: date-time
+        "400":
+          description: INVALID_REQUEST
+        "403":
+          description: Forbidden - lacks catalog.manage
+        "404":
+          description: NOT_FOUND (product not in this store or archived)
+        "413":
+          description: MEDIA_TOO_LARGE (over 5 MB)
+        "415":
+          description: MEDIA_UNSUPPORTED (type other than JPEG, PNG or WebP)
+        "422":
+          description: VALIDATION_FAILED (kind, product_id, size)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationErrorResponse"
+        "503":
+          description: MEDIA_UNAVAILABLE (R2 media bucket not configured)
+  /api/v1/media/uploads/{id}/complete:
+    post:
+      tags: [Media]
+      operationId: completeMediaUpload
+      summary: Verify the uploaded file, write JPEG variants and link the product image (B3)
+      description: >-
+        Re-reads the object from the bucket and checks its real size (5 MB), its magic bytes against the
+        declared type and its dimensions (at least 200 x 200, at most 25 megapixels). JPEG EXIF orientation
+        is applied, then every metadata block is dropped by re-encoding. Writes JPEG (quality 80) variants
+        200, 600 and 1200 px wide (never upscaled), deletes the raw upload, sets products.image_url to the
+        600 px variant and audits PRODUCT_IMAGE_CHANGED. A rejected file is deleted from the bucket.
+        products.image_url cannot be set through the catalog API.
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Linked
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, product_id, image_url, variants]
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                  product_id:
+                    type: string
+                    format: uuid
+                  image_url:
+                    type: string
+                  variants:
+                    type: array
+                    items:
+                      type: object
+                      required: [width, height, url]
+                      properties:
+                        width:
+                          type: integer
+                        height:
+                          type: integer
+                        url:
+                          type: string
+        "400":
+          description: INVALID_ID
+        "403":
+          description: Forbidden - lacks catalog.manage
+        "404":
+          description: NOT_FOUND
+        "409":
+          description: MEDIA_ALREADY_COMPLETED or MEDIA_NOT_UPLOADED (no object in the bucket yet)
+        "410":
+          description: MEDIA_UPLOAD_EXPIRED (15-minute window passed; start a new upload)
+        "413":
+          description: MEDIA_TOO_LARGE (the stored object exceeds 5 MB)
+        "415":
+          description: MEDIA_UNSUPPORTED (content is not the declared image type)
+        "422":
+          description: MEDIA_DIMENSIONS
+        "503":
+          description: MEDIA_UNAVAILABLE
   /api/v1/store/settings:
     get:
       tags: [Staff]
@@ -2682,6 +3081,27 @@ components:
       description: Signed HMAC token binding a public dine-in/takeaway session to a specific `store_id` and `table_number`.
 
   parameters:
+    ReportFrom:
+      name: from
+      in: query
+      description: First business day (YYYY-MM-DD, store time zone); defaults to today.
+      schema:
+        type: string
+        format: date
+    ReportTo:
+      name: to
+      in: query
+      description: Last business day, inclusive; defaults to from. At most 92 days after from.
+      schema:
+        type: string
+        format: date
+    ReportFormat:
+      name: format
+      in: query
+      schema:
+        type: string
+        enum: [json, csv]
+        default: json
     IfNoneMatch:
       name: If-None-Match
       in: header
@@ -3280,6 +3700,7 @@ components:
           maximum: 10000
     ProductInput:
       type: object
+      description: image_url is not accepted here (422 on field image_url); product images are set by POST /api/v1/media/uploads and /complete.
       properties:
         category_id:
           type: string
@@ -3423,6 +3844,139 @@ components:
           type: string
           example: mycaffe-api
 
+    Receipt:
+      type: object
+      description: Receipt built only from order, item, option and payment snapshots (B1).
+      required: [kind, store, order_id, order_number, queue_number, order_type, status, payment_status, issued_at, local_time, lines, subtotal_amount, discount_amount, tax_amount, service_charge_amount, total_amount, paid_amount, refunded_amount, payments]
+      properties:
+        kind:
+          type: string
+          enum: [sale, refund, void]
+        store:
+          type: object
+          required: [name]
+          properties:
+            name: {type: string}
+            address: {type: string}
+            phone: {type: string}
+        order_id: {type: string, format: uuid}
+        order_number: {type: string}
+        queue_number: {type: string}
+        table_number: {type: string}
+        order_type: {type: string}
+        status: {type: string}
+        payment_status: {type: string}
+        issued_at:
+          type: string
+          format: date-time
+          description: Order time (sale), refund time (refund) or void time (void).
+        local_time:
+          type: string
+          description: issued_at in the store time zone, dd/mm/yyyy hh:mm.
+        staff_name:
+          type: string
+          description: Cashier (sale), refunding or voiding staff; omitted on the public receipt.
+        lines:
+          type: array
+          items:
+            type: object
+            required: [name, quantity, unit_price, amount]
+            properties:
+              name: {type: string}
+              variant: {type: string}
+              options:
+                type: array
+                description: Option names; nested sub-options start with "- ".
+                items: {type: string}
+              notes: {type: string}
+              quantity: {type: integer}
+              unit_price: {type: integer, format: int64, description: "Snapshot unit price incl. modifiers (IDR)"}
+              amount: {type: integer, format: int64}
+        subtotal_amount: {type: integer, format: int64}
+        discount_amount: {type: integer, format: int64}
+        tax_amount: {type: integer, format: int64}
+        service_charge_amount: {type: integer, format: int64}
+        total_amount: {type: integer, format: int64}
+        paid_amount: {type: integer, format: int64}
+        refunded_amount: {type: integer, format: int64}
+        payments:
+          type: array
+          items:
+            type: object
+            required: [method, amount, status]
+            properties:
+              split_label: {type: string}
+              method: {type: string}
+              amount: {type: integer, format: int64}
+              cash_tendered_amount: {type: integer, format: int64}
+              change_amount: {type: integer, format: int64}
+              status: {type: string}
+        refund:
+          type: object
+          required: [payment_id, method, amount, reason, stock_returned]
+          properties:
+            payment_id: {type: string, format: uuid}
+            method: {type: string}
+            amount: {type: integer, format: int64}
+            reason: {type: string}
+            stock_returned: {type: boolean}
+        void_reason: {type: string}
+    SalesReport:
+      type: object
+      required: [from, to, group, rows]
+      properties:
+        from: {type: string, format: date}
+        to: {type: string, format: date}
+        group:
+          type: string
+          enum: [day, hour, method, category, item]
+        rows:
+          type: array
+          items:
+            type: object
+            required: [key, gross_sales, discount_amount, tax_amount, service_charge_amount, total_amount, refunded_amount, net_amount]
+            properties:
+              key:
+                type: string
+                description: Date (YYYY-MM-DD), local hour (00-23), payment method, category name ("Tanpa kategori" when none) or "item (variant)".
+              orders: {type: integer, format: int64, description: "Orders (day, hour, category, item)"}
+              payments: {type: integer, format: int64, description: Payments (method)}
+              quantity: {type: integer, format: int64, description: "Units sold (category, item)"}
+              gross_sales: {type: integer, format: int64, description: "Subtotal before discount (orders) or payment amount (method)"}
+              discount_amount: {type: integer, format: int64}
+              tax_amount: {type: integer, format: int64}
+              service_charge_amount: {type: integer, format: int64}
+              total_amount: {type: integer, format: int64}
+              refunded_amount: {type: integer, format: int64}
+              net_amount: {type: integer, format: int64}
+    ReportSummary:
+      type: object
+      required: [from, to, orders, gross_sales, discount_amount, tax_amount, service_charge_amount, total_amount, refunded_amount, net_amount, void_count, void_amount, refunds_by_method, cash_sales, cash_refunds, cash_net]
+      properties:
+        from: {type: string, format: date}
+        to: {type: string, format: date}
+        orders: {type: integer, format: int64}
+        gross_sales: {type: integer, format: int64}
+        discount_amount: {type: integer, format: int64}
+        tax_amount: {type: integer, format: int64}
+        service_charge_amount: {type: integer, format: int64}
+        total_amount: {type: integer, format: int64}
+        refunded_amount: {type: integer, format: int64}
+        net_amount: {type: integer, format: int64}
+        void_count: {type: integer, format: int64}
+        void_amount: {type: integer, format: int64}
+        refunds_by_method:
+          type: array
+          items:
+            type: object
+            required: [method, count, amount]
+            properties:
+              method: {type: string}
+              count: {type: integer, format: int64}
+              amount: {type: integer, format: int64}
+        cash_sales: {type: integer, format: int64}
+        cash_refunds: {type: integer, format: int64}
+        cash_net: {type: integer, format: int64}
     ErrorResponse:
       type: object
       required: [error]
@@ -4041,6 +4595,16 @@ components:
           type: string
           enum: ["off", auto, forced]
           description: Static QRIS fallback when Midtrans fails (K8). Default auto.
+        refund_window_cashier_days:
+          type: integer
+          minimum: 0
+          maximum: 30
+          description: Business days after paid_at a cashier may refund alone (RF1-e). Default 0 (same day).
+        refund_window_owner_days:
+          type: integer
+          minimum: 0
+          maximum: 30
+          description: Business days after paid_at the owner (or a cashier with owner PIN) may refund; at least the cashier window. Default 7.
 
     InitiatePaymentResponse:
       type: object

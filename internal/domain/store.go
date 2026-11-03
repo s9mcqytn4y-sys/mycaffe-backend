@@ -208,6 +208,9 @@ type StoreSettings struct {
 	TableIdleCloseMinutes    int       `json:"table_idle_close_minutes" db:"table_idle_close_minutes"`
 	QROrderingPaused         bool      `json:"qr_ordering_paused" db:"qr_ordering_paused"`
 	StaticQRISFallbackMode   string    `json:"static_qris_fallback_mode" db:"static_qris_fallback_mode"`
+	// RefundWindow*Days limit refunds to payments paid at most this many business days ago (RF1-e; 0 = same day).
+	RefundWindowCashierDays int `json:"refund_window_cashier_days" db:"refund_window_cashier_days"`
+	RefundWindowOwnerDays   int `json:"refund_window_owner_days" db:"refund_window_owner_days"`
 }
 
 // DefaultStoreSettings mirrors the column defaults of migration 000007.
@@ -215,6 +218,7 @@ func DefaultStoreSettings(storeID uuid.UUID) StoreSettings {
 	return StoreSettings{
 		StoreID: storeID, VoidRefundOwnerThreshold: 100000, CashierMaxDiscountBPS: 1000, CashVarianceTolerance: 5000,
 		TableIdleCloseMinutes: 30, StaticQRISFallbackMode: StaticQRISFallbackAuto,
+		RefundWindowCashierDays: 0, RefundWindowOwnerDays: 7,
 	}
 }
 

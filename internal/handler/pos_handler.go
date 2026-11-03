@@ -393,10 +393,12 @@ func writeOperationalError(c *gin.Context, err error) {
 			"code":  "ORDER_HAS_PAYMENTS",
 			"error": "Pesanan sudah memiliki pembayaran (lunas, sebagian, atau masih diproses). Gunakan refund, bukan void.",
 		})
-	case errors.Is(err, service.ErrRefundMethodNotSupported):
+	case errors.Is(err, service.ErrForbidden):
+		authError(c, http.StatusForbidden, "FORBIDDEN", "Peran Anda tidak diizinkan melakukan aksi ini.")
+	case errors.Is(err, service.ErrRefundWindowExceeded):
 		c.JSON(http.StatusConflict, gin.H{
-			"code":  "REFUND_METHOD_NOT_SUPPORTED",
-			"error": "Refund non-tunai (QRIS/EDC) belum didukung di POS. Hubungi owner untuk penanganan manual.",
+			"code":  "REFUND_WINDOW_EXCEEDED",
+			"error": "Pembayaran ini sudah melewati batas waktu refund toko dan tidak bisa direfund di sistem.",
 		})
 	case errors.Is(err, service.ErrPINLocked):
 		c.JSON(http.StatusTooManyRequests, gin.H{
@@ -407,6 +409,11 @@ func writeOperationalError(c *gin.Context, err error) {
 		c.JSON(http.StatusTooManyRequests, gin.H{
 			"code":  "PIN_ATTEMPTS_EXCEEDED",
 			"error": "Terlalu banyak percobaan PIN Owner yang salah. Coba lagi dalam 15 menit.",
+		})
+	case errors.Is(err, service.ErrOwnerPINStoreLimit):
+		c.JSON(http.StatusTooManyRequests, gin.H{
+			"code":  "OWNER_PIN_STORE_LIMIT",
+			"error": "Persetujuan PIN Owner diblokir sementara karena terlalu banyak PIN salah di toko ini. Owner sudah diberi tahu lewat email.",
 		})
 	case errors.Is(err, service.ErrProductNotTracked):
 		c.JSON(http.StatusUnprocessableEntity, gin.H{

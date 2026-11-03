@@ -620,11 +620,14 @@ func (r *OrderRepository) InsertOrderItem(ctx context.Context, tx *sqlx.Tx, item
 			id, store_id, order_id, product_id, config_hash, snapshot_name,
 			unit_base_price, modifier_total_price, snapshot_price, quantity,
 			subtotal_amount, selected_options, notes, variant_id, snapshot_variant_name, snapshot_sku, round_id,
-			snapshot_prep_station
+			snapshot_prep_station, snapshot_category_name
 		) VALUES (
 			$1, $2, $3, $4, $5, $6,
 			$7, $8, $9, $10,
-			$11, $12::jsonb, $13, $14, $15, $16, $17, $18
+			$11, $12::jsonb, $13, $14, $15, $16, $17, $18,
+			-- B2: snapshot the product category as it is at sale time.
+			COALESCE((SELECT c.name FROM products p JOIN categories c ON c.store_id = p.store_id AND c.id = p.category_id
+				WHERE p.store_id = $2 AND p.id = $4), '')
 		)
 		RETURNING created_at
 	`

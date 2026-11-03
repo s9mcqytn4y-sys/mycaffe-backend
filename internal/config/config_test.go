@@ -282,7 +282,7 @@ func TestValidateConfigStagingRequiresStrongJWTSecret(t *testing.T) {
 			t.Errorf("staging accepted JWT secret %q", secret)
 		}
 	}
-	if err := config.ValidateConfig(&config.Config{AppEnv: "staging", JWTSecret: "9f3c1e7a52b84d06a1c9e2f47b8d3065", EmailDriver: "log"}); err != nil {
+	if err := config.ValidateConfig(&config.Config{AppEnv: "staging", JWTSecret: strings.Repeat("strong", 6), EmailDriver: "log"}); err != nil {
 		t.Errorf("staging rejected a strong secret: %v", err)
 	}
 }

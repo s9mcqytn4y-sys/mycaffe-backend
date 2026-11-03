@@ -393,10 +393,12 @@ func writeOperationalError(c *gin.Context, err error) {
 			"code":  "ORDER_HAS_PAYMENTS",
 			"error": "Pesanan sudah memiliki pembayaran (lunas, sebagian, atau masih diproses). Gunakan refund, bukan void.",
 		})
-	case errors.Is(err, service.ErrRefundMethodNotSupported):
+	case errors.Is(err, service.ErrForbidden):
+		authError(c, http.StatusForbidden, "FORBIDDEN", "Peran Anda tidak diizinkan melakukan aksi ini.")
+	case errors.Is(err, service.ErrRefundWindowExceeded):
 		c.JSON(http.StatusConflict, gin.H{
-			"code":  "REFUND_METHOD_NOT_SUPPORTED",
-			"error": "Refund non-tunai (QRIS/EDC) belum didukung di POS. Hubungi owner untuk penanganan manual.",
+			"code":  "REFUND_WINDOW_EXCEEDED",
+			"error": "Pembayaran ini sudah melewati batas waktu refund toko dan tidak bisa direfund di sistem.",
 		})
 	case errors.Is(err, service.ErrPINLocked):
 		c.JSON(http.StatusTooManyRequests, gin.H{

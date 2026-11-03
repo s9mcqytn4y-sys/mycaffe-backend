@@ -381,12 +381,14 @@ func TestVoidRefundHotfix4d1Integration(t *testing.T) {
 
 		edcOrder, edcTotal := createOrder(line(1, false))
 		edcPayment := pay(edcOrder, nil, "edc", edcTotal)
-		res = refund(edcOrder, edcPayment, map[string]any{"restore_stock": true})
-		if res.Code != http.StatusConflict || !strings.Contains(res.Body.String(), "REFUND_METHOD_NOT_SUPPORTED") {
-			t.Fatalf("expected 409 REFUND_METHOD_NOT_SUPPORTED, got %d: %s", res.Code, res.Body.String())
+		// RF1-c: a manual bank transfer is the owner's alone; a cashier is refused and nothing changes.
+		res = refund(edcOrder, edcPayment, map[string]any{"restore_stock": true, "refund_method": "bank_transfer",
+			"bank_name": "BCA", "account_last4": "1234", "transfer_reference": "TRF-1"})
+		if res.Code != http.StatusForbidden {
+			t.Fatalf("cashier bank-transfer refund must be 403, got %d: %s", res.Code, res.Body.String())
 		}
 		if _, ps, _, refunded := orderRow(edcOrder); ps != "paid" || refunded != 0 {
-			t.Fatalf("refused non-cash refund must leave the order paid, got %s/%d", ps, refunded)
+			t.Fatalf("refused refund must leave the order paid, got %s/%d", ps, refunded)
 		}
 	})
 

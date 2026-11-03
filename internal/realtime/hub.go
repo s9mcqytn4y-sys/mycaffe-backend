@@ -218,6 +218,19 @@ func (h *Hub) SetLimits(limits Limits, revalidate time.Duration) {
 	h.limits, h.revalidate = limits, revalidate
 }
 
+// Connections returns how many connections of a store the hub has registered.
+func (h *Hub) Connections(storeID string) int {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	n := 0
+	for c := range h.clients {
+		if c.storeID == storeID {
+			n++
+		}
+	}
+	return n
+}
+
 // Admit reports ErrTooManyConnections when sub would exceed a cap. Checked before the upgrade, so two
 // simultaneous connects may overshoot a cap by one.
 func (h *Hub) Admit(sub Subscription) error {

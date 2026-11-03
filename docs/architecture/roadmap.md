@@ -54,7 +54,7 @@ guest); Midtrans webhook. Metrics on the internal `METRICS_ADDR` only.
 | B1 | **Receipts** (R1): structured payload, ESC/POS 58/80 mm, 90-day digital link, void/refund receipts | snapshot-only, no recalculation; implemented (migration 000020) | P0-11 |
 | B2 | **Owner reports**: per business day (store time zone), payment method, category/item, hour, void/refund, discount, tax & service; date range; CSV | consistent with Z-report; read-only with indexes; implemented (migration 000021, calendar day until PD5 cutoff) | P1-02 |
 | B3 | **Media C4**: presigned PUT to `mycaffe-media`, magic bytes, size, EXIF strip, JPEG variants (K9 deviation) | `product.image_url` only from verified objects; implemented (migration 000022) | R8 |
-| B4 | **RF1 staged**: RF1-c manual cash/transfer, RF1-e window per role, RF1-f `refund_pending`; RF1-a/b Midtrans refund in a separate PR after sandbox test | per decision register RF1 | P1-01 |
+| B4 | **RF1 staged**: RF1-c manual cash/transfer, RF1-e window per role (implemented, migration 000023); RF1-f `refund_pending` moves with RF1-a/b Midtrans refund, a separate PR after sandbox test | per decision register RF1 | P1-01 |
 
 Frozen until go-live: ADR-005 offline cash sync (P0-10), inventory C5 (P1-07..P1-10, P2-06),
 promotions & bundles (K7), loyalty (K6), static QRIS fallback (K8), delivery channels.

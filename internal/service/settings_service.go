@@ -23,6 +23,8 @@ type StoreSettingsPatch struct {
 	TableIdleCloseMinutes    *int    `json:"table_idle_close_minutes"`
 	QROrderingPaused         *bool   `json:"qr_ordering_paused"`
 	StaticQRISFallbackMode   *string `json:"static_qris_fallback_mode"`
+	RefundWindowCashierDays  *int    `json:"refund_window_cashier_days"`
+	RefundWindowOwnerDays    *int    `json:"refund_window_owner_days"`
 }
 
 // SettingsService lets owners change operating policies without a developer (owner decision K3).
@@ -83,6 +85,12 @@ func (s *SettingsService) Update(ctx context.Context, actor *AuthenticatedStaff,
 		if patch.StaticQRISFallbackMode != nil {
 			after.StaticQRISFallbackMode = *patch.StaticQRISFallbackMode
 		}
+		if patch.RefundWindowCashierDays != nil {
+			after.RefundWindowCashierDays = *patch.RefundWindowCashierDays
+		}
+		if patch.RefundWindowOwnerDays != nil {
+			after.RefundWindowOwnerDays = *patch.RefundWindowOwnerDays
+		}
 		if err := validateStoreSettings(after); err != nil {
 			return err
 		}
@@ -111,6 +119,10 @@ func validateStoreSettings(s domain.StoreSettings) error {
 		return errors.Join(ErrInvalidSettings, errors.New("batas diskon kasir harus 0-10000 bps (0-100%)"))
 	case s.TableIdleCloseMinutes < 5 || s.TableIdleCloseMinutes > 240:
 		return errors.Join(ErrInvalidSettings, errors.New("waktu tutup meja otomatis harus 5-240 menit"))
+	case s.RefundWindowCashierDays < 0 || s.RefundWindowCashierDays > 30 || s.RefundWindowOwnerDays < 0 || s.RefundWindowOwnerDays > 30:
+		return errors.Join(ErrInvalidSettings, errors.New("batas waktu refund harus 0-30 hari"))
+	case s.RefundWindowOwnerDays < s.RefundWindowCashierDays:
+		return errors.Join(ErrInvalidSettings, errors.New("batas waktu refund owner tidak boleh lebih pendek dari kasir"))
 	case s.StaticQRISFallbackMode != domain.StaticQRISFallbackOff && s.StaticQRISFallbackMode != domain.StaticQRISFallbackAuto && s.StaticQRISFallbackMode != domain.StaticQRISFallbackForced:
 		return errors.Join(ErrInvalidSettings, errors.New("mode QRIS statis harus off, auto, atau forced"))
 	}

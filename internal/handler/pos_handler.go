@@ -408,6 +408,11 @@ func writeOperationalError(c *gin.Context, err error) {
 			"code":  "PIN_ATTEMPTS_EXCEEDED",
 			"error": "Terlalu banyak percobaan PIN Owner yang salah. Coba lagi dalam 15 menit.",
 		})
+	case errors.Is(err, service.ErrOwnerPINStoreLimit):
+		c.JSON(http.StatusTooManyRequests, gin.H{
+			"code":  "OWNER_PIN_STORE_LIMIT",
+			"error": "Persetujuan PIN Owner diblokir sementara karena terlalu banyak PIN salah di toko ini. Owner sudah diberi tahu lewat email.",
+		})
 	case errors.Is(err, service.ErrProductNotTracked):
 		c.JSON(http.StatusUnprocessableEntity, gin.H{
 			"code":  "PRODUCT_NOT_TRACKED",

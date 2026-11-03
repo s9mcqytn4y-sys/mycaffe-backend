@@ -15,10 +15,11 @@ var templateFS embed.FS
 
 // Template names. Each has templates/<name>.html (subject, preheader, html_body) and <name>.txt.
 const (
-	TemplateStaffInvite   = "staff_invite"
-	TemplatePINReset      = "pin_reset"
-	TemplatePINChanged    = "pin_changed"
-	TemplateAccountLocked = "account_locked"
+	TemplateStaffInvite      = "staff_invite"
+	TemplatePINReset         = "pin_reset"
+	TemplatePINChanged       = "pin_changed"
+	TemplateAccountLocked    = "account_locked"
+	TemplateOwnerPINAttempts = "owner_pin_attempts"
 )
 
 // Data is the template input. Fields a template does not use are ignored.

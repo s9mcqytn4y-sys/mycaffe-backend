@@ -172,8 +172,18 @@ func TestPaymentServiceIntegration_EndToEnd(t *testing.T) {
 	lessSugarOptID := uuid.MustParse("20000004-0000-4000-8000-000000000004")
 	coldFoamSubOptID := uuid.MustParse("20000006-0000-4000-8000-000000000006")
 
-	cashierID := uuid.MustParse("a0000003-0000-4000-8000-000000000003")
+	// A dedicated cashier: the seeded cashier.central is used by handler tests that run in parallel
+	// (another package), and an open shift here would capture their cash movements.
+	cashierID := uuid.New()
 	baristaID := uuid.MustParse("a0000004-0000-4000-8000-000000000004")
+	if err := database.WithTenantTx(ctx, db, storeAID, func(tx *sqlx.Tx) error {
+		_, err := tx.ExecContext(ctx, `INSERT INTO users (id, store_id, email, full_name, role, pin_hash, is_active, pin_set_at)
+			SELECT $1, store_id, $2, 'Kasir Uji Payment', 'cashier', pin_hash, true, NOW() FROM users WHERE store_id = $3 AND id = 'a0000003-0000-4000-8000-000000000003'`,
+			cashierID, "payment."+cashierID.String()[:8]+"@mycaffe.local", storeAID)
+		return err
+	}); err != nil {
+		t.Fatalf("failed to create test cashier: %v", err)
+	}
 
 	currentNow := time.Date(2026, 10, 29, 14, 30, 0, 0, time.UTC)
 	clock := func() time.Time {

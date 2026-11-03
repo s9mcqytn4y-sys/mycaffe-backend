@@ -133,6 +133,7 @@ func main() {
 	var guestHandler *handler.GuestHandler
 	var realtimeHandler *handler.RealtimeHandler
 	var kdsHandler *handler.KDSHandler
+	var receiptHandler *handler.ReceiptHandler
 	if db != nil {
 		emailService := newEmailService(cfg, db, workerCtx)
 		authPolicy := service.AuthPolicy{
@@ -165,6 +166,7 @@ func main() {
 		tableHandler = handler.NewTableHandler(service.NewTableService(db))
 		guestHandler = handler.NewGuestHandler(service.NewGuestService(db, orderService, paymentService))
 		kdsHandler = handler.NewKDSHandler(service.NewKDSService(db))
+		receiptHandler = handler.NewReceiptHandler(service.NewReceiptService(db, cfg.AppPublicURL))
 		realtimeService := service.NewRealtimeService(db)
 		realtimeHandler = handler.NewRealtimeHandler(hub, realtimeService)
 		// Outbox relay (iteration 5c): LISTEN outbox + 2 s polling, at-least-once, ordered per store.
@@ -229,6 +231,11 @@ func main() {
 			pos.POST("/orders/:id/void", authHandler.RequirePermission(rbac.OrderVoid), posHandler.VoidOrder)
 			pos.POST("/orders/:id/payments/:payment_id/refund", authHandler.RequirePermission(rbac.PaymentRefund), posHandler.RefundPayment)
 			pos.POST("/products/:id/stock-override", authHandler.RequirePermission(rbac.StockOverride), posHandler.OverrideStock)
+
+			// Receipts (B1, decision R1): snapshot-only JSON or ESC/POS, 90-day digital link.
+			pos.GET("/orders/:id/receipt", authHandler.RequirePermission(rbac.OrderReadStore), receiptHandler.GetReceipt)
+			pos.POST("/orders/:id/receipt-link", authHandler.RequirePermission(rbac.OrderReadStore), receiptHandler.IssueLink)
+			v1.GET("/public/receipts/:token", receiptHandler.PublicReceipt)
 
 			// Tables & table sessions (iteration 5a): table board for staff, CRUD for the owner (QR3).
 			pos.GET("/tables", authHandler.RequireStaff(), tableHandler.ListTables)

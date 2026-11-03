@@ -7,8 +7,8 @@
 # restarts it after a crash and after Docker Desktop starts again (enable
 # "Start Docker Desktop when you sign in" for reboot survival).
 #
-# APP_ENV=staging keeps unauthenticated order, payment and WebSocket routes fail-closed
-# (503) until Phase 02 authentication ships. Midtrans stays in sandbox.
+# APP_ENV=staging: every route is live and Midtrans stays in sandbox. The stack refuses to start
+# without JWT_SECRET_KEY, DEMO_OWNER_PIN and DEMO_STAFF_PIN in .env.demo (leaks L-1, L-2).
 #
 # Usage: see docs/setup/demo-staging-environment.md
 
@@ -52,13 +52,16 @@ services:
       DATABASE_MIGRATION_URL: postgres://${DB_MIGRATOR_USER:-mycaffe_migrator}:${DB_MIGRATOR_PASSWORD:-mycaffe_demo_migrator_password}@postgres:5432/${DB_NAME:-mycaffe_demo}?sslmode=disable
       DB_APP_USER: ${DB_APP_USER:-mycaffe_app}
       DB_APP_PASSWORD: ${DB_APP_PASSWORD:-mycaffe_demo_app_password}
+      # The seed PIN 482913 is public; demo-pins replaces it (L-1). Set both in .env.demo.
+      DEMO_OWNER_PIN: ${DEMO_OWNER_PIN:?set DEMO_OWNER_PIN in .env.demo}
+      DEMO_STAFF_PIN: ${DEMO_STAFF_PIN:?set DEMO_STAFF_PIN in .env.demo}
     volumes:
       - ../../db/seeds:/app/db/seeds:ro
     # Both actions are idempotent, so this is safe on every `up`.
     entrypoint:
       - /bin/sh
       - -c
-      - /app/mycaffe-migrate -action=up -dir=/app/db/migrations && /app/mycaffe-migrate -action=seed -seed-file=/app/db/seeds/development.sql
+      - /app/mycaffe-migrate -action=up -dir=/app/db/migrations && /app/mycaffe-migrate -action=seed -seed-file=/app/db/seeds/development.sql && /app/mycaffe-migrate -action=demo-pins -store-slug=central-cafe,express-counter
     networks:
       - mycaffe-data
 
@@ -80,7 +83,7 @@ services:
       DATABASE_URL: postgres://${DB_APP_USER:-mycaffe_app}:${DB_APP_PASSWORD:-mycaffe_demo_app_password}@postgres:5432/${DB_NAME:-mycaffe_demo}?sslmode=disable
       DB_APP_USER: ${DB_APP_USER:-mycaffe_app}
       DB_APP_PASSWORD: ${DB_APP_PASSWORD:-mycaffe_demo_app_password}
-      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-demo-only-jwt-secret-key-minimum-32-characters}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?set JWT_SECRET_KEY in .env.demo (openssl rand -hex 32)}
       MIDTRANS_MERCHANT_ID: ${MIDTRANS_MERCHANT_ID:-G000000000}
       MIDTRANS_SERVER_KEY: ${MIDTRANS_SERVER_KEY:-SB-Mid-server-demo-placeholder}
       MIDTRANS_CLIENT_KEY: ${MIDTRANS_CLIENT_KEY:-SB-Mid-client-demo-placeholder}

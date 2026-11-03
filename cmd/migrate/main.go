@@ -17,10 +17,10 @@ import (
 )
 
 func main() {
-	action := flag.String("action", "up", "Action: up, down, seed, bootstrap-store, or reset-owner-pin")
+	action := flag.String("action", "up", "Action: up, down, seed, demo-pins, bootstrap-store, or reset-owner-pin")
 	migrationsDir := flag.String("dir", "db/migrations", "Path to SQL migrations directory")
 	seedFile := flag.String("seed-file", "db/seeds/development.sql", "Path to development seed SQL file")
-	storeSlug := flag.String("store-slug", "", "bootstrap-store/reset-owner-pin: store slug (login code)")
+	storeSlug := flag.String("store-slug", "", "bootstrap-store/reset-owner-pin: store slug (login code); demo-pins: comma-separated slugs")
 	storeName := flag.String("store-name", "", "bootstrap-store: store display name")
 	ownerName := flag.String("owner-name", "", "bootstrap-store: owner full name")
 	ownerEmail := flag.String("owner-email", "", "bootstrap-store/reset-owner-pin: owner email")
@@ -76,6 +76,16 @@ func main() {
 			log.Fatalf("[MIGRATE SEED FAILED] %v", err)
 		}
 		log.Printf("[MIGRATE SEED] Seed file %s applied successfully.", *seedFile)
+	case "demo-pins":
+		// Demo stack only (L-1): PINs come from the git-ignored .env.demo, never from the repo.
+		if cfg.AppEnv != "staging" {
+			log.Fatalf("[DEMO PINS] refused: APP_ENV must be staging, got %q", cfg.AppEnv)
+		}
+		n, err := service.ApplyDemoPINs(ctx, db, strings.Split(*storeSlug, ","), os.Getenv("DEMO_OWNER_PIN"), os.Getenv("DEMO_STAFF_PIN"))
+		if err != nil {
+			log.Fatalf("[DEMO PINS FAILED] %v (set DEMO_OWNER_PIN and DEMO_STAFF_PIN in .env.demo)", err)
+		}
+		log.Printf("[DEMO PINS] Seed PIN replaced for %d user(s) in %s.", n, *storeSlug)
 	case "bootstrap-store":
 		pin := mustReadPIN()
 		storeID, ownerID, err := service.BootstrapStore(ctx, db, service.BootstrapStoreInput{
@@ -92,7 +102,7 @@ func main() {
 		}
 		log.Printf("[RESET OWNER PIN] PIN reset for owner %q in store %q; all sessions revoked.", *ownerEmail, *storeSlug)
 	default:
-		log.Fatalf("[MIGRATE FATAL] Unsupported action %q (allowed: up, down, seed, bootstrap-store, reset-owner-pin)", *action)
+		log.Fatalf("[MIGRATE FATAL] Unsupported action %q (allowed: up, down, seed, demo-pins, bootstrap-store, reset-owner-pin)", *action)
 	}
 }
 

@@ -128,3 +128,34 @@ func ResetOwnerPIN(ctx context.Context, db *sqlx.DB, slug, email, pin string) er
 		})
 	})
 }
+
+// seedDevPIN is the PIN db/seeds/development.sql gives every seeded user.
+const seedDevPIN = "482913"
+
+var ErrDemoPINs = errors.New("demo PINs must be two different, policy-compliant PINs other than the seed PIN")
+
+// ApplyDemoPINs replaces the published seed PIN of every user in the given stores before the
+// demo is reachable through a public tunnel (L-1): owners get ownerPIN, other staff staffPIN.
+// It runs after each `seed` (which resets the seed PIN), so no sessions are revoked or audited:
+// the effective demo PIN does not change between runs.
+func ApplyDemoPINs(ctx context.Context, db *sqlx.DB, storeSlugs []string, ownerPIN, staffPIN string) (int64, error) {
+	if ownerPIN == staffPIN || ownerPIN == seedDevPIN || staffPIN == seedDevPIN ||
+		auth.ValidatePINPolicy(ownerPIN) != nil || auth.ValidatePINPolicy(staffPIN) != nil {
+		return 0, ErrDemoPINs
+	}
+	ownerHash, err := auth.HashPIN(ownerPIN)
+	if err != nil {
+		return 0, err
+	}
+	staffHash, err := auth.HashPIN(staffPIN)
+	if err != nil {
+		return 0, err
+	}
+	res, err := db.ExecContext(ctx, `
+		UPDATE users u SET pin_hash = CASE WHEN u.role = 'owner' THEN $2 ELSE $3 END
+		FROM stores s WHERE s.id = u.store_id AND s.slug = ANY($1)`, storeSlugs, ownerHash, staffHash)
+	if err != nil {
+		return 0, fmt.Errorf("failed to apply demo PINs: %w", err)
+	}
+	return res.RowsAffected()
+}

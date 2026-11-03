@@ -103,7 +103,7 @@ func TestVoidRefundStockOverrideIntegration(t *testing.T) {
 
 	// 1. Staff Sign-in
 	ownerLogin := call("POST", "/login", "", map[string]string{
-		"store_slug": "central-cafe", "email": "abdulaziz543333@gmail.com", "pin": "482913",
+		"store_slug": "central-cafe", "email": "owner.central@mycaffe.local", "pin": "482913",
 	})
 	if ownerLogin.Code != http.StatusOK {
 		t.Fatalf("Owner login failed: %d: %s", ownerLogin.Code, ownerLogin.Body.String())

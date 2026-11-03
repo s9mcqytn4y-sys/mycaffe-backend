@@ -134,14 +134,16 @@ func main() {
 	var realtimeHandler *handler.RealtimeHandler
 	var kdsHandler *handler.KDSHandler
 	if db != nil {
-		authService := service.NewAuthService(db, postgres.NewAuthRepository(), cfg.JWTSecret, service.AuthPolicy{
+		emailService := newEmailService(cfg, db, workerCtx)
+		authPolicy := service.AuthPolicy{
 			AccessTokenTTL:     cfg.StaffAccessTokenTTL,
 			RefreshTokenTTL:    cfg.StaffRefreshTokenTTL,
 			SessionIdleTimeout: cfg.StaffSessionIdleTimeout,
 			MaxSessions:        cfg.StaffMaxSessions,
 			PINMaxFailures:     cfg.StaffPINMaxFailures,
 			PINLockout:         cfg.StaffPINLockout,
-		}, service.WithAuthEmail(newEmailService(cfg, db, workerCtx), cfg.AppPublicURL, ""))
+		}
+		authService := service.NewAuthService(db, postgres.NewAuthRepository(), cfg.JWTSecret, authPolicy, service.WithAuthEmail(emailService, cfg.AppPublicURL, ""))
 		authHandler = handler.NewAuthHandler(authService)
 		authHandler.DefaultStoreSlug = cfg.DefaultStoreSlug
 
@@ -153,9 +155,12 @@ func main() {
 		midtransHandler.SetPaymentService(paymentService)
 		posHandler = handler.NewPOSHandler(orderService, paymentService, service.NewSettingsService(db))
 		operationalService := service.NewOperationalService(db, orderRepo, paymentRepo, postgres.NewShiftRepository(), postgres.NewAuthRepository(), postgres.NewSettingsRepository())
+		operationalService.SetPINPolicy(authPolicy, emailService)
 		posHandler.SetOperational(operationalService)
 		catalogHandler = handler.NewCatalogHandler(service.NewCatalogService(db))
-		shiftHandler = handler.NewShiftHandler(service.NewShiftService(db))
+		shiftService := service.NewShiftService(db)
+		shiftService.SetPINPolicy(authPolicy, emailService)
+		shiftHandler = handler.NewShiftHandler(shiftService)
 		tabHandler = handler.NewTabHandler(service.NewTabService(db, postgres.NewTabRepository(), orderRepo))
 		tableHandler = handler.NewTableHandler(service.NewTableService(db))
 		guestHandler = handler.NewGuestHandler(service.NewGuestService(db, orderService, paymentService))

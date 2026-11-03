@@ -391,35 +391,48 @@ func (s *OperationalService) RefundPayment(
 			order.PaymentStatus = domain.OrderPaymentStatusRefunded
 		}
 
+		// restore_stock=false records the refunded lines as waste (order_item_id -> quantity) in the audit.
 		stockRestored := false
-		if *in.RestoreStock {
-			switch {
-			case splitMode == domain.SplitModeByItem:
-				var lines []struct {
-					OrderItemID uuid.UUID `db:"order_item_id"`
-					Quantity    int       `db:"quantity"`
-				}
-				if err := tx.SelectContext(ctx, &lines, `
-					SELECT order_item_id, quantity FROM payment_split_items
-					WHERE store_id = $1 AND split_id = $2
-				`, storeID, *payment.SplitID); err != nil {
-					return fmt.Errorf("failed to load split items for restock: %w", err)
-				}
-				lineQty := make(map[uuid.UUID]int, len(lines))
-				for _, l := range lines {
-					lineQty[l.OrderItemID] += l.Quantity
-				}
+		var wastedLines map[uuid.UUID]int
+		switch {
+		case splitMode == domain.SplitModeByItem:
+			var lines []struct {
+				OrderItemID uuid.UUID `db:"order_item_id"`
+				Quantity    int       `db:"quantity"`
+			}
+			if err := tx.SelectContext(ctx, &lines, `
+				SELECT order_item_id, quantity FROM payment_split_items
+				WHERE store_id = $1 AND split_id = $2
+			`, storeID, *payment.SplitID); err != nil {
+				return fmt.Errorf("failed to load split items for restock: %w", err)
+			}
+			lineQty := make(map[uuid.UUID]int, len(lines))
+			for _, l := range lines {
+				lineQty[l.OrderItemID] += l.Quantity
+			}
+			if *in.RestoreStock {
 				products, options := computeItemStockQuantities(order, lineQty)
 				if err := restoreStockTx(ctx, tx, s.orderRepo, storeID, products, options); err != nil {
 					return err
 				}
 				stockRestored = len(lines) > 0
-			case fullyRefunded:
-				before := order.StockStatus
-				if err := releaseOrderStockTx(ctx, tx, s.orderRepo, order); err != nil {
-					return err
-				}
-				stockRestored = order.StockStatus != before
+			} else {
+				wastedLines = lineQty
+			}
+			// Every split has now been refunded and its lines restocked or wasted (review follow-up F3).
+			if fullyRefunded && (order.StockStatus == domain.OrderStockStatusReserved || order.StockStatus == domain.OrderStockStatusCommitted) {
+				order.StockStatus = domain.OrderStockStatusReleased
+			}
+		case fullyRefunded && *in.RestoreStock:
+			before := order.StockStatus
+			if err := releaseOrderStockTx(ctx, tx, s.orderRepo, order); err != nil {
+				return err
+			}
+			stockRestored = order.StockStatus != before
+		case fullyRefunded:
+			wastedLines = make(map[uuid.UUID]int, len(order.Items))
+			for _, item := range order.Items {
+				wastedLines[item.ID] += item.Quantity
 			}
 		}
 
@@ -441,6 +454,8 @@ func (s *OperationalService) RefundPayment(
 			"method":            payment.Method,
 			"restore_stock":     *in.RestoreStock,
 			"stock_restored":    stockRestored,
+			"wasted_lines":      wastedLines,
+			"stock_after":       order.StockStatus,
 			"owner_override_by": ownerOverrideID,
 		})
 		if err := postgres.InsertAuditLog(ctx, tx, &domain.AuditLog{
@@ -597,4 +612,9 @@ func (s *OperationalService) OverrideStock(
 		return nil, err
 	}
 	return result, nil
+}
+
+// SetPINPolicy applies the configured PIN lockout policy and the email service for owner alerts.
+func (s *OperationalService) SetPINPolicy(policy AuthPolicy, email *EmailService) {
+	s.pins.setPolicy(policy, email)
 }

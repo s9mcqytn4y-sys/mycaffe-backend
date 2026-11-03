@@ -30,6 +30,8 @@ func writeShiftServiceError(c *gin.Context, err error) {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"code": "VARIANCE_EXCEEDS_TOLERANCE", "error": "Selisih kas melebihi batas toleransi toko. Memerlukan PIN Owner dan alasan selisih."})
 	case errors.Is(err, service.ErrInvalidOwnerPIN):
 		c.JSON(http.StatusUnauthorized, gin.H{"code": "INVALID_OWNER_PIN", "error": "PIN Owner yang dimasukkan tidak valid."})
+	case errors.Is(err, service.ErrOwnerPINStoreLimit):
+		c.JSON(http.StatusTooManyRequests, gin.H{"code": "OWNER_PIN_STORE_LIMIT", "error": "Persetujuan PIN Owner diblokir sementara karena terlalu banyak PIN salah di toko ini. Owner sudah diberi tahu lewat email."})
 	case errors.Is(err, service.ErrPINLocked), errors.Is(err, service.ErrPINAttemptsExceeded):
 		c.JSON(http.StatusTooManyRequests, gin.H{"code": "PIN_LOCKED", "error": "Terlalu banyak PIN Owner salah. Coba lagi dalam 15 menit."})
 	case errors.Is(err, service.ErrInsufficientDrawerCash):

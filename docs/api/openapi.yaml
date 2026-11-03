@@ -1235,7 +1235,10 @@ paths:
         last_seq, events after it are replayed (filtered to the ticket's channels); more than 500 missed
         events yield a single `resync_required` and the client reloads over REST. Staff channels get the
         full outbox payload; a guest gets only order_id, order_number, queue_number, status and
-        payment_status of its own orders. Origin must be in ALLOWED_ORIGINS.
+        payment_status of its own orders. Origin must be in ALLOWED_ORIGINS. An open connection re-checks
+        its subject every 30 s and is closed once the staff session is revoked, expired or logged out, the
+        account is deactivated or locked, or the guest session ended; the client then needs a new ticket.
+        Concurrent connections are capped per guest session (3), client IP (20) and store (150).
       x-implementation-status: implemented
       parameters:
         - name: ticket
@@ -1255,6 +1258,8 @@ paths:
           description: Switching protocols
         "401":
           description: WS_TICKET_REQUIRED or WS_TICKET_INVALID (unknown, used, expired, or subject no longer valid)
+        "429":
+          description: WS_CONNECTION_LIMIT (a connection cap is reached; the ticket is consumed)
   /api/v1/kds/tickets:
     get:
       tags: [KDS]
@@ -1971,7 +1976,10 @@ paths:
         "422":
           description: VALIDATION_FAILED (reason/pin) or OWNER_PIN_REQUIRED above void_refund_owner_threshold
         "429":
-          description: PIN_LOCKED (actor or every owner locked) or PIN_ATTEMPTS_EXCEEDED (5 wrong owner PINs by this actor in 15 min)
+          description: >-
+            PIN_LOCKED (actor or every owner locked), PIN_ATTEMPTS_EXCEEDED (STAFF_PIN_MAX_FAILURES wrong owner
+            PINs by this actor per STAFF_PIN_LOCKOUT window) or OWNER_PIN_STORE_LIMIT (3x that many from all staff
+            of the store; owners are emailed once)
 
   /api/v1/pos/orders/{id}/payments/{payment_id}/refund:
     post:
@@ -2049,7 +2057,7 @@ paths:
         "422":
           description: VALIDATION_FAILED (reason, restore_stock, pin) or OWNER_PIN_REQUIRED
         "429":
-          description: PIN_LOCKED or PIN_ATTEMPTS_EXCEEDED
+          description: PIN_LOCKED, PIN_ATTEMPTS_EXCEEDED or OWNER_PIN_STORE_LIMIT
 
   /api/v1/pos/products/{id}/stock-override:
     post:
@@ -2118,7 +2126,7 @@ paths:
         "422":
           description: VALIDATION_FAILED (negative quantity, missing reason/PIN) or PRODUCT_NOT_TRACKED
         "429":
-          description: PIN_LOCKED or PIN_ATTEMPTS_EXCEEDED
+          description: PIN_LOCKED, PIN_ATTEMPTS_EXCEEDED or OWNER_PIN_STORE_LIMIT
 
   /api/v1/store/settings:
     get:

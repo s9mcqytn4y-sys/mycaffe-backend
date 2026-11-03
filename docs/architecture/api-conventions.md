@@ -77,3 +77,20 @@ unsupported type, 422 dimensions, 409 already completed. Blocked until the R2 bu
 - No N+1: catalog and order loading use set queries (`IN (...)`) and in-memory assembly.
 - Long external calls (Midtrans 12 s) run outside DB transactions (two-phase payment).
 - WebSocket fan-out is in-process; the outbox relay (Phase 03) will push events without polling the API.
+
+## 6. Realtime delivery (WebSocket)
+
+- **At-least-once.** Outbox events reach `/ws` clients at least once, in per-store sequence order. A
+  replay after reconnect (`last_seq`) can resend an event the client already has. Clients must keep
+  the highest `seq` (`store_seq`) they processed and ignore any event with `seq` ≤ that value.
+- **Gaps mean reload.** More than 500 missed events produce a single `resync_required`; the client
+  reloads its state over REST and continues from the new highest `seq`.
+- **One sequence per store serialises outbox writers.** `store_event_sequences` hands out `seq` under a
+  row lock, so transactions that write outbox events in the same store commit one after another.
+  Accepted for one cafe per deployment (single VPS); revisit if a store's write rate makes that lock a
+  bottleneck.
+- **Connections end with their session.** Every connection re-checks its staff or guest session every
+  30 s and is closed when the session is revoked, expired or logged out, the staff account is
+  deactivated or locked, or the guest session ended. Caps: 3 per guest session, 20 per client IP, 150
+  per store (`429 WS_CONNECTION_LIMIT`). A closed client requests a new ticket and reconnects with
+  `last_seq`.

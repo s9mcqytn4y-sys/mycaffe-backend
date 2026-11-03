@@ -47,6 +47,11 @@ type Subscription struct {
 	// Replay returns missed events. It runs after registration so nothing published meanwhile is
 	// lost; a duplicate is possible and harmless because clients deduplicate by seq.
 	Replay func() ([]*EventMessage, error)
+	// Alive re-checks the session behind the ticket; the connection closes once it reports false.
+	Alive func(ctx context.Context) (bool, error)
+	// IP and GuestKey (guest session id, empty for staff) count against the connection caps.
+	IP       string
+	GuestKey string
 }
 
 type Client struct {
@@ -55,6 +60,8 @@ type Client struct {
 	send     chan []byte
 	storeID  string
 	channels map[string]bool
+	ip       string
+	guestKey string
 	isClosed int32 // atomic flag to avoid multiple channel close
 }
 
@@ -67,7 +74,23 @@ type Hub struct {
 	stopOnce       sync.Once
 	mu             sync.RWMutex
 	allowedOrigins []string
+	limits         Limits
+	revalidate     time.Duration
 }
+
+// Limits caps concurrent connections per guest session, client IP and store; zero disables a cap.
+type Limits struct {
+	PerGuest, PerIP, PerStore int
+}
+
+// ErrTooManyConnections is returned by Admit when a connection cap is reached.
+var ErrTooManyConnections = errors.New("too many realtime connections")
+
+// Defaults for one cafe: a few tabs per guest, one counter's devices behind one IP, all screens of a store.
+var DefaultLimits = Limits{PerGuest: 3, PerIP: 20, PerStore: 150}
+
+// DefaultRevalidateInterval is how often an open connection re-checks its session.
+const DefaultRevalidateInterval = 30 * time.Second
 
 func NewHub(allowedOrigins []string) *Hub {
 	return &Hub{
@@ -77,6 +100,8 @@ func NewHub(allowedOrigins []string) *Hub {
 		stopCh:         make(chan struct{}),
 		clients:        make(map[*Client]bool),
 		allowedOrigins: allowedOrigins,
+		limits:         DefaultLimits,
+		revalidate:     DefaultRevalidateInterval,
 	}
 }
 
@@ -188,6 +213,36 @@ func (h *Hub) Publish(msg *EventMessage) error {
 	return nil
 }
 
+// SetLimits replaces the connection caps and the session re-check interval (call before serving).
+func (h *Hub) SetLimits(limits Limits, revalidate time.Duration) {
+	h.limits, h.revalidate = limits, revalidate
+}
+
+// Admit reports ErrTooManyConnections when sub would exceed a cap. Checked before the upgrade, so two
+// simultaneous connects may overshoot a cap by one.
+func (h *Hub) Admit(sub Subscription) error {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	var perGuest, perIP, perStore int
+	for c := range h.clients {
+		if c.storeID != sub.StoreID {
+			continue
+		}
+		perStore++
+		if sub.IP != "" && c.ip == sub.IP {
+			perIP++
+		}
+		if sub.GuestKey != "" && c.guestKey == sub.GuestKey {
+			perGuest++
+		}
+	}
+	l := h.limits
+	if (l.PerStore > 0 && perStore >= l.PerStore) || (l.PerIP > 0 && perIP >= l.PerIP) || (l.PerGuest > 0 && perGuest >= l.PerGuest) {
+		return ErrTooManyConnections
+	}
+	return nil
+}
+
 // ServeWS upgrades an authenticated subscription (store and channels from a redeemed ticket) with a
 // strict Origin check, then replays missed events.
 func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request, sub Subscription) {
@@ -223,6 +278,8 @@ func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request, sub Subscription) 
 		conn:     conn,
 		send:     make(chan []byte, 64),
 		storeID:  sub.StoreID,
+		ip:       sub.IP,
+		guestKey: sub.GuestKey,
 		channels: map[string]bool{},
 		isClosed: 0,
 	}
@@ -240,6 +297,37 @@ func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request, sub Subscription) 
 	go client.readPump()
 	if sub.Replay != nil {
 		go client.replay(sub.Replay)
+	}
+	if sub.Alive != nil && h.revalidate > 0 {
+		go client.watch(sub.Alive, h.revalidate)
+	}
+}
+
+// watch closes the connection once its session is revoked, logged out, deactivated or ended. A failed
+// check (database unavailable) keeps the connection; the next tick tries again.
+func (c *Client) watch(alive func(ctx context.Context) (bool, error), every time.Duration) {
+	ticker := time.NewTicker(every)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-c.hub.stopCh:
+			return
+		case <-ticker.C:
+		}
+		if atomic.LoadInt32(&c.isClosed) == 1 {
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ok, err := alive(ctx)
+		cancel()
+		if err != nil {
+			log.Printf("[REALTIME] session re-check failed for store %s: %v", c.storeID, err)
+			continue
+		}
+		if !ok {
+			c.hub.removeClient(c)
+			return
+		}
 	}
 }
 

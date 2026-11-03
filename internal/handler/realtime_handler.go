@@ -53,7 +53,7 @@ func (h *RealtimeHandler) Connect(c *gin.Context) {
 		authError(c, http.StatusUnauthorized, "WS_TICKET_REQUIRED", "Tiket koneksi realtime wajib diisi.")
 		return
 	}
-	storeID, channels, err := h.svc.Redeem(c.Request.Context(), ticket)
+	grant, err := h.svc.Redeem(c.Request.Context(), ticket)
 	if err != nil {
 		if !errors.Is(err, service.ErrInvalidWSTicket) {
 			log.Printf("[REALTIME] redeem error request_id=%s: %v", c.GetString(RequestIDHeader), err)
@@ -65,14 +65,24 @@ func (h *RealtimeHandler) Connect(c *gin.Context) {
 	if v, err := strconv.ParseInt(c.Query("last_seq"), 10, 64); err == nil && v >= 0 {
 		lastSeq = v
 	}
-	h.hub.ServeWS(c.Writer, c.Request, realtime.Subscription{
-		StoreID:  storeID.String(),
-		Channels: channels,
+	sub := realtime.Subscription{
+		StoreID:  grant.StoreID.String(),
+		Channels: grant.Channels,
+		IP:       c.ClientIP(),
 		Replay: func() ([]*realtime.EventMessage, error) {
 			// The request context ends once the connection is hijacked, so replay gets its own deadline.
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
-			return h.svc.Replay(ctx, storeID, channels, lastSeq)
+			return h.svc.Replay(ctx, grant.StoreID, grant.Channels, lastSeq)
 		},
-	})
+		Alive: func(ctx context.Context) (bool, error) { return h.svc.Alive(ctx, grant) },
+	}
+	if grant.GuestSessionID != nil {
+		sub.GuestKey = grant.GuestSessionID.String()
+	}
+	if err := h.hub.Admit(sub); err != nil {
+		authError(c, http.StatusTooManyRequests, "WS_CONNECTION_LIMIT", "Terlalu banyak koneksi realtime aktif. Tutup tab lain lalu coba lagi.")
+		return
+	}
+	h.hub.ServeWS(c.Writer, c.Request, sub)
 }

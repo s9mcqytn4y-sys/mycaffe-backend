@@ -2,7 +2,7 @@
 
 Applies to every module from iteration 3 on. The catalog module (`internal/handler/catalog_handler.go`,
 `internal/service/catalog_service.go`) is the reference implementation; copy its shape for tables,
-shifts, promos, and later modules. Machine contract: [docs/api/openapi.yaml](../api/openapi.yaml).
+shifts, promos, and later modules. Machine contract: [docs/Api/OpenApi.yaml](../Api/OpenApi.yaml).
 
 ## 1. Request pipeline
 
@@ -84,7 +84,7 @@ and no blurhash yet. At most two images are processed at once (memory bound on t
   keyed by `(store_id, catalog_version)` only if profiling shows it matters (it is bounded per store).
 - No N+1: catalog and order loading use set queries (`IN (...)`) and in-memory assembly.
 - Long external calls (Midtrans 12 s) run outside DB transactions (two-phase payment).
-- WebSocket fan-out is in-process; the outbox relay (Phase 03) will push events without polling the API.
+- WebSocket fan-out is in-process; the outbox relay (iteration 5c) pushes events without polling the API.
 
 ## 6. Realtime delivery (WebSocket)
 

@@ -1,7 +1,7 @@
 # MyCaffe Core POS: Workspace Instructions
 
 ## Product Context
-MyCaffe is a configurable, multi-tenant, white-label QR table ordering, Point of Sale (POS), Kitchen Display System (KDS), queue display, and owner backoffice product for cafes and restaurants. Business rules, branding, taxes, service charges, modifier groups, payment methods, and operating policies are fully configurable per store/tenant rather than hardcoded. See [Brand Guidelines & Product Knowledge](docs/product/brand-and-product-knowledge.md) for the official brand identity (`MyCaffe`), default visual tokens (*Espresso & Crema*), entity numbering conventions, and operational product knowledge.
+MyCaffe is a configurable, multi-tenant, white-label QR table ordering, Point of Sale (POS), Kitchen Display System (KDS), queue display, and owner backoffice product for cafes and restaurants. Business rules, branding, taxes, service charges, modifier groups, payment methods, and operating policies are fully configurable per store/tenant rather than hardcoded. See [Brand Guidelines & Product Knowledge](docs/Product/BrandAndProductKnowledge.md) for the official brand identity (`MyCaffe`), default visual tokens (*Espresso & Crema*), entity numbering conventions, and operational product knowledge.
 
 This workspace is `mycaffe-backend`. Treat it as the backend repository. The frontend is a separate Next.js App Router + TypeScript + Tailwind CSS/PWA repository. Do not create or modify frontend code directly within this backend repository.
 
@@ -9,7 +9,7 @@ This workspace is `mycaffe-backend`. Treat it as the backend repository. The fro
 1. Inspect the current repository, `go.mod`, directory structure, current Git status, and existing tests before proposing implementation.
 2. Preserve existing framework and conventions (Gin Gonic, `sqlx`, `pgx/v5`).
 3. For multi-file or architectural work, first present a concise plan and identify migrations, security impact, tests, and rollback implications.
-4. Read the relevant product requirements in `docs/product/` and decision gates in `docs/architecture/` (notably [ADR-002](docs/architecture/adr-002-single-vps-docker-topology.md)) before implementing those areas.
+4. Read the relevant product requirements in `docs/Product/` and decision gates in `docs/Architecture/` (notably [ADR-002](docs/Architecture/Adr002SingleVpsDockerTopology.md)) before implementing those areas.
 5. Do not silently resolve unresolved architecture decisions. Ask for confirmation when a choice affects data safety, payment correctness, deployment, or significant future cost.
 6. Never claim a command, test, build, migration, deployment, or payment integration succeeded unless it was actually run and its result was inspected.
 

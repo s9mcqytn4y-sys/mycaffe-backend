@@ -11,7 +11,7 @@ Production runs images pinned by digest (`ghcr.io/...@sha256:...`), never by a m
 
 ## 2. Deploy
 
-On the VPS, as user `mycaffe`, from `/opt/mycaffe` (the released tag's `deploy/` and `scripts/`, see [backup-and-restore.md](backup-and-restore.md) §2):
+On the VPS, as user `mycaffe`, from `/opt/mycaffe` (the released tag's `deploy/` and `scripts/`, see [BackupAndRestore.md](BackupAndRestore.md) §2):
 
 ```bash
 scripts/deploy/deploy.sh sha256:<api digest>                      # web keeps its running digest
@@ -50,7 +50,7 @@ scripts/deploy/compose.sh up -d alloy
 ## 5. If the rollback also fails (exit code 2)
 
 1. `cat /var/lib/mycaffe/deploy/history.log` and `scripts/deploy/compose.sh logs --tail 300 migrate api`.
-2. A migration that broke the old image is a migration bug: restore the pre-deploy backup ([backup-and-restore.md](backup-and-restore.md) §3), then deploy the last good digest.
+2. A migration that broke the old image is a migration bug: restore the pre-deploy backup ([BackupAndRestore.md](BackupAndRestore.md) §3), then deploy the last good digest.
 3. Never edit files or rebuild images on the VPS (ADR-002 §4).
 
 ## 6. Limits

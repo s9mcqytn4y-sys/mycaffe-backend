@@ -4,7 +4,7 @@ This document records architectural decision gates and their approved resolution
 
 ## 1. Production Database vs Realtime
 
-- **Decision**: **Option B: Native PostgreSQL 18 with In-Memory Go WebSocket Hub and Transactional Outbox** (Resolved in [ADR-002](adr-002-single-vps-docker-topology.md)).
+- **Decision**: **Option B: Native PostgreSQL 18 with In-Memory Go WebSocket Hub and Transactional Outbox** (Resolved in [ADR-002](../Architecture/Adr002SingleVpsDockerTopology.md)).
 - **Rationale**: A single Hostinger KVM 2 VPS (2 vCPU, 8 GB RAM, 100 GB SSD) runs PostgreSQL 18 and the Go backend inside Docker Compose. Real-time updates for KDS, POS, and TV queue display are recorded atomically in `outbox_events` and delivered via the authenticated Go WebSocket Hub (`internal/realtime`), scoped strictly by tenant `store_id`. This eliminates external database PaaS dependencies and recurring cloud subscription costs.
 
 ## 2. Static QRIS vs Dynamic QRIS

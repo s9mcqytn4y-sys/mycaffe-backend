@@ -1,8 +1,8 @@
 # Decision Register
 
 Owner decisions that bind implementation. Recorded 2026-10-31 (structured interview with the owner).
-Earlier decisions live in [decisions-before-code.md](decisions-before-code.md) and ADR-003
-(PR #7, `docs/architecture/adr-003-staff-authentication-session-and-rbac.md`).
+Earlier decisions live in [DecisionsBeforeCode.md](../Archive/DecisionsBeforeCode.md) and ADR-003
+(PR #7, `docs/Architecture/Adr003StaffAuthenticationSessionAndRbac.md`).
 
 ## Approved
 
@@ -19,7 +19,7 @@ Earlier decisions live in [decisions-before-code.md](decisions-before-code.md) a
 | Q5 | Printed table QR lifetime (**superseded by QR1**) | **No time expiry.** Version-based revocation (`qr_version`) per table, signing-key rotation via key ID, plus a per-store **emergency pause** that disables all QR session creation instantly. | Dedicated QR signing key (never `JWT_SECRET_KEY`). | 02.01-D |
 | Q6 | Guest sessions | **One session per device**; a guest sees only orders bound to its own session. TTL **3 h**, or ends when all of its orders are paid and completed. | Distinct `aud`/`typ` from staff tokens. | 02.01-E |
 | Q7 | Late settlement after expiry | Keep current behavior: revive the order to the queue if stock allows, otherwise cancel + `payment.late_settlement_stock_exhausted`. **Add a "late payment" flag** visible on KDS and cashier screens. | Implemented in 5d: `kds_tickets.late_payment`. | KDS (5d) |
-| Q8 | Demo / staging environment | Local Docker Compose stack + **Cloudflare Quick Tunnel**, auto-restart, `APP_ENV=staging`, Midtrans sandbox | [docs/setup/demo-staging-environment.md](../setup/demo-staging-environment.md) | — |
+| Q8 | Demo / staging environment | Local Docker Compose stack + **Cloudflare Quick Tunnel**, auto-restart, `APP_ENV=staging`, Midtrans sandbox | [docs/Setup/DemoStagingEnvironment.md](../Setup/DemoStagingEnvironment.md) | — |
 
 ## Infrastructure & Phase 02.01-B (recorded 2026-10-31, second interview)
 
@@ -33,7 +33,7 @@ Earlier decisions live in [decisions-before-code.md](decisions-before-code.md) a
 | I6 | Owner PIN recovery | **Another owner resets it**; break-glass `-action=reset-owner-pin` (operator only) revokes all sessions and audits `STAFF_PIN_RESET` | No email/SMS dependency |
 | I7 | 02.01-B implementation plan | **Approved** as one PR: migration 000005, resolver, login/refresh/logout/me, CLI, tests | Security boundary change approved by the owner |
 
-Setup details: [docs/setup/windows-dev-environment.md](../setup/windows-dev-environment.md).
+Setup details: [docs/Setup/WindowsDevEnvironment.md](../Setup/WindowsDevEnvironment.md).
 
 ## Email, operations & hardware (recorded 2026-10-31, third interview)
 
@@ -54,7 +54,7 @@ Setup details: [docs/setup/windows-dev-environment.md](../setup/windows-dev-envi
 | N1 | Notifications | In-app WebSocket (toast/sound/KDS) from an outbox relay; owner email only for important events; web push deferred |
 | S1 | Next PR | Email foundation + invitation/reset PIN (migration 000006) — implemented |
 
-Full evaluation and ordered backlog: [pos-operations-evaluation.md](pos-operations-evaluation.md).
+Full evaluation and ordered backlog: [PosOperationsEvaluation2026-10.md](../Archive/PosOperationsEvaluation2026-10.md).
 
 ## Catalog, owner self-service & finance (recorded 2026-10-31, fourth interview)
 
@@ -71,8 +71,8 @@ Full evaluation and ordered backlog: [pos-operations-evaluation.md](pos-operatio
 | K9 | Media storage & backups | **Cloudflare R2 Triple-Bucket Architecture**: `mycaffe-media` (public read via CDN / dev-url, presigned PUT), `mycaffe-private-media` (private signed URL TTL 15m for static QRIS & sensitive documents), and `mycaffe-backups` (strictly private, GPG AES256 encrypted pg_dump, relative path sha256 checksums, non-destructive restore guard). **B3 (2026-11-04):** product image variants are JPEG q80 200/600/1200 instead of WebP (no CGO), no blurhash yet; see api-conventions §4. |
 | C-scope | Phase 02.01-C | Approved and implemented: RBAC matrix, `store_settings`, token-bound POS routes, `/me.permissions`, removal of client-supplied store/actor and of `/ws?token=` |
 
-Designs: [catalog-inventory-design.md](catalog-inventory-design.md), requirements:
-[../product/requirements-owner-staff-customer.md](../product/requirements-owner-staff-customer.md).
+Designs: [CatalogInventoryDesign.md](CatalogInventoryDesign.md), requirements:
+[RequirementsOwnerStaffCustomer.md](../Product/RequirementsOwnerStaffCustomer.md).
 
 ## Cleanup, single tenant & iteration 3 (recorded 2026-10-31, fifth interview)
 
@@ -87,7 +87,7 @@ Designs: [catalog-inventory-design.md](catalog-inventory-design.md), requirement
 
 P1–P9 (negative modifier deltas, open tab rounds, split equal/by item, void stock rules, refund time
 window, one shift per drawer, drawer kick + no-sale, local cart + quote, plan approval) are detailed in
-[iteration-4-design.md](iteration-4-design.md#6-decisions-recorded).
+[Iteration4Design.md](../Archive/Iteration4Design.md#6-decisions-recorded).
 
 ### Iteration 4c-2: Split Bill, Tab Settlement & Shift Decoupling (recorded 2026-11-01)
 
@@ -114,11 +114,11 @@ window, one shift per drawer, drawer kick + no-sale, local cart + quote, plan ap
 
 | ID | Decision |
 |----|----------|
-| ADR4 | Catalog cleanup done now, before Iteration 5: pricing reads only the variant price, `products.base_price` kept as a deprecated mirror, unit stock stays on products (variants share it), DB CHECK single-choice groups `max_select = 1`. See [ADR-004](adr-004-catalog-schema-modernization.md) |
+| ADR4 | Catalog cleanup done now, before Iteration 5: pricing reads only the variant price, `products.base_price` kept as a deprecated mirror, unit stock stays on products (variants share it), DB CHECK single-choice groups `max_select = 1`. See [ADR-004](Adr004CatalogSchemaModernization.md) |
 
 ## Iteration 5 (recorded 2026-11-01, seventh interview)
 
-Plan: [iteration-5-table-qr-kds-plan.md](iteration-5-table-qr-kds-plan.md).
+Plan: [Iteration5TableQrKdsPlan.md](../Archive/Iteration5TableQrKdsPlan.md).
 
 | ID | Decision | Approved option |
 |----|----------|-----------------|
@@ -132,7 +132,7 @@ Plan: [iteration-5-table-qr-kds-plan.md](iteration-5-table-qr-kds-plan.md).
 
 ## Offline cash & static QRIS (recorded 2026-11-02, eighth interview)
 
-ADR: [adr-005-offline-cash-sync.md](adr-005-offline-cash-sync.md). Status: decided, implementation planned.
+ADR: [Adr005OfflineCashSync.md](Adr005OfflineCashSync.md). Status: decided, implementation planned.
 
 | ID | Decision | Approved option |
 |----|----------|-----------------|
@@ -162,12 +162,12 @@ Midtrans facts checked against docs.midtrans.com on 2026-11-02: QRIS is charged 
 
 ## Infrastructure & operations (recorded 2026-11-02, tenth interview)
 
-Status: decided, implementation planned ([audit tickets](../engineering/audit-backlog.md) P0-03, P0-04, P0-07, P2-04; P0-03 and P0-04 done).
+Status: decided, implementation planned ([audit tickets](../Engineering/AuditBacklog.md) P0-03, P0-04, P0-07, P2-04; P0-03 and P0-04 done).
 
 | ID | Decision | Approved option |
 |----|----------|-----------------|
 | IN1 | Production ingress | **Named Cloudflare Tunnel** per client VPS, same pattern as the demo (I2): no inbound ports except SSH from admin IPs, TLS at the Cloudflare edge, client IP from `CF-Connecting-IP` (Nginx `real_ip_header` + `set_real_ip_from` the cloudflared container network; `TRUSTED_PROXIES` set), certbot removed. Changing `docker-compose.prod.yml` and `nginx.prod.conf` still needs approval as a deployment change. If the tunnel is down, cash and static QRIS continue through ADR-005 offline mode |
-| IN2 | Branch protection | **Stay on the free plan; manual discipline.** No technical branch protection (private repo, API 403). Rules in [git-workflow-and-releases.md](../engineering/git-workflow-and-releases.md) §3 apply; the risk of a merge without approval (PR #23) is accepted by the owner |
+| IN2 | Branch protection | **Stay on the free plan; manual discipline.** No technical branch protection (private repo, API 403). Rules in [GitWorkflowAndReleases.md](../Engineering/GitWorkflowAndReleases.md) §3 apply; the risk of a merge without approval (PR #23) is accepted by the owner |
 | IN3 | Monitoring & alerting | **Grafana Cloud free tier**: external uptime check on `/health/ready` plus metrics via remote write; technical alerts to the operator's Telegram group and email. Store owners get business notifications from MyCaffe only, not technical alerts |
 | IN4 | Accounting export | **Neutral CSV first**: generic journal columns (date, account, debit, credit, reference) with configurable account mapping; adapters for Jurnal/Accurate only when a client uses one |
 
@@ -179,7 +179,7 @@ None.
 
 | Topic | Resolution | Source |
 | ------- | ----------- | -------- |
-| Split bill semantics | Approved in Iteration 4 (P3, P10–P14): equal N (remainder to split 1) and by item (proportional tax/service, remainder to last split); locked after first split payment; payments use POST /pos/orders/:id/payments with split_id; payments.shift_id attribution. Scheduled for Iteration 4c-2. | `docs/architecture/iteration-4-design.md#6-decisions-recorded` (P3), `decision-register.md` (P10–P14) |
+| Split bill semantics | Approved in Iteration 4 (P3, P10–P14): equal N (remainder to split 1) and by item (proportional tax/service, remainder to last split); locked after first split payment; payments use POST /pos/orders/:id/payments with split_id; payments.shift_id attribution. Scheduled for Iteration 4c-2. | `docs/Archive/Iteration4Design.md#6-decisions-recorded` (P3), `DecisionRegister.md` (P10–P14) |
 | Roles | Exactly `owner`, `cashier`, `barista`, `kitchen`; no new roles. | `AGENTS.md`, migration `000001` |
 
 ## Still open

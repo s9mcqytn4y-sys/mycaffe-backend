@@ -65,7 +65,7 @@ owner as final until the server has accepted it.
 
 1. **Schema change**: relaxing the two stock CHECK constraints (OF5). It removes a guarantee other code may rely on; all readers of `stock_quantity` must be checked first.
 2. **Permission**: a new owner-only permission for device management (proposed `device.manage`).
-3. **Public contract**: the sync request/response shapes in `docs/api/openapi.yaml`.
+3. **Public contract**: the sync request/response shapes in `docs/Api/OpenApi.yaml`.
 
 ## 6. Tests required
 

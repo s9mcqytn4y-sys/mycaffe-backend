@@ -10,7 +10,7 @@
 # APP_ENV=staging keeps unauthenticated order, payment and WebSocket routes fail-closed
 # (503) until Phase 02 authentication ships. Midtrans stays in sandbox.
 #
-# Usage: see docs/setup/demo-staging-environment.md
+# Usage: see docs/Setup/DemoStagingEnvironment.md
 
 name: mycaffe-demo
 

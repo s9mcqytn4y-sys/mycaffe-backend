@@ -1,6 +1,6 @@
 # Email: Setup, Queue & Templates
 
-Owner decisions E1–E5 (see [decision-register.md](../architecture/decision-register.md)). This phase sends
+Owner decisions E1–E5 (see [DecisionRegister.md](../Architecture/DecisionRegister.md)). This phase sends
 **transactional and notification email only**; marketing consent is collected (planned) but no campaigns
 are sent through the Hostinger mailbox.
 

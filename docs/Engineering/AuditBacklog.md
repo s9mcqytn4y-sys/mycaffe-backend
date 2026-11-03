@@ -1,11 +1,11 @@
 # Audit Backlog (v0.5.0 audit)
 
 Tickets from the v0.5.0 production-readiness audit (2026-11-02). The decision register, roadmap and PR
-titles refer to these IDs. Status reviewed 2026-11-03 against `staging` `acb3dee`.
+titles refer to these IDs. Status reviewed 2026-11-04 against `staging` after v0.6.0.
 
 **Owner direction (2026-11-03):** large new features are **frozen until go-live**: ADR-005 offline cash
 sync, inventory (C5), promotions/loyalty and delivery channels. Rows marked *Frozen* are not started
-without explicit owner approval. The go-live work is tracked as PR A and PR B in [roadmap.md](../architecture/roadmap.md).
+without explicit owner approval. The go-live work is tracked as PR A and PR B in [Roadmap.md](../Architecture/Roadmap.md).
 
 Status: *Done* (merged to `staging`, tested in CI), *Planned*, *Frozen*, *To verify* (partly in code,
 gap not yet confirmed).
@@ -15,17 +15,17 @@ gap not yet confirmed).
 | ID | Title | Status | Evidence / next step |
 |----|-------|--------|----------------------|
 | P0-01 | Run every integration test in CI | Done | PR #38 |
-| P0-02 | Scheduled backups, retention tiers, restore drill | Done (drill on a real VPS pending) | PR #39, [backup-and-restore.md](../setup/backup-and-restore.md) |
+| P0-02 | Scheduled backups, retention tiers, restore drill | Done (drill on a real VPS pending) | PR #39, [BackupAndRestore.md](../Setup/BackupAndRestore.md) |
 | P0-03 | Structured logging and metrics | Done | PR #40 |
-| P0-04 | Alerting and external uptime | Done (Grafana Cloud account pending, owner) | PR #41, [monitoring.md](../setup/monitoring.md) |
-| P0-05 | Deploy by digest, idempotent deploy/rollback script | Done (first VPS run pending) | PR #42, [deploy.md](../setup/deploy.md) |
+| P0-04 | Alerting and external uptime | Done (Grafana Cloud account pending, owner) | PR #41, [Monitoring.md](../Setup/Monitoring.md) |
+| P0-05 | Deploy by digest, idempotent deploy/rollback script | Done (first VPS run pending) | PR #42, [Deploy.md](../Setup/Deploy.md) |
 | P0-06 | Supply chain: provenance, SBOM, image scan | Done (tag/Release path runs on the next `v*` tag) | PR #43 |
 | P0-07 | Real client IP and VPS firewall (IN1 Named Tunnel) | Planned | Deployment change, needs owner approval |
 | P0-08 | Outbox dead-letter and purge of technical tables | Planned | `attempts`, `last_error`, `dead_at`; purge `outbox_events`, `ws_tickets`, `guest_sessions`, `payment_notification_logs` |
 | P0-09 | Provisioning and incident runbook per client | Planned | Go-live gate |
 | P0-10 | ADR-005 offline cash sync | **Frozen** | Owner freeze 2026-11-03 |
 | P0-11 | Receipts (ESC/POS + digital) | Done (printer QR untested on real hardware) | PR B1, migration 000020 |
-| P0-12 | Refresh risk register and release notes | Planned | R2 (WebSocket) and R8 (media) are stale |
+| P0-12 | Refresh risk register and release notes | Done | Risk register refreshed 2026-11-04; release notes on GitHub Releases |
 
 ## P1: first weeks after go-live
 

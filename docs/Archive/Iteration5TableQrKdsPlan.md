@@ -6,7 +6,7 @@
   T1, T2, Q5 and Q6, ignored the emergency pause, and contained SQL that would fail or silently do the
   wrong thing (see §9).
 - **Binding decisions**: T1, T2, Q5 (superseded by QR1 once approved), Q6, Q7, C3, N1, R1, E4 in the
-  [decision register](decision-register.md) and QR1–QR7; ADR-004 (variant pricing, product stock); hotfix rules
+  [decision register](../Architecture/DecisionRegister.md) and QR1–QR7; ADR-004 (variant pricing, product stock); hotfix rules
   HF1–HF6.
 
 ## 1. Principles

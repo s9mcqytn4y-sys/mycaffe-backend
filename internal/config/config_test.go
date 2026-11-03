@@ -269,3 +269,20 @@ func TestLoadConfigEmailDriver(t *testing.T) {
 	}
 
 }
+
+// L-2: the staging demo is reachable through a public tunnel, so it needs a real JWT secret too.
+func TestValidateConfigStagingRequiresStrongJWTSecret(t *testing.T) {
+	for _, secret := range []string{
+		"",
+		"short-secret",
+		"demo-only-jwt-secret-key-minimum-32-characters",
+		"replace-with-a-very-long-random-secret-key-min-32-chars",
+	} {
+		if err := config.ValidateConfig(&config.Config{AppEnv: "staging", JWTSecret: secret}); err == nil {
+			t.Errorf("staging accepted JWT secret %q", secret)
+		}
+	}
+	if err := config.ValidateConfig(&config.Config{AppEnv: "staging", JWTSecret: strings.Repeat("strong", 6), EmailDriver: "log"}); err != nil {
+		t.Errorf("staging rejected a strong secret: %v", err)
+	}
+}

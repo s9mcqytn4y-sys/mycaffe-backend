@@ -13,8 +13,12 @@ through a Cloudflare Quick Tunnel. Defined in `deploy/docker/docker-compose.demo
 
 ## Start
 
+Copy `.env.demo.example` to `.env.demo` (git-ignored) and set `JWT_SECRET_KEY` (`openssl rand -hex 32`),
+`DEMO_OWNER_PIN` and `DEMO_STAFF_PIN`. The stack refuses to start without them. After seeding, the
+`migrate` step replaces the public seed PIN with these two PINs (owners / other staff).
+
 ```bash
-docker compose -f deploy/docker/docker-compose.demo.yml up -d --build
+docker compose -f deploy/docker/docker-compose.demo.yml --env-file .env.demo up -d --build
 ```
 
 ## Get the public URL
@@ -43,12 +47,9 @@ The demo runs the same image as production with `APP_ENV=staging`. Since iterati
 live, including guest QR ordering (`/api/v1/public/*`) and `GET /ws` (single-use tickets). Full list:
 [FrontendIntegrationContract.md](../Architecture/FrontendIntegrationContract.md).
 
-**Before sharing the URL**, close the leaks in
-[DemoReadinessChecklist.md](DemoReadinessChecklist.md) §1:
-
-- the development seed uses PIN `482913` for every account, owner included;
-- `JWT_SECRET_KEY` has a public default in the compose file;
-- the seed contains a personal e-mail address.
+Leaks L-1..L-3 from [DemoReadinessChecklist.md](DemoReadinessChecklist.md) §1 are closed: the public seed
+PIN is replaced at every start, the JWT secret has no default, and the seed uses `@mycaffe.local`
+addresses only. Log in with the seeded e-mails and your `DEMO_OWNER_PIN` / `DEMO_STAFF_PIN`.
 
 Media uploads answer `503 MEDIA_UNAVAILABLE` until `R2_*` is set.
 

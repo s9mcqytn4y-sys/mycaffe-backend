@@ -276,14 +276,18 @@ func ValidateConfig(cfg *Config) error {
 		return fmt.Errorf("[SECURITY FAIL-CLOSED] invalid APP_ENV %q: allowed values are development, test, staging, production", cfg.AppEnv)
 	}
 
-	// Generic validation: reject obviously insecure patterns in production
-	if cfg.AppEnv == "production" {
+	// staging is the publicly tunnelled demo (L-2): a guessable JWT secret there lets anyone forge staff tokens.
+	if cfg.AppEnv == "production" || cfg.AppEnv == "staging" {
 		if containsPlaceholderPattern(cfg.JWTSecret) {
-			return errors.New("[SECURITY FAIL-CLOSED] production requires a genuine, unguessable JWT_SECRET_KEY")
+			return fmt.Errorf("[SECURITY FAIL-CLOSED] %s requires a genuine, unguessable JWT_SECRET_KEY", cfg.AppEnv)
 		}
 		if len(cfg.JWTSecret) < 32 {
-			return errors.New("[SECURITY FAIL-CLOSED] production requires a strong JWT_SECRET_KEY of at least 32 characters")
+			return fmt.Errorf("[SECURITY FAIL-CLOSED] %s requires a strong JWT_SECRET_KEY of at least 32 characters", cfg.AppEnv)
 		}
+	}
+
+	// Generic validation: reject obviously insecure patterns in production
+	if cfg.AppEnv == "production" {
 		if cfg.StaffAccessTokenTTL > time.Hour || cfg.StaffRefreshTokenTTL > 24*time.Hour {
 			return errors.New("[SECURITY FAIL-CLOSED] production staff token TTLs cannot exceed 1h (access) / 24h (refresh)")
 		}
@@ -340,6 +344,8 @@ func containsPlaceholderPattern(val string) bool {
 		"local-dev",
 		"dev_secret",
 		"example_key",
+		"replace-with",
+		"demo-only",
 	}
 	for _, p := range patterns {
 		if strings.Contains(lower, p) {

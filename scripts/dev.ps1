@@ -195,7 +195,8 @@ switch ($Command) {
 
     'demo-up' {
         Write-Step 'Stack demo (PostgreSQL, API staging, Nginx, Cloudflare Quick Tunnel)'
-        $envArgs = if (Test-Path .env.demo) { @('--env-file', '.env.demo') } else { @() }
+        if (-not (Test-Path .env.demo)) { throw 'Buat .env.demo dari .env.demo.example (JWT_SECRET_KEY, DEMO_OWNER_PIN, DEMO_STAFF_PIN wajib).' }
+        $envArgs = @('--env-file', '.env.demo')
         Invoke-Native docker (@('compose', '-f', $DemoCompose) + $envArgs + @('up', '-d', '--build'))
         for ($i = 0; $i -lt 30 -and -not (Get-DemoUrl); $i++) { Start-Sleep -Seconds 2 }
         & $PSCommandPath demo-url

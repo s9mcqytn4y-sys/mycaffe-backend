@@ -134,6 +134,7 @@ func main() {
 	var realtimeHandler *handler.RealtimeHandler
 	var kdsHandler *handler.KDSHandler
 	var receiptHandler *handler.ReceiptHandler
+	var reportHandler *handler.ReportHandler
 	if db != nil {
 		emailService := newEmailService(cfg, db, workerCtx)
 		authPolicy := service.AuthPolicy{
@@ -167,6 +168,7 @@ func main() {
 		guestHandler = handler.NewGuestHandler(service.NewGuestService(db, orderService, paymentService))
 		kdsHandler = handler.NewKDSHandler(service.NewKDSService(db))
 		receiptHandler = handler.NewReceiptHandler(service.NewReceiptService(db, cfg.AppPublicURL))
+		reportHandler = handler.NewReportHandler(service.NewReportService(db))
 		realtimeService := service.NewRealtimeService(db)
 		realtimeHandler = handler.NewRealtimeHandler(hub, realtimeService)
 		// Outbox relay (iteration 5c): LISTEN outbox + 2 s polling, at-least-once, ordered per store.
@@ -236,6 +238,11 @@ func main() {
 			pos.GET("/orders/:id/receipt", authHandler.RequirePermission(rbac.OrderReadStore), receiptHandler.GetReceipt)
 			pos.POST("/orders/:id/receipt-link", authHandler.RequirePermission(rbac.OrderReadStore), receiptHandler.IssueLink)
 			v1.GET("/public/receipts/:token", receiptHandler.PublicReceipt)
+
+			// Owner reports (B2): read-only, business day in the store time zone, JSON or CSV.
+			reports := v1.Group("/reports", authHandler.RequirePermission(rbac.ReportFinanceRead))
+			reports.GET("/sales", reportHandler.Sales)
+			reports.GET("/summary", reportHandler.Summary)
 
 			// Tables & table sessions (iteration 5a): table board for staff, CRUD for the owner (QR3).
 			pos.GET("/tables", authHandler.RequireStaff(), tableHandler.ListTables)

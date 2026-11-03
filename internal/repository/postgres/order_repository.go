@@ -108,6 +108,15 @@ func (r *OrderRepository) GetOrderByIdempotencyKey(ctx context.Context, tx *sqlx
 }
 
 func (r *OrderRepository) GetOrderByIDForUpdate(ctx context.Context, tx *sqlx.Tx, storeID, orderID uuid.UUID) (*domain.Order, []domain.PaymentSplit, error) {
+	return r.getOrderByID(ctx, tx, storeID, orderID, true)
+}
+
+// GetOrderByIDReadOnly loads the order, its items and splits without a row lock (GET /pos/orders/:id).
+func (r *OrderRepository) GetOrderByIDReadOnly(ctx context.Context, tx *sqlx.Tx, storeID, orderID uuid.UUID) (*domain.Order, []domain.PaymentSplit, error) {
+	return r.getOrderByID(ctx, tx, storeID, orderID, false)
+}
+
+func (r *OrderRepository) getOrderByID(ctx context.Context, tx *sqlx.Tx, storeID, orderID uuid.UUID, lock bool) (*domain.Order, []domain.PaymentSplit, error) {
 	if tx == nil {
 		return nil, nil, ErrNilTransaction
 	}
@@ -124,14 +133,16 @@ func (r *OrderRepository) GetOrderByIDForUpdate(ctx context.Context, tx *sqlx.Tx
 			id, store_id, idempotency_key, request_hash, order_number, queue_number,
 			table_number, customer_name, COALESCE(customer_phone, '') AS customer_phone,
 			order_type, billing_mode, status, payment_status, stock_status,
-			expires_at, created_by_user_id, table_id, table_session_id, guest_session_id,
+			expires_at, created_by_user_id, shift_id, table_id, table_session_id, guest_session_id,
 			subtotal_amount, discount_amount, tax_amount, service_charge_amount,
 			total_amount, paid_amount, refunded_amount, COALESCE(notes, '') AS notes,
 			created_at, updated_at
 		FROM orders
 		WHERE store_id = $1 AND id = $2
-		FOR UPDATE
 	`
+	if lock {
+		orderQuery += " FOR UPDATE"
+	}
 	if err := tx.GetContext(ctx, &order, orderQuery, storeID, orderID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil, ErrOrderNotFound

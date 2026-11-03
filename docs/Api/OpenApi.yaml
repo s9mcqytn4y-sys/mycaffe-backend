@@ -666,6 +666,102 @@ paths:
           $ref: "#/components/responses/NotFound"
 
   /api/v1/pos/orders:
+    get:
+      tags: [Orders]
+      operationId: listPosOrders
+      summary: List store orders, newest first, with keyset pagination (v0.7 G-1, G-2)
+      x-implementation-status: implemented
+      description: |
+        Permission `order.read.store`. Sorted by `created_at` then `id`, descending. Open tabs (G-2) are
+        `billing_mode=open_tab&status=open`; a closed tab awaiting payment is `status=pending_payment`.
+        The date window uses the store time zone (default today, at most 92 days). Pass `next_cursor` as
+        `after` for the next page; it is `null` on the last page. The list omits customer phone numbers.
+        Refetch after `order.*` events on the `pos` WebSocket channel.
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: status
+          in: query
+          description: Comma-separated order statuses, e.g. open,pending_payment.
+          schema:
+            type: string
+        - name: payment_status
+          in: query
+          description: Comma-separated order payment statuses.
+          schema:
+            type: string
+        - name: billing_mode
+          in: query
+          description: Comma-separated billing modes (pay_first, open_tab, split_bill).
+          schema:
+            type: string
+        - name: from
+          in: query
+          description: First calendar day (YYYY-MM-DD, store time zone). Default today.
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          description: Last calendar day, inclusive. Default from.
+          schema:
+            type: string
+            format: date
+        - name: shift_id
+          in: query
+          description: Orders settled in this shift.
+          schema:
+            type: string
+            format: uuid
+        - name: table_id
+          in: query
+          description: Orders of this table.
+          schema:
+            type: string
+            format: uuid
+        - name: q
+          in: query
+          description: Prefix of the order number or queue number (letters, digits, hyphen; max 30).
+          schema:
+            type: string
+        - name: limit
+          in: query
+          description: Page size.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+        - name: after
+          in: query
+          description: Opaque cursor from next_cursor.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: One page of orders
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrderList"
+        "401":
+          description: UNAUTHENTICATED
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Missing `order.read.store` (`FORBIDDEN`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: VALIDATION_FAILED (status, payment_status, billing_mode, from, to, shift_id, table_id, q, limit, after)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationErrorResponse"
     post:
       tags: [Orders]
       operationId: createPosOrder
@@ -703,6 +799,52 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
           description: Unavailable item, insufficient stock, or idempotency conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/pos/orders/{id}:
+    get:
+      tags: [Orders]
+      operationId: getPosOrder
+      summary: Order detail with items, rounds, splits, payments, refunds and allowed_actions (v0.7 G-1)
+      x-implementation-status: implemented
+      description: |
+        Permission `order.read.store`. `allowed_actions` lists what the caller may start now, derived from
+        the order and payment state and the caller's permissions: `pay`, `void`, `refund`,
+        `print_receipt`, `add_round`, `close_tab`, `reopen_tab`. Owner-PIN thresholds are still
+        checked when the action runs. Idempotency keys and request hashes are never returned.
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Order detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrderDetail"
+        "401":
+          description: UNAUTHENTICATED
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Missing `order.read.store` (`FORBIDDEN`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: NOT_FOUND (unknown id, malformed id, or an order of another store)
           content:
             application/json:
               schema:
@@ -3634,6 +3776,86 @@ components:
           type: string
         notes:
           type: string
+    OrderSummary:
+      type: object
+      required: [id, order_number, queue_number, order_type, billing_mode, status, payment_status, total_amount, paid_amount, refunded_amount, item_count, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        order_number: {type: string}
+        queue_number: {type: string}
+        order_type: {type: string, enum: [dine_in, takeaway]}
+        billing_mode: {type: string, enum: [pay_first, open_tab, split_bill]}
+        status: {type: string}
+        payment_status: {type: string}
+        table_number: {type: string}
+        customer_name: {type: string}
+        total_amount: {type: integer, format: int64}
+        paid_amount: {type: integer, format: int64}
+        refunded_amount: {type: integer, format: int64}
+        item_count: {type: integer, format: int64, description: Sum of item quantities}
+        shift_id: {type: string, format: uuid}
+        created_at: {type: string, format: date-time}
+    OrderList:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/OrderSummary"
+        next_cursor:
+          type: [string, "null"]
+    OrderPaymentView:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        split_id: {type: string, format: uuid}
+        method: {type: string}
+        status: {type: string}
+        amount: {type: integer, format: int64}
+        refunded_amount: {type: integer, format: int64}
+        paid_at: {type: string, format: date-time}
+        created_at: {type: string, format: date-time}
+    OrderRefundView:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        payment_id: {type: string, format: uuid}
+        amount: {type: integer, format: int64}
+        method: {type: string, enum: [cash, bank_transfer]}
+        bank_name: {type: string}
+        account_last4: {type: string}
+        transfer_reference: {type: string}
+        reason: {type: string}
+        actor_name: {type: string}
+        created_at: {type: string, format: date-time}
+    OrderDetail:
+      type: object
+      required: [order, rounds, splits, payments, refunds, allowed_actions]
+      properties:
+        order:
+          $ref: "#/components/schemas/Order"
+        rounds:
+          type: array
+          items:
+            $ref: "#/components/schemas/OrderRound"
+        splits:
+          type: array
+          items:
+            $ref: "#/components/schemas/PaymentSplit"
+        payments:
+          type: array
+          items:
+            $ref: "#/components/schemas/OrderPaymentView"
+        refunds:
+          type: array
+          items:
+            $ref: "#/components/schemas/OrderRefundView"
+        allowed_actions:
+          type: array
+          items:
+            type: string
+            enum: [pay, void, refund, print_receipt, add_round, close_tab, reopen_tab]
     ValidationErrorResponse:
       type: object
       required: [code, error, fields]

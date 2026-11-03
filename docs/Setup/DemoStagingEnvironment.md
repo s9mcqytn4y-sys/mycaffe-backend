@@ -39,18 +39,18 @@ container restarts**. For a stable hostname, create a Named Tunnel in the Cloudf
 
 ## What the demo exposes
 
-`APP_ENV=staging` keeps unauthenticated routes fail-closed until Phase 02 ships:
+The demo runs the same image as production with `APP_ENV=staging`. Since iteration 5 every route is
+live, including guest QR ordering (`/api/v1/public/*`) and `GET /ws` (single-use tickets). Full list:
+[FrontendIntegrationContract.md](../Architecture/FrontendIntegrationContract.md).
 
-| Route | Demo behavior |
-| ------- | --------------- |
-| `GET /health/live`, `/health/ready` | `200` |
-| `POST /api/v1/payments/midtrans/webhook` | Live: rejects unsigned/invalid payloads; signed sandbox notifications are processed |
-| `POST /api/v1/auth/staff/login`, `/refresh`, `/logout`, `GET /api/v1/auth/staff/me` | Live (Phase 02.01-B). Dev PIN `482913` for seeded staff; strict limit on `/login` only |
-| `POST /api/v1/pos/orders`, `POST /api/v1/pos/orders/{id}/payments`, `GET/PATCH /api/v1/store/settings` | Live for signed-in staff with the matching permission (02.01-C) |
-| `POST /api/v1/orders` (guest), `GET /ws` | `503` (by design, until guest sessions 02.01-E and the WS ticket in Phase 03) |
+**Before sharing the URL**, close the leaks in
+[DemoReadinessChecklist.md](DemoReadinessChecklist.md) §1:
 
-To exercise the full order/payment flow locally, use the development stack
-(`deploy/docker/docker-compose.yml`, `APP_ENV=development`) which is **not** exposed publicly.
+- the development seed uses PIN `482913` for every account, owner included;
+- `JWT_SECRET_KEY` has a public default in the compose file;
+- the seed contains a personal e-mail address.
+
+Media uploads answer `503 MEDIA_UNAVAILABLE` until `R2_*` is set.
 
 ## Client IP & proxies
 
@@ -59,7 +59,7 @@ trusts only that subnet (`TRUSTED_PROXIES`), so logs show the real visitor IP fo
 `cloudflared` instead of a container address. Nginx restores the same visitor IP with
 `set_real_ip_from 172.29.10.0/24` (`nginx.demo.conf`), so `limit_req` is per visitor, not one
 shared bucket for all tunnel traffic. Keep both in sync if you change `DEMO_EDGE_SUBNET`.
-Full networking notes: [windows-dev-environment.md](windows-dev-environment.md). Email in the demo: [email.md](email.md).
+Full networking notes: [WindowsDevEnvironment.md](WindowsDevEnvironment.md). Email in the demo: [Email.md](Email.md).
 
 ## Midtrans sandbox webhook
 

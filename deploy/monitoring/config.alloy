@@ -1,5 +1,5 @@
 // Grafana Alloy (decision IN3): scrape the API's internal /metrics and host metrics, remote-write to
-// Grafana Cloud. Alert rules: deploy/monitoring/alert-rules.yml. Setup: docs/setup/monitoring.md.
+// Grafana Cloud. Alert rules: deploy/monitoring/alert-rules.yml. Setup: docs/Setup/Monitoring.md.
 // No docker.sock mount: container logs stay on the VPS (`docker compose logs`).
 
 prometheus.scrape "api" {

@@ -14,7 +14,7 @@ Nothing here claims the system is "secure"; it lists what is controlled and what
 | A3 | **Owner can authenticate with PIN only**, so a shoulder-surfed owner PIN grants staff management and settings | E1 | Sessions max 3 + 2 h idle; every settings/staff change audited with actor; PIN-changed email | Same as A1 |
 | A4 | **In-process rate limiter and workers** (single VPS, ADR-002) | Simplicity; no Redis | Nginx limits are the outer layer; workers use `SKIP LOCKED` so a second instance would not double-process | Second API instance or load balancer |
 | A5 | **`log` email driver prints link secrets** in dev/demo logs | Developer convenience | Rejected at startup in production; demo stack is not used for real customers (I1) | Demo used with real staff → `.env.demo` with Gmail |
-| A6 | **Staging demo exposed publicly** through a Quick Tunnel with seed data and a published dev PIN | Product demos | Unauthenticated order/payment/WS routes stay 503 in staging; Midtrans sandbox only; no real data (I1) | Real pilot data enters the laptop |
+| A6 | **Staging demo exposed publicly** through a Quick Tunnel with seed data and a published dev PIN | Product demos | Guest and WS routes are live in staging since iteration 5; seed PIN and default JWT secret must be replaced before sharing the URL (DemoReadinessChecklist L-1..L-3); Midtrans sandbox only; no real data (I1) | Real pilot data enters the laptop |
 | A7 | **SMTP retry can duplicate an email** after an ambiguous timeout | SMTP has no idempotency | Newest link supersedes older ones; duplicates are harmless | — |
 
 ## 2. Residual and open risks
@@ -24,7 +24,7 @@ Nothing here claims the system is "secure"; it lists what is controlled and what
 | ID | Risk | Location | Status / next step |
 | ---- | ------ | ---------- | -------------------- |
 | R1 | `.env` pointed `DATABASE_URL` at a remote Supabase host | local `.env` | **Resolved 2026-10-31**: Supabase removed from `.env`, MCP config, CLI; `dev.ps1` also ignores remote DSNs. A pre-cleanup copy is in `.env.bak` (git-ignored) — delete it once local dev is confirmed |
-| R2 | **No real WebSocket authentication for browsers** (headers cannot be set on `new WebSocket`) | `internal/handler/order_handler.go` `HandleWebSocket` | Mitigated by containment: `/ws` is 503 in staging/production; Phase 03 one-time WS ticket |
+| R2 | **No real WebSocket authentication for browsers** (headers cannot be set on `new WebSocket`) | `internal/handler/realtime_handler.go` | Mitigated (5c, PR A): single-use WS tickets via `?ticket=`, per-guest/IP/store connection caps, session revalidation every 30 s |
 | R3 | **No backup restore drill yet** (scripts exist, never restored on a real VPS) | `scripts/backup/*` | Blocked — needs VPS; drill is a release gate |
 
 ### Medium
@@ -38,7 +38,7 @@ Nothing here claims the system is "secure"; it lists what is controlled and what
 | R8 | **Media upload** (was: not implemented) | `internal/service/media_service.go`, `internal/pkg/imaging` | Mitigated (B3): presigned PUT, server-side size and magic-byte check, dimension cap, EXIF stripped by re-encoding, JPEG variants, image_url only from verified uploads; real R2 presign untested until credentials are set |
 | R9 | **Email failures are invisible** to the owner (`email_outbox.status='failed'`) | `email_outbox` | Open — backoffice view + alert (backlog 11) |
 | R10 | Production Nginx has no `client_max_body_size` override (nginx default 1 MB) and no CSP | `deploy/nginx/nginx.prod.conf` | Accepted for API-only host; add CSP on the frontend host |
-| R11 | **Guest ordering not authenticated yet** | `POST /api/v1/orders` | Mitigated by containment (503 in staging/production); 02.01-D/E |
+| R11 | **Guest ordering not authenticated yet** | `/api/v1/public/guest/*` | Mitigated (5b): signed table QR, guest session cookie, per-IP and per-guest limits, pay-first |
 
 ### Low
 
@@ -71,7 +71,7 @@ Nothing here claims the system is "secure"; it lists what is controlled and what
 | TLS | n/a | Cloudflare edge | Let's Encrypt via bootstrap entrypoint; HSTS |
 | Proxy trust | none | edge subnet `172.29.10.0/24` | edge subnet `172.30.0.0/24` |
 | Rate limits | — | Nginx + app limiter, per real visitor IP | Nginx + app limiter |
-| WebSocket path | `/ws` header auth (dev only) | 503 | 503 until Phase 03 ticket |
+| WebSocket path | `/ws?ticket=` | `/ws?ticket=` | `/ws?ticket=` (single-use tickets) |
 | Email | `log` | `log` or Gmail (`.env.demo`) | Hostinger SMTP 465, SPF/DKIM/DMARC |
 | Storage | — | — | R2 (planned, K9) + encrypted DB backups to R2 |
 | Observability | stdout logs | `docker compose logs` | stdout + Sentry (startup); metrics planned |

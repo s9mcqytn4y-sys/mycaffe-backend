@@ -93,7 +93,7 @@ Cloudflare R2 is used with two strictly separated buckets and separate IAM API t
 2. **Immutable Artifact Promotion**:
    - All changes are developed on `feature/*` branches, verified via Pull Request against `staging` (passing `build-and-test`, `docker-build`, and `database-migration-test`), and promoted via Pull Request to `main`.
    - Merging to `main` triggers `.github/workflows/release-ghcr.yml`, publishing an immutable image tagged with the Git commit SHA (`sha-<commit>`) and branch/semver tag to `ghcr.io/s9mcqytn4y-sys/mycaffe-api`.
-3. **Production Update Procedure** (P0-05, [deploy.md](../setup/deploy.md)):
+3. **Production Update Procedure** (P0-05, [Deploy.md](../Setup/Deploy.md)):
    - Images are pinned by digest (`mycaffe-api@sha256:...`), taken from the release run summary; tags are never deployed.
    - `scripts/deploy/deploy.sh <api digest> [web digest]` runs a pre-deploy backup, pulls, runs additive migrations via the `migrate` service (`mycaffe_migrator`), starts services and waits for a healthy API, then records the running digests in `/var/lib/mycaffe/deploy/`.
 4. **Rollback Procedure**:

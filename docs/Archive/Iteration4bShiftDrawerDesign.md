@@ -274,4 +274,4 @@ Integrasi langsung pada [internal/pkg/rbac/rbac.go](file:///c:/Projects/myCaffe-
 | `internal/service/payment_service.go` | Payment Integration | Injeksi pencatatan `cash_movements` saat cash tender berhasil, penolakan 409 bila laci belum memiliki open shift. |
 | `internal/handler/shift_handler.go` | HTTP Transport | Handlers untuk siklus shift, cash movements, X/Z reports, dan flag `open_drawer`. |
 | `internal/handler/shift_integration_test.go` | Integration Tests | Test komprehensif lifecycle shift, blind count, PIN override, cash movements, dan laporan Z. |
-| `docs/api/openapi.yaml` | OpenAPI Contract | Dokumentasi schema request/response `/pos/drawers` dan `/pos/shifts`. |
+| `docs/Api/OpenApi.yaml` | OpenAPI Contract | Dokumentasi schema request/response `/pos/drawers` dan `/pos/shifts`. |

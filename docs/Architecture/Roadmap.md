@@ -1,15 +1,17 @@
 # Roadmap, Iterations & Checklist
 
-Reviewed 2026-11-03 against `staging` `acb3dee` (after iteration 5 and audit tickets P0-01..P0-06);
-`main` is at v0.5.0. Status uses the four-tier classification from `AGENTS.md`; a module counts as done
+Reviewed 2026-11-04 against `staging` after release **v0.6.0** (`main` `dc7e408`: go-live steps 0, A,
+B1–B4). Next step: **v0.7 Demo-ready**; see [PrdV2Brainstorm.md](../Product/PrdV2Brainstorm.md) §3,
+[FrontendIntegrationContract.md](FrontendIntegrationContract.md) §5 and
+[DemoReadinessChecklist.md](../Setup/DemoReadinessChecklist.md). Status uses the four-tier classification from `AGENTS.md`; a module counts as done
 only when its route, authorization, tests, and docs exist. MVP scope: **one cafe (single tenant)**,
 multi-tenant schema kept for future branches (owner decision M3). Audit tickets and their status:
-[audit-backlog.md](../engineering/audit-backlog.md).
+[AuditBacklog.md](../Engineering/AuditBacklog.md).
 
 **Owner direction (2026-11-03): large new features are frozen until go-live**: ADR-005 offline cash
 sync, inventory (C5), promotions/loyalty, delivery channels. Only the go-live plan below is in scope.
 
-**Schema (33 tables, 19 migrations):** stores, users, auth_sessions, account_tokens, email_outbox,
+**Schema (36 tables, 23 migrations):** receipt_tokens, media_uploads, payment_refunds (v0.6.0); stores, users, auth_sessions, account_tokens, email_outbox,
 store_settings, audit_logs; categories, products, product_variants, modifier_groups, modifier_options,
 product_modifier_groups, option_modifier_groups; store_daily_sequences, orders, order_items,
 order_item_options, order_rounds, payment_splits, payment_split_items, payments,
@@ -33,23 +35,23 @@ guest); Midtrans webhook. Metrics on the internal `METRICS_ADDR` only.
 | 02.01-A/B Auth design, staff login, rotating sessions, lockout, operator CLI | Implemented & Tested | migration 000005, ADR-003, auth tests |
 | 02 Email outbox, invite/reset PIN, 6-digit PIN | Implemented & Tested | migration 000006, lifecycle tests |
 | 02.01-C RBAC, store settings, token-bound POS routes | Implemented & Tested | migration 000007, RBAC HTTP tests |
-| 3 Catalog C1–C3, variants, standard error contract, R2 buckets provisioned | Implemented & Tested | migration 000008, [api-conventions.md](api-conventions.md) |
+| 3 Catalog C1–C3, variants, standard error contract, R2 buckets provisioned | Implemented & Tested | migration 000008, [ApiConventions.md](ApiConventions.md) |
 | 4a Modifier groups/options CRUD, quote API (P8) | Implemented & Tested | iteration 4 design |
-| 4b Shift & cash drawer, X/Z report (P6, P7, C1, H1) | Implemented & Tested | [iteration-4b-shift-drawer-design.md](iteration-4b-shift-drawer-design.md) |
-| 4c Open tab, rounds, split bill (P2, P3, P10–P14) | Implemented & Tested | [iteration-4c2-split-bill-plan.md](iteration-4c2-split-bill-plan.md) |
-| 4d Void / refund, hotfix v0.4.3 | Implemented & Tested | [iteration-4d-void-refund-stock-plan.md](iteration-4d-void-refund-stock-plan.md); review follow-ups F1–F3 open (PR A) |
-| ADR-004 Catalog cleanup (variant-only pricing) | Implemented & Tested | [adr-004-catalog-schema-modernization.md](adr-004-catalog-schema-modernization.md) |
+| 4b Shift & cash drawer, X/Z report (P6, P7, C1, H1) | Implemented & Tested | [Iteration4bShiftDrawerDesign.md](../Archive/Iteration4bShiftDrawerDesign.md) |
+| 4c Open tab, rounds, split bill (P2, P3, P10–P14) | Implemented & Tested | [Iteration4c2SplitBillPlan.md](../Archive/Iteration4c2SplitBillPlan.md) |
+| 4d Void / refund, hotfix v0.4.3 | Implemented & Tested | [Iteration4dVoidRefundStockPlan.md](../Archive/Iteration4dVoidRefundStockPlan.md); review follow-ups F1–F3 open (PR A) |
+| ADR-004 Catalog cleanup (variant-only pricing) | Implemented & Tested | [Adr004CatalogSchemaModernization.md](Adr004CatalogSchemaModernization.md) |
 | 5a Tables, table sessions, QR resolve | Implemented & Tested | migration 000016 |
 | 5b Guest session, QR pay-first orders, tracker | Implemented & Tested | migration 000017 |
 | 5c Outbox relay → WebSocket, WS tickets | Implemented & Tested | migration 000018 |
 | 5d KDS tickets, late-payment flag (Q7) | Implemented & Tested | migration 000019; Q7 integration test open (P1-12) |
 | Audit P0-01..P0-06: CI integration tests, backups, logs/metrics, alerting, deploy by digest, supply chain | Implemented & Tested | PR #38–#43 |
 
-## Go-live plan (ordered; each PR waits for owner approval before merge)
+## Go-live plan (ordered; each PR waits for owner approval before merge; steps 0–B4 released in v0.6.0)
 
 | Step | Item | Acceptance criteria | Ticket |
 | ------ | ------ | --------------------- | -------- |
-| 0 | **Housekeeping**: this roadmap, [audit-backlog.md](../engineering/audit-backlog.md); then promote `staging` → `main` | docs match the code | P0-12 (part) |
+| 0 | **Housekeeping**: this roadmap, [AuditBacklog.md](../Engineering/AuditBacklog.md); then promote `staging` → `main` | docs match the code | P0-12 (part) |
 | A | **Review debt v0.5.2**: F1 shop-wide owner-PIN guess limit (HF5), F2 PIN policy from config, F3 by-item refund stock release/waste, WebSocket revocation + connection caps, at-least-once delivery docs | named tests per item | 4d review |
 | B1 | **Receipts** (R1): structured payload, ESC/POS 58/80 mm, 90-day digital link, void/refund receipts | snapshot-only, no recalculation; implemented (migration 000020) | P0-11 |
 | B2 | **Owner reports**: per business day (store time zone), payment method, category/item, hour, void/refund, discount, tax & service; date range; CSV | consistent with Z-report; read-only with indexes; implemented (migration 000021, calendar day until PD5 cutoff) | P1-02 |
@@ -73,12 +75,12 @@ promotions & bundles (K7), loyalty (K6), static QRIS fallback (K8), delivery cha
 | Real client IP + Named Cloudflare Tunnel + VPS firewall (P0-07, IN1) | Planned (deployment change, needs approval) |
 | Outbox dead-letter and purge (P0-08) | Planned |
 | Provisioning and incident runbook (P0-09) | Planned |
-| Hostinger SMTP + SPF/DKIM/DMARC runbook | Documented ([email.md](../setup/email.md)); blocked (no domain) |
+| Hostinger SMTP + SPF/DKIM/DMARC runbook | Documented ([Email.md](../Setup/Email.md)); blocked (no domain) |
 | Operator bootstrap (`bootstrap-store`) + `DEFAULT_STORE_SLUG` | Implemented |
 | Promote `staging` → `main` with a merge commit + semver tag | Owner approves each promotion |
 
 ## Open blockers (owner)
 
 1. Buy domain + Hostinger KVM 2 + mailbox → unblocks Named Tunnel, SMTP, restore drill on the VPS.
-2. Grafana Cloud stack ([monitoring.md](../setup/monitoring.md) §2).
+2. Grafana Cloud stack ([Monitoring.md](../Setup/Monitoring.md) §2).
 3. Midtrans production keys → unblocks live payments.

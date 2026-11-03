@@ -2,7 +2,7 @@
 
 ## 1. Executive Summary & Product Scope
 
-Dokumen ini mendefinisikan spesifikasi teknis dan arsitektur untuk **Iteration 4d: POS Void, Refund, dan Stock Override** pada MyCaffe Core POS. Sesuai keputusan Owner **O1** dan **O4** pada [docs/architecture/decision-register.md](decision-register.md), seluruh tindakan operasional yang mengubah status pesanan, membatalkan transaksi keuangan, mengembalikan uang kas, atau menyesuaikan kuantitas stok fisik wajib diaudit ketat secara *append-only* (`audit_logs`) dan dilindungi mekanisme otorisasi PIN kasir vs PIN owner berdasarkan ambang batas (*threshold*).
+Dokumen ini mendefinisikan spesifikasi teknis dan arsitektur untuk **Iteration 4d: POS Void, Refund, dan Stock Override** pada MyCaffe Core POS. Sesuai keputusan Owner **O1** dan **O4** pada [docs/Architecture/DecisionRegister.md](../Architecture/DecisionRegister.md), seluruh tindakan operasional yang mengubah status pesanan, membatalkan transaksi keuangan, mengembalikan uang kas, atau menyesuaikan kuantitas stok fisik wajib diaudit ketat secara *append-only* (`audit_logs`) dan dilindungi mekanisme otorisasi PIN kasir vs PIN owner berdasarkan ambang batas (*threshold*).
 
 ---
 

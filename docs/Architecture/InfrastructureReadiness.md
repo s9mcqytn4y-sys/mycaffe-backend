@@ -54,7 +54,7 @@
 - **Implemented & Tested (Phase 01 Sub-task 04)**:
   - Payment initiation (cash/static QRIS/EDC + Midtrans Core API two-phase charge), durable webhook inbox, duplicate-settlement detection, order expiry and reconciliation worker (`internal/service/payment_service.go`).
 - **Planned**:
-  - Phase 02: Staff authentication, RBAC middleware, signed table QR, and guest table sessions — see `docs/architecture/roadmap.md`.
+  - Phase 02: Staff authentication, RBAC middleware, signed table QR, and guest table sessions — see `docs/Architecture/Roadmap.md`.
 - **Blocked by Dependency**:
   - Production Midtrans credentials, domain/DNS cutover, and live Hostinger KVM 2 VPS provisioning.
 

@@ -1,7 +1,7 @@
 # Kebutuhan Owner, Staf, dan Pelanggan
 
 Disusun dari wawancara owner 2026-10-31 (keputusan O1–O4, I1–I7, E1–E5, T1–T2, C1–C3, H1, R1, N1, K1–K9;
-lihat [decision-register.md](../architecture/decision-register.md)). Kolom **Status**: ✅ Implemented & Tested,
+lihat [DecisionRegister.md](../Architecture/DecisionRegister.md)). Kolom **Status**: ✅ Implemented & Tested,
 🟡 sebagian, ⏳ Planned, ⛔ Blocked by Dependency.
 
 ## 1. Owner / pengusaha

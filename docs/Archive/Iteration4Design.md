@@ -2,7 +2,7 @@
 
 Owner decisions P1–P9 (sixth interview, 2026-10-31) plus earlier O1, O4, C1, C2, C3, T2, H1. Delivery
 order: **PR 4a → 4b → 4c → 4d**; each PR ships an additive migration, PostgreSQL integration tests over
-HTTP, OpenAPI, and docs, following [api-conventions.md](api-conventions.md).
+HTTP, OpenAPI, and docs, following [ApiConventions.md](../Architecture/ApiConventions.md).
 
 ## 1. Add-ons, sub-add-ons, variants & categories (PR 4a)
 
@@ -105,7 +105,7 @@ Reasons (structured): salah input, pelanggan batal, item habis, komplain, lainny
 Paid orders are never voided. Refund updates `payment_status` (`partially_refunded`/`refunded`) separately
 from `order_status`.
 
-Hotfix v0.4.3 (decisions HF1–HF6 in the [decision register](decision-register.md)) tightened these rules:
+Hotfix v0.4.3 (decisions HF1–HF6 in the [decision register](../Architecture/DecisionRegister.md)) tightened these rules:
 void needs an order with no money attached, stock returns exactly once through one shared helper
 (modifier options included), refund restock is explicit and split-aware, and every re-entered PIN
 shares the login lockout.

@@ -15,7 +15,7 @@ Simpan seluruh artefak panduan agen berikut di dalam kontrol versi Git (tanpa kr
 - `AGENTS.md` dan `GEMINI.md`: instruksi utama proyek yang selalu aktif.
 - `.agents/rules/`: aturan terkondisi untuk bahasa Go, isolasi multi-tenant, keamanan pembayaran QRIS/Midtrans, migrasi database, dan rilis.
 - `.agents/skills/`: alur kerja terstruktur untuk pengiriman fitur, migrasi database, integrasi Midtrans QRIS, tinjauan keamanan, dan kesiapan rilis.
-- `docs/product/` dan `docs/architecture/`: dokumen spesifikasi produk, identitas merek (`brand-and-product-knowledge.md`), serta catatan keputusan arsitektur (`ADR-002`).
+- `docs/Product/` dan `docs/Architecture/`: dokumen spesifikasi produk, identitas merek (`BrandAndProductKnowledge.md`), serta catatan keputusan arsitektur (`ADR-002`).
 
 ## C. Instalasi dan Verifikasi RTK (Rust Token Killer)
 

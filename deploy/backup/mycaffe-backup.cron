@@ -1,4 +1,4 @@
-# /etc/cron.d/mycaffe-backup — install and env file: docs/setup/backup-and-restore.md
+# /etc/cron.d/mycaffe-backup — install and env file: docs/Setup/BackupAndRestore.md
 # Runs as the `mycaffe` OS user (member of the docker group). Times are UTC.
 # /opt/mycaffe = checkout of the released tag (deploy/ and scripts/ only, never edited on the VPS).
 # /etc/mycaffe/backup.env = R2 + GPG settings, mode 600, owned by mycaffe.

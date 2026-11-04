@@ -284,18 +284,20 @@ func ValidateSplitAllocations(orderTotal int64, orderItems []OrderItem, splits [
 }
 
 type Payment struct {
-	ID                 uuid.UUID            `json:"id" db:"id"`
-	StoreID            uuid.UUID            `json:"store_id" db:"store_id"`
-	OrderID            uuid.UUID            `json:"order_id" db:"order_id"`
-	SplitID            *uuid.UUID           `json:"split_id,omitempty" db:"split_id"`
-	ShiftID            *uuid.UUID           `json:"shift_id,omitempty" db:"shift_id"`
-	AttemptNo          int                  `json:"attempt_no" db:"attempt_no"`
-	IdempotencyKey     string               `json:"idempotency_key" db:"idempotency_key"`
-	RequestHash        string               `json:"-" db:"request_hash"`
-	Provider           string               `json:"provider" db:"provider"`
-	ProviderOrderID    string               `json:"provider_order_id" db:"provider_order_id"`
-	Amount             int64                `json:"amount" db:"amount"`
-	RefundedAmount     int64                `json:"refunded_amount" db:"refunded_amount"`
+	ID              uuid.UUID  `json:"id" db:"id"`
+	StoreID         uuid.UUID  `json:"store_id" db:"store_id"`
+	OrderID         uuid.UUID  `json:"order_id" db:"order_id"`
+	SplitID         *uuid.UUID `json:"split_id,omitempty" db:"split_id"`
+	ShiftID         *uuid.UUID `json:"shift_id,omitempty" db:"shift_id"`
+	AttemptNo       int        `json:"attempt_no" db:"attempt_no"`
+	IdempotencyKey  string     `json:"idempotency_key" db:"idempotency_key"`
+	RequestHash     string     `json:"-" db:"request_hash"`
+	Provider        string     `json:"provider" db:"provider"`
+	ProviderOrderID string     `json:"provider_order_id" db:"provider_order_id"`
+	Amount          int64      `json:"amount" db:"amount"`
+	RefundedAmount  int64      `json:"refunded_amount" db:"refunded_amount"`
+	// RoundingAmount is cash received minus Amount on a rounded closing cash tender (V11), never taxed.
+	RoundingAmount     int64                `json:"rounding_amount" db:"rounding_amount"`
 	Method             PaymentMethod        `json:"method" db:"method"`
 	Status             PaymentAttemptStatus `json:"status" db:"status"`
 	RawProviderStatus  string               `json:"raw_provider_status,omitempty" db:"raw_provider_status"`

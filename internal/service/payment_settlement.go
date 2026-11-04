@@ -109,7 +109,7 @@ func (s *PaymentService) commitPaidOrderTx(ctx context.Context, tx *sqlx.Tx, ord
 		if err := tx.GetContext(ctx, &sumPaid, `
 			SELECT COALESCE(SUM(paid_amount), 0)
 			FROM payment_splits
-			WHERE store_id = $1 AND order_id = $2 AND status = 'paid'
+			WHERE store_id = $1 AND order_id = $2 AND status IN ('paid', 'partially_paid')
 		`, order.StoreID, order.ID); err != nil {
 			return err
 		}
@@ -256,4 +256,29 @@ func (s *PaymentService) insertPaymentOutboxTx(
 		Payload:       string(bytes),
 	}
 	return s.orderRepo.InsertOutboxEvent(ctx, tx, &event)
+}
+
+// recordPartialPaymentTx marks an order partially paid after a partial direct tender (V12). The order
+// stops expiring (money is attached) and is sent to the kitchen only once fully paid.
+func (s *PaymentService) recordPartialPaymentTx(ctx context.Context, tx *sqlx.Tx, order *domain.Order) error {
+	if err := tx.GetContext(ctx, &order.PaidAmount, `
+		SELECT COALESCE(SUM(paid_amount), 0) FROM payment_splits WHERE store_id = $1 AND order_id = $2`, order.StoreID, order.ID); err != nil {
+		return err
+	}
+	order.PaymentStatus = domain.OrderPaymentStatusPartiallyPaid
+	order.ExpiresAt = nil
+	if err := s.orderRepo.UpdateOrderStatusAndStock(ctx, tx, order); err != nil {
+		return fmt.Errorf("failed to update partially paid order: %w", err)
+	}
+	return s.insertPaymentOutboxTx(ctx, tx, order, "payment.partially_paid", map[string]any{
+		"paid_amount": order.PaidAmount, "remaining": order.TotalAmount - order.PaidAmount,
+	})
+}
+
+// roundToNearest rounds a cash amount to the nearest step, halves up (V11). step 0 disables rounding.
+func roundToNearest(amount, step int64) int64 {
+	if step <= 0 {
+		return amount
+	}
+	return (amount + step/2) / step * step
 }

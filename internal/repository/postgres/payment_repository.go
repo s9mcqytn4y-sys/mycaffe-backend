@@ -54,7 +54,7 @@ func (r *PaymentRepository) ResolveWebhookContext(ctx context.Context, db *sqlx.
 
 const paymentSelectColumns = `
 	id, store_id, order_id, split_id, shift_id, attempt_no, idempotency_key, request_hash,
-	provider, provider_order_id, amount, refunded_amount, method, status,
+	provider, provider_order_id, amount, refunded_amount, rounding_amount, method, status,
 	raw_provider_status, fraud_status, COALESCE(transaction_id, '') AS transaction_id,
 	COALESCE(payment_type, '') AS payment_type, COALESCE(acquirer, '') AS acquirer,
 	COALESCE(qr_string, '') AS qr_string, COALESCE(deeplink_url, '') AS deeplink_url,
@@ -294,7 +294,7 @@ func (r *PaymentRepository) InsertPayment(
 			qr_string, deeplink_url, va_number, bank, biller_code, bill_key,
 			payment_code, reconciliation_ref, verified_by_user_id,
 			cash_tendered_amount, change_given_amount, failure_code, failure_reason,
-			paid_at, expires_at
+			paid_at, expires_at, rounding_amount
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8,
 			$9, $10, $11, $12, $13, $14,
@@ -302,7 +302,7 @@ func (r *PaymentRepository) InsertPayment(
 			$20, $21, $22, $23, $24, $25,
 			$26, $27, $28,
 			$29, $30, $31, $32,
-			$33, $34
+			$33, $34, $35
 		)
 		RETURNING created_at, updated_at
 	`
@@ -316,7 +316,7 @@ func (r *PaymentRepository) InsertPayment(
 		payment.VANumber, payment.Bank, payment.BillerCode, payment.BillKey,
 		payment.PaymentCode, payment.ReconciliationRef, payment.VerifiedByUserID,
 		payment.CashTenderedAmount, payment.ChangeGivenAmount,
-		payment.FailureCode, payment.FailureReason, payment.PaidAt, payment.ExpiresAt,
+		payment.FailureCode, payment.FailureReason, payment.PaidAt, payment.ExpiresAt, payment.RoundingAmount,
 	).Scan(&payment.CreatedAt, &payment.UpdatedAt)
 }
 

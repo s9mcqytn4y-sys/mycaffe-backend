@@ -76,6 +76,8 @@ type ReportSummary struct {
 	CashSales     int64         `json:"cash_sales"`
 	CashRefunds   int64         `json:"cash_refunds"`
 	CashNet       int64         `json:"cash_net"`
+	// CashRounding is the net cash rounding (V11) inside CashSales; it is not part of Total.
+	CashRounding int64 `json:"cash_rounding"`
 }
 
 type MethodTotal struct {
@@ -213,6 +215,10 @@ func (s *ReportService) Summary(ctx context.Context, storeID uuid.UUID, from, to
 			return fmt.Errorf("failed to sum cash movements: %w", err)
 		}
 		sum.CashNet = sum.CashSales - sum.CashRefunds
+		if err := tx.GetContext(ctx, &sum.CashRounding, `SELECT COALESCE(SUM(rounding_amount), 0) FROM payments
+			WHERE store_id = $1 AND paid_at >= $2 AND paid_at < $3`, storeID, rng.start, rng.end); err != nil {
+			return fmt.Errorf("failed to sum cash rounding: %w", err)
+		}
 		return nil
 	})
 	return sum, err

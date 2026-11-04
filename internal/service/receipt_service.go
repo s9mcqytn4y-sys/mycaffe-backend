@@ -82,6 +82,7 @@ type ReceiptPayment struct {
 	Amount       int64  `json:"amount" db:"amount"`
 	CashTendered int64  `json:"cash_tendered_amount,omitempty" db:"cash_tendered_amount"`
 	Change       int64  `json:"change_amount,omitempty" db:"change_amount"`
+	Rounding     int64  `json:"rounding_amount,omitempty" db:"rounding_amount"`
 	Status       string `json:"status" db:"status"`
 }
 
@@ -397,7 +398,7 @@ func receiptPaymentsTx(ctx context.Context, tx *sqlx.Tx, storeID, orderID uuid.U
 	payments := []ReceiptPayment{}
 	err := tx.SelectContext(ctx, &payments, `
 		SELECT COALESCE(sp.label, '') AS split_label, p.method, p.amount, p.cash_tendered_amount,
-			p.change_given_amount AS change_amount, p.status
+			p.change_given_amount AS change_amount, p.rounding_amount, p.status
 		FROM payments p LEFT JOIN payment_splits sp ON sp.store_id = p.store_id AND sp.id = p.split_id
 		WHERE p.store_id = $1 AND p.order_id = $2 AND p.status IN ('paid', 'partially_refunded', 'refunded')
 		ORDER BY sp.split_number NULLS FIRST, p.paid_at, p.created_at`, storeID, orderID)

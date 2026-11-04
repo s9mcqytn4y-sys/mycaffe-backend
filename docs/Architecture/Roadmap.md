@@ -19,7 +19,7 @@ prospective-client demo waits for v0.8. Benchmark: [CompetitorAnalysisMajoo.md](
 | 8.1 | Outbox dead-letter, attempts, backoff, purge of technical tables (P0-08) | — | **Done** (PR #59, migration 000025) |
 | 8.2 | Messaging: `message_outbox` + sender interface (`log`, SMS aggregator), `otp_challenges`, `customers` with verified phone, staff PIN reset by SMS; demo owner e-mail back to the owner's Gmail | V4, V5, V6 | **Done** (migration 000026): drivers `log`/`disabled`; the provider driver waits for the owner to pick a vendor; WhatsApp waits for a domain (V8) |
 | 8.3 | Multi-payment (direct methods free, dynamic QRIS last), split by amount, cash rounding | V11, V12 | **Done** (migration 000027). Split by amount is covered by partial tenders (each payer pays an amount on the same split), so no separate split mode |
-| 8.4 | Outlet cash fund, expense categories, daily limit with `outlet_expense` approval, cashier settings (default float, blind count) | V13 | New ADR-007 action |
+| 8.4 | Outlet cash fund, expense categories, daily limit with `outlet_expense` approval, cashier settings (default float, blind count) | V13 | **Done** (migration 000028): fixed categories (ingredients, operational, other) instead of a category table; ADR-007 action `outlet_expense` |
 | 8.5 | Partial refunds per item (proportional tax/service/discount), outlet cash as a refund source, RF1-a/b/d/f Midtrans refunds with `refund_pending` | RF1, V13 | A live sandbox proof needs the owner's sandbox keys in `.env` |
 | 8.6 | Discount approval above `cashier_max_discount_bps` (ADR-007 action `discount`), compliment as an approved 100 % discount | V12 | — |
 | 8.7 | Staff QR badges (revocable token) + PIN login | V14 | ADR-003 amendment |

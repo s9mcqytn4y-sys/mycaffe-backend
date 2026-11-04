@@ -25,6 +25,7 @@ const (
 	ApprovalRefund        = "refund"
 	ApprovalStockOverride = "stock_override"
 	ApprovalShiftVariance = "shift_variance"
+	ApprovalOutletExpense = "outlet_expense"
 
 	approvalWindow      = 2 * time.Minute // to decide, then again to use an approval (RA3)
 	approvalMaxPending  = 3
@@ -46,6 +47,7 @@ var (
 var approvalPermission = map[string]rbac.Permission{
 	ApprovalVoid: rbac.OrderVoid, ApprovalRefund: rbac.PaymentRefund,
 	ApprovalStockOverride: rbac.StockOverride, ApprovalShiftVariance: rbac.ShiftClose,
+	ApprovalOutletExpense: rbac.CashMovementCreate,
 }
 
 type CreateApprovalInput struct {
@@ -58,6 +60,9 @@ type CreateApprovalInput struct {
 type approvalParams struct {
 	NewQuantity *int   `json:"new_quantity,omitempty"`
 	CountedCash *int64 `json:"counted_cash,omitempty"`
+	// Outlet expense (V13): the approval covers exactly this amount and category.
+	Amount   *int64 `json:"amount,omitempty"`
+	Category string `json:"category,omitempty"`
 }
 
 type Approval struct {
@@ -113,7 +118,10 @@ func (s *ApprovalService) Create(ctx context.Context, actor *AuthenticatedStaff,
 	reason := strings.TrimSpace(in.Reason)
 	fields := map[string]string{}
 	if !known {
-		fields["action"] = "harus void, refund, stock_override atau shift_variance"
+		fields["action"] = "harus void, refund, stock_override, shift_variance atau outlet_expense"
+	}
+	if in.Action == ApprovalOutletExpense {
+		in.ReferenceID = actor.Staff.Store.ID // the fund belongs to the store, not to one record
 	}
 	if in.ReferenceID == uuid.Nil {
 		fields["reference_id"] = "wajib diisi"
@@ -129,6 +137,9 @@ func (s *ApprovalService) Create(ctx context.Context, actor *AuthenticatedStaff,
 	}
 	if in.Action == ApprovalStockOverride && (params.NewQuantity == nil || *params.NewQuantity < 0) {
 		fields["params.new_quantity"] = "wajib diisi, tidak boleh negatif"
+	}
+	if in.Action == ApprovalOutletExpense && (params.Amount == nil || *params.Amount <= 0 || !outletExpenseCategories[params.Category]) {
+		fields["params"] = "amount (> 0) dan category (ingredients, operational, other) wajib diisi"
 	}
 	if in.Action == ApprovalShiftVariance && (params.CountedCash == nil || *params.CountedCash < 0) {
 		fields["params.counted_cash"] = "wajib diisi, tidak boleh negatif"
@@ -233,6 +244,12 @@ func (s *ApprovalService) requiredAmount(ctx context.Context, tx *sqlx.Tx, actor
 			tolerance = 5000
 		}
 		return variance, variance > tolerance || -variance > tolerance, nil
+	case ApprovalOutletExpense:
+		spent, err := outletExpensesTodayTx(ctx, tx, storeID)
+		if err != nil {
+			return 0, false, err
+		}
+		return *p.Amount, spent+*p.Amount > settings.OutletDailyExpenseLimit, nil
 	}
 	return 0, false, ErrApprovalInvalid
 }
@@ -240,7 +257,7 @@ func (s *ApprovalService) requiredAmount(ctx context.Context, tx *sqlx.Tx, actor
 const approvalSelect = `
 	SELECT a.id, a.action, a.reference_id, a.amount, a.params, a.reason, a.status, a.requested_by,
 	       COALESCE(a.decision_note, '') AS decision_note, a.expires_at, a.decided_at, a.created_at,
-	       COALESCE(o.order_number, po.order_number, pr.name, d.name, '') AS reference_label,
+	       COALESCE(o.order_number, po.order_number, pr.name, d.name, CASE WHEN a.action = 'outlet_expense' THEN 'Kas outlet' END, '') AS reference_label,
 	       COALESCE(ru.full_name, '') AS requested_by_name, COALESCE(du.full_name, '') AS decided_by_name
 	FROM approval_requests a
 	LEFT JOIN orders o ON a.action = 'void' AND o.store_id = a.store_id AND o.id = a.reference_id
@@ -420,7 +437,9 @@ func consumeApproval(ctx context.Context, tx *sqlx.Tx, actor *AuthenticatedStaff
 	var approved approvalParams
 	_ = json.Unmarshal(row.Params, &approved)
 	paramsMatch := (c.Params.NewQuantity == nil || (approved.NewQuantity != nil && *approved.NewQuantity == *c.Params.NewQuantity)) &&
-		(c.Params.CountedCash == nil || (approved.CountedCash != nil && *approved.CountedCash == *c.Params.CountedCash))
+		(c.Params.CountedCash == nil || (approved.CountedCash != nil && *approved.CountedCash == *c.Params.CountedCash)) &&
+		(c.Params.Amount == nil || (approved.Amount != nil && *approved.Amount == *c.Params.Amount)) &&
+		c.Params.Category == approved.Category
 	if row.Status != approvalStatusOK || row.DecidedBy == nil || !now.Before(row.ExpiresAt) || row.RequestedBy != actor.Staff.UserID ||
 		row.Action != c.Action || row.ReferenceID != c.Ref || row.Amount != amount || !paramsMatch {
 		return uuid.Nil, ErrApprovalInvalid

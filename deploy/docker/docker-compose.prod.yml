@@ -95,6 +95,10 @@ services:
       MIDTRANS_IS_PRODUCTION: "true"
       # Hostinger mailbox (smtp.hostinger.com:465, implicit TLS). The API refuses to start without it.
       EMAIL_DRIVER: smtp
+      SMS_DRIVER: ${SMS_DRIVER:-disabled}
+      SMS_EMAIL_TO: ${SMS_EMAIL_TO:-}
+      SMS_WEBHOOK_URL: ${SMS_WEBHOOK_URL:-}
+      SMS_WEBHOOK_TOKEN: ${SMS_WEBHOOK_TOKEN:-}
       SMTP_HOST: ${SMTP_HOST:-smtp.hostinger.com}
       SMTP_PORT: ${SMTP_PORT:-465}
       SMTP_USERNAME: ${SMTP_USERNAME:?SMTP_USERNAME must be set}

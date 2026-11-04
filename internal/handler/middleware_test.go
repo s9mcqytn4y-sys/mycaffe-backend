@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/getsentry/sentry-go"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus/testutil"
@@ -76,5 +77,31 @@ func TestRecoverReturns500AndLogsPanic(t *testing.T) {
 	}
 	if !strings.Contains(logs.String(), `"msg":"panic"`) || !strings.Contains(logs.String(), "kaboom") {
 		t.Fatalf("panic not logged: %s", logs.String())
+	}
+}
+
+func TestScrubSentryEventRedactsCredentialsAndPII(t *testing.T) {
+	ev := &sentry.Event{
+		Request: &sentry.Request{
+			URL:         "https://demo.abbdullaziz.online/api/v1/auth/staff/login",
+			QueryString: "ticket=secret-ws-ticket",
+			Cookies:     "mycaffe_refresh=secret-refresh-token",
+			Data:        `{"pin":"739284"}`,
+			Headers: map[string]string{
+				"Authorization": "Bearer secret-jwt",
+				"Cookie":        "mycaffe_refresh=secret",
+				"User-Agent":    "Mozilla/5.0",
+			},
+		},
+	}
+	scrubbed := ScrubSentryEvent(ev, nil)
+	if scrubbed.Request.Cookies != "" || scrubbed.Request.QueryString != "" || scrubbed.Request.Data != "[REDACTED]" {
+		t.Fatalf("request body/cookies/query not scrubbed: %+v", scrubbed.Request)
+	}
+	if scrubbed.Request.Headers["Authorization"] != "[REDACTED]" || scrubbed.Request.Headers["Cookie"] != "[REDACTED]" {
+		t.Fatalf("auth headers not scrubbed: %+v", scrubbed.Request.Headers)
+	}
+	if scrubbed.Request.Headers["User-Agent"] != "Mozilla/5.0" {
+		t.Fatalf("non-sensitive header should be preserved: %+v", scrubbed.Request.Headers)
 	}
 }

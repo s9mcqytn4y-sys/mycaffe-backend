@@ -288,6 +288,7 @@ func TestValidateConfigStagingRequiresStrongJWTSecret(t *testing.T) {
 }
 
 // V4/V5: the log driver prints OTP codes, so only development and test may use it.
+// email and webhook drivers are allowed in staging/production when properly configured.
 func TestValidateConfigSMSDriver(t *testing.T) {
 	strong := strings.Repeat("strong", 6)
 	if err := config.ValidateConfig(&config.Config{AppEnv: "staging", JWTSecret: strong, EmailDriver: "log", SMSDriver: "log"}); err == nil {
@@ -295,6 +296,30 @@ func TestValidateConfigSMSDriver(t *testing.T) {
 	}
 	if err := config.ValidateConfig(&config.Config{AppEnv: "staging", JWTSecret: strong, EmailDriver: "log", SMSDriver: "disabled"}); err != nil {
 		t.Errorf("staging with SMS disabled: %v", err)
+	}
+	if err := config.ValidateConfig(&config.Config{
+		AppEnv:         "staging",
+		JWTSecret:      strong,
+		EmailDriver:    "smtp",
+		SMTPHost:       "smtp.gmail.com",
+		SMTPUsername:   "owner@abbdullaziz.online",
+		SMTPPassword:   "app-pass",
+		EmailFromEmail: "owner@abbdullaziz.online",
+		SMTPTLSMode:    "starttls",
+		AppPublicURL:   "https://demo.abbdullaziz.online",
+		SMSDriver:      "email",
+		SMSEmailTo:     "owner@abbdullaziz.online",
+	}); err != nil {
+		t.Errorf("staging with SMS_DRIVER=email should pass: %v", err)
+	}
+	if err := config.ValidateConfig(&config.Config{
+		AppEnv:        "staging",
+		JWTSecret:     strong,
+		EmailDriver:   "log",
+		SMSDriver:     "webhook",
+		SMSWebhookURL: "https://gateway.abbdullaziz.online/sms",
+	}); err != nil {
+		t.Errorf("staging with SMS_DRIVER=webhook should pass: %v", err)
 	}
 	if err := config.ValidateConfig(&config.Config{AppEnv: "development", EmailDriver: "log", SMSDriver: "carrier-pigeon"}); err == nil {
 		t.Error("unknown SMS driver must be refused")

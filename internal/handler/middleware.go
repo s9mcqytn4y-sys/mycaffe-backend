@@ -6,8 +6,10 @@ import (
 	"regexp"
 	"runtime/debug"
 	"strconv"
+	"strings"
 	"time"
 
+	"github.com/getsentry/sentry-go"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/metrics"
@@ -16,6 +18,46 @@ import (
 const RequestIDHeader = "X-Request-ID"
 
 var safeRequestID = regexp.MustCompile(`^[A-Za-z0-9._-]{8,64}$`)
+
+// SentryClientOptions builds the fail-safe Sentry SDK configuration with Free Plan quota
+// protection (10% trace sampling, 100% error capture) and strict PII / credential scrubbing
+// (closing Security Risk Register R6).
+func SentryClientOptions(dsn, environment string) sentry.ClientOptions {
+	return sentry.ClientOptions{
+		Dsn:              strings.TrimSpace(dsn),
+		Environment:      strings.TrimSpace(environment),
+		SampleRate:       1.0,
+		TracesSampleRate: 0.1,
+		SendDefaultPII:   false,
+		AttachStacktrace: true,
+		BeforeSend:       ScrubSentryEvent,
+	}
+}
+
+// ScrubSentryEvent strips sensitive headers, cookies, query strings, and request bodies
+// before any event leaves the process for Sentry.
+func ScrubSentryEvent(event *sentry.Event, _ *sentry.EventHint) *sentry.Event {
+	if event == nil {
+		return nil
+	}
+	if event.Request != nil {
+		event.Request.Cookies = ""
+		event.Request.QueryString = ""
+		if event.Request.Data != "" {
+			event.Request.Data = "[REDACTED]"
+		}
+		if event.Request.Headers != nil {
+			for k := range event.Request.Headers {
+				lower := strings.ToLower(k)
+				if lower == "authorization" || lower == "cookie" || lower == "set-cookie" ||
+					strings.Contains(lower, "secret") || strings.Contains(lower, "token") || strings.Contains(lower, "pin") {
+					event.Request.Headers[k] = "[REDACTED]"
+				}
+			}
+		}
+	}
+	return event
+}
 
 // RequestID propagates a well-formed inbound X-Request-ID (e.g. from Nginx) or creates one, and
 // echoes it on the response so a cashier's error report can be matched to server logs.
@@ -46,37 +88,78 @@ func AccessLog() gin.HandlerFunc {
 		metrics.HTTPRequests.WithLabelValues(c.Request.Method, route, strconv.Itoa(status)).Inc()
 		metrics.HTTPDuration.WithLabelValues(c.Request.Method, route).Observe(elapsed.Seconds())
 
+		reqID := c.GetString(RequestIDHeader)
 		attrs := []any{
-			"request_id", c.GetString(RequestIDHeader),
+			"request_id", reqID,
 			"method", c.Request.Method,
 			"route", route,
 			"status", status,
 			"latency_ms", elapsed.Milliseconds(),
 			"client_ip", c.ClientIP(),
 		}
+		var storeIDStr string
 		if staff := currentStaff(c); staff != nil {
+			storeIDStr = staff.Staff.Store.ID.String()
 			attrs = append(attrs, "store_id", staff.Staff.Store.ID, "staff_id", staff.Staff.UserID)
 		}
 		level := slog.LevelInfo
 		if status >= http.StatusInternalServerError {
 			level = slog.LevelError
+			if len(c.Errors) > 0 {
+				captureRequestErrorToSentry(c, reqID, route, storeIDStr, status, c.Errors.Last().Err)
+			}
 		}
 		slog.Log(c.Request.Context(), level, "http_request", attrs...)
 	}
 }
 
-// Recover turns a handler panic into a 500 and logs it with the request id and stack.
+// Recover turns a handler panic into a 500, logs it with the request id and stack,
+// and reports the panic to Sentry with tenant/request tags (R6).
 func Recover() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		defer func() {
 			if r := recover(); r != nil {
-				slog.Error("panic", "request_id", c.GetString(RequestIDHeader), "route", c.FullPath(), "panic", r, "stack", string(debug.Stack()))
+				reqID := c.GetString(RequestIDHeader)
+				route := c.FullPath()
+				if route == "" {
+					route = "unmatched"
+				}
+				slog.Error("panic", "request_id", reqID, "route", route, "panic", r, "stack", string(debug.Stack()))
+
+				hub := sentry.CurrentHub().Clone()
+				hub.ConfigureScope(func(scope *sentry.Scope) {
+					scope.SetTag("request_id", reqID)
+					scope.SetTag("route", route)
+					scope.SetTag("method", c.Request.Method)
+					if staff := currentStaff(c); staff != nil {
+						scope.SetTag("store_id", staff.Staff.Store.ID.String())
+					}
+				})
+				hub.RecoverWithContext(c.Request.Context(), r)
+
 				authError(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Terjadi kesalahan pada server.")
 				c.Abort()
 			}
 		}()
 		c.Next()
 	}
+}
+
+func captureRequestErrorToSentry(c *gin.Context, reqID, route, storeID string, status int, err error) {
+	if err == nil {
+		return
+	}
+	hub := sentry.CurrentHub().Clone()
+	hub.ConfigureScope(func(scope *sentry.Scope) {
+		scope.SetTag("request_id", reqID)
+		scope.SetTag("route", route)
+		scope.SetTag("method", c.Request.Method)
+		scope.SetTag("http.status_code", strconv.Itoa(status))
+		if storeID != "" {
+			scope.SetTag("store_id", storeID)
+		}
+	})
+	hub.CaptureException(err)
 }
 
 // LimitBody caps request bodies so a single client cannot make the API buffer arbitrary JSON.

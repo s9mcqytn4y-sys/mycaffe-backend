@@ -445,10 +445,11 @@ func (s *ShiftService) CreateCashMovement(ctx context.Context, actor *Authentica
 // ---------- Shift Closing & Reconciliation ----------
 
 type CloseShiftInput struct {
-	CountedCash    int64   `json:"counted_cash"`
-	VarianceReason *string `json:"variance_reason,omitempty"`
-	OwnerPIN       *string `json:"owner_pin,omitempty"`
-	Notes          *string `json:"notes,omitempty"`
+	CountedCash    int64      `json:"counted_cash"`
+	VarianceReason *string    `json:"variance_reason,omitempty"`
+	OwnerPIN       *string    `json:"owner_pin,omitempty"`
+	ApprovalID     *uuid.UUID `json:"approval_id,omitempty"`
+	Notes          *string    `json:"notes,omitempty"`
 }
 
 type CloseShiftResult struct {
@@ -500,11 +501,13 @@ func (s *ShiftService) CloseShift(ctx context.Context, actor *AuthenticatedStaff
 		}
 
 		var ownerOverrideID *uuid.UUID
+		counted := in.CountedCash
+		claim := &approvalClaim{ID: in.ApprovalID, Action: ApprovalShiftVariance, Ref: shift.ID, Params: approvalParams{CountedCash: &counted}}
 		if absVariance > tolerance {
 			pinProvided := in.OwnerPIN != nil && strings.TrimSpace(*in.OwnerPIN) != ""
 			reasonProvided := in.VarianceReason != nil && strings.TrimSpace(*in.VarianceReason) != ""
 
-			if !pinProvided || !reasonProvided {
+			if (!pinProvided && in.ApprovalID == nil) || !reasonProvided {
 				return &ValidationError{
 					Fields: map[string]string{
 						"variance": fmt.Sprintf("Selisih kas (Rp%d) melebihi batas toleransi toko (Rp%d). Wajib menyertakan PIN Owner dan alasan selisih.", variance, tolerance),
@@ -512,8 +515,13 @@ func (s *ShiftService) CloseShift(ctx context.Context, actor *AuthenticatedStaff
 				}
 			}
 
-			// Verifikasi PIN Owner terhadap akun aktif pemilik toko
-			verifiedOwnerID, err := s.pins.verifyOwner(ctx, tx, actor, strings.TrimSpace(*in.OwnerPIN))
+			// Verifikasi PIN Owner terhadap akun aktif pemilik toko, atau persetujuan jarak jauh (ADR-007)
+			var verifiedOwnerID uuid.UUID
+			if pinProvided {
+				verifiedOwnerID, err = s.pins.verifyOwner(ctx, tx, actor, strings.TrimSpace(*in.OwnerPIN))
+			} else {
+				verifiedOwnerID, err = consumeApproval(ctx, tx, actor, claim, variance, s.nowFunc().UTC())
+			}
 			if err != nil {
 				return err
 			}
@@ -545,6 +553,7 @@ func (s *ShiftService) CloseShift(ctx context.Context, actor *AuthenticatedStaff
 			"counted_cash":      in.CountedCash,
 			"variance":          variance,
 			"owner_override_by": ownerOverrideID,
+			"approval_id":       claim.usedID(),
 		})
 		if err := postgres.InsertAuditLog(ctx, tx, &domain.AuditLog{
 			StoreID:     actor.Staff.Store.ID,

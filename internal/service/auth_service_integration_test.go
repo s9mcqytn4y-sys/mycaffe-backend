@@ -367,4 +367,21 @@ func TestStaffAdminIntegration(t *testing.T) {
 	if _, err := svc.Login(ctx, service.LoginInput{StoreSlug: slug, Email: "pemilik@" + slug + ".test", PIN: "905172"}); err != nil {
 		t.Fatalf("login with reset PIN: %v", err)
 	}
+
+	// L-1: demo PINs replace the published seed PIN; same, weak or seed PINs are refused.
+	for _, pins := range [][2]string{{"731904", "731904"}, {"482913", "731904"}, {"731904", "123456"}} {
+		if _, err := service.ApplyDemoPINs(ctx, migratorDB, []string{slug}, pins[0], pins[1]); !errors.Is(err, service.ErrDemoPINs) {
+			t.Fatalf("demo PINs %v must be refused: %v", pins, err)
+		}
+	}
+	n, err := service.ApplyDemoPINs(ctx, migratorDB, []string{slug}, "731904", "586203")
+	if err != nil || n != 1 {
+		t.Fatalf("apply demo PINs: rows=%d err=%v", n, err)
+	}
+	if _, err := svc.Login(ctx, service.LoginInput{StoreSlug: slug, Email: "pemilik@" + slug + ".test", PIN: "905172"}); err == nil {
+		t.Fatal("old owner PIN must stop working after demo PINs")
+	}
+	if _, err := svc.Login(ctx, service.LoginInput{StoreSlug: slug, Email: "pemilik@" + slug + ".test", PIN: "731904"}); err != nil {
+		t.Fatalf("login with demo owner PIN: %v", err)
+	}
 }

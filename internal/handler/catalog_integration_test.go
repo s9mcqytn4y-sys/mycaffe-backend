@@ -94,7 +94,7 @@ func TestCatalogIntegration(t *testing.T) {
 		}
 	}
 
-	owner := login("abdulaziz543333@gmail.com")
+	owner := login("owner.central@mycaffe.local")
 	cashier := login("cashier.central@mycaffe.local")
 	barista := login("barista.central@mycaffe.local")
 	kitchen := login("kitchen.central@mycaffe.local")

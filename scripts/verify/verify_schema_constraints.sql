@@ -355,6 +355,13 @@ BEGIN
     IF has_table_privilege('mycaffe_app', 'public.kds_tickets', 'DELETE') THEN
         RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may DELETE kds_tickets!';
     END IF;
+    -- 10F-9. Approval requests (migration 000024, ADR-007): RLS on, never deleted by the app role.
+    IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.approval_requests'::regclass) THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: approval_requests does not have row-level security enabled!';
+    END IF;
+    IF has_table_privilege('mycaffe_app', 'public.approval_requests', 'DELETE') THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may DELETE approval_requests!';
+    END IF;
     -- 10F-8. Refund ledger (migration 000023): RLS on, insert-only for the app role.
     IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.payment_refunds'::regclass) THEN
         RAISE EXCEPTION 'SECURITY FAILURE: payment_refunds does not have row-level security enabled!';

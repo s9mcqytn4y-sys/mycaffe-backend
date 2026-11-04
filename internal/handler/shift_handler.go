@@ -28,6 +28,8 @@ func writeShiftServiceError(c *gin.Context, err error) {
 		c.JSON(http.StatusConflict, gin.H{"code": "CONFLICT", "error": conflict.Message, "field": conflict.Field})
 	case errors.Is(err, service.ErrVarianceExceedsTolerance):
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"code": "VARIANCE_EXCEEDS_TOLERANCE", "error": "Selisih kas melebihi batas toleransi toko. Memerlukan PIN Owner dan alasan selisih."})
+	case errors.Is(err, service.ErrApprovalInvalid):
+		authError(c, http.StatusConflict, "APPROVAL_INVALID", "Persetujuan owner tidak cocok, sudah dipakai, atau kedaluwarsa. Minta persetujuan baru.")
 	case errors.Is(err, service.ErrInvalidOwnerPIN):
 		c.JSON(http.StatusUnauthorized, gin.H{"code": "INVALID_OWNER_PIN", "error": "PIN Owner yang dimasukkan tidak valid."})
 	case errors.Is(err, service.ErrOwnerPINStoreLimit):

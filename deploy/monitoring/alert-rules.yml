@@ -1,5 +1,5 @@
 # MyCaffe technical alerts (decision IN3), Prometheus rule format. Load into Grafana Cloud with
-# mimirtool (docs/setup/monitoring.md); unit tests: alert-rules.test.yml (`promtool test rules`, CI).
+# mimirtool (docs/Setup/Monitoring.md); unit tests: alert-rules.test.yml (`promtool test rules`, CI).
 # Routing: severity=critical -> Telegram + email, severity=warning -> Telegram.
 groups:
   - name: mycaffe-api

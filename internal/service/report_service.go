@@ -91,7 +91,8 @@ type ReportService struct {
 func NewReportService(db *sqlx.DB) *ReportService { return &ReportService{db: db} }
 
 // parseRange validates from/to (default today) against the store time zone and the 92-day cap.
-func (s *ReportService) parseRange(ctx context.Context, tx *sqlx.Tx, storeID uuid.UUID, from, to string) (*ReportRange, error) {
+// Order lists (GET /pos/orders) use the same window.
+func parseRange(ctx context.Context, tx *sqlx.Tx, storeID uuid.UUID, from, to string) (*ReportRange, error) {
 	var tz string
 	if err := tx.GetContext(ctx, &tz, `SELECT timezone FROM stores WHERE id = $1`, storeID); err != nil {
 		return nil, fmt.Errorf("failed to load store timezone: %w", err)
@@ -160,7 +161,7 @@ func (s *ReportService) Sales(ctx context.Context, storeID uuid.UUID, from, to, 
 
 	var report *SalesReport
 	err := database.WithTenantTx(ctx, s.db, storeID, func(tx *sqlx.Tx) error {
-		rng, err := s.parseRange(ctx, tx, storeID, from, to)
+		rng, err := parseRange(ctx, tx, storeID, from, to)
 		if err != nil {
 			return err
 		}
@@ -179,7 +180,7 @@ func (s *ReportService) Sales(ctx context.Context, storeID uuid.UUID, from, to, 
 func (s *ReportService) Summary(ctx context.Context, storeID uuid.UUID, from, to string) (*ReportSummary, error) {
 	var sum *ReportSummary
 	err := database.WithTenantTx(ctx, s.db, storeID, func(tx *sqlx.Tx) error {
-		rng, err := s.parseRange(ctx, tx, storeID, from, to)
+		rng, err := parseRange(ctx, tx, storeID, from, to)
 		if err != nil {
 			return err
 		}

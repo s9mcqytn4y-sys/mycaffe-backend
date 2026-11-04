@@ -112,7 +112,7 @@ type StaffStore struct {
 	Name string    `json:"name"`
 }
 
-// StaffIdentity is the OpenAPI StaffProfile (docs/api/openapi.yaml).
+// StaffIdentity is the OpenAPI StaffProfile (docs/Api/OpenApi.yaml).
 type StaffIdentity struct {
 	UserID   uuid.UUID       `json:"id"`
 	FullName string          `json:"full_name"`

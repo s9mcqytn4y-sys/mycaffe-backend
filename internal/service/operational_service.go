@@ -78,7 +78,8 @@ func NewOperationalService(
 // authorizeAmount enforces decision O1: the actor's own PIN up to void_refund_owner_threshold, an
 // owner PIN above it. It returns the approving owner's id when an owner PIN was used.
 // requireOwner forces the owner PIN regardless of the amount (a refund past the cashier window, RF1-e).
-func (s *OperationalService) authorizeAmount(ctx context.Context, tx *sqlx.Tx, actor *AuthenticatedStaff, amount int64, pin string, ownerPIN *string, requireOwner bool) (*uuid.UUID, error) {
+// An approved remote request (ADR-007) stands in for the owner PIN when none is given.
+func (s *OperationalService) authorizeAmount(ctx context.Context, tx *sqlx.Tx, actor *AuthenticatedStaff, amount int64, pin string, ownerPIN *string, requireOwner bool, approval *approvalClaim) (*uuid.UUID, error) {
 	settings, err := s.settings.GetStoreSettings(ctx, tx, actor.Staff.Store.ID)
 	if err != nil {
 		return nil, err
@@ -96,6 +97,13 @@ func (s *OperationalService) authorizeAmount(ctx context.Context, tx *sqlx.Tx, a
 		if owner == "" && actor.Staff.Role == domain.RoleOwner {
 			owner = pin
 		}
+		if owner == "" && approval.ID != nil {
+			ownerID, err := consumeApproval(ctx, tx, actor, approval, amount, s.nowFunc().UTC())
+			if err != nil {
+				return nil, err
+			}
+			return &ownerID, nil
+		}
 		if owner == "" {
 			return nil, ErrOwnerPINRequired
 		}
@@ -112,9 +120,10 @@ func (s *OperationalService) authorizeAmount(ctx context.Context, tx *sqlx.Tx, a
 }
 
 type VoidOrderInput struct {
-	Reason   string  `json:"reason"`
-	PIN      string  `json:"pin"`
-	OwnerPIN *string `json:"owner_pin"`
+	Reason     string     `json:"reason"`
+	PIN        string     `json:"pin"`
+	OwnerPIN   *string    `json:"owner_pin"`
+	ApprovalID *uuid.UUID `json:"approval_id"`
 }
 
 type VoidOrderResult struct {
@@ -171,7 +180,8 @@ func (s *OperationalService) VoidOrder(
 			return ErrOrderHasPayments
 		}
 
-		ownerOverrideID, err := s.authorizeAmount(ctx, tx, actor, order.TotalAmount, in.PIN, in.OwnerPIN, false)
+		claim := &approvalClaim{ID: in.ApprovalID, Action: ApprovalVoid, Ref: order.ID}
+		ownerOverrideID, err := s.authorizeAmount(ctx, tx, actor, order.TotalAmount, in.PIN, in.OwnerPIN, false, claim)
 		if err != nil {
 			return err
 		}
@@ -232,6 +242,7 @@ func (s *OperationalService) VoidOrder(
 			"order_id":          order.ID,
 			"total_amount":      order.TotalAmount,
 			"owner_override_by": ownerOverrideID,
+			"approval_id":       claim.usedID(),
 			"stock_before":      previousStock,
 			"stock_after":       order.StockStatus,
 			"wasted_lines":      wasted,
@@ -262,9 +273,10 @@ func (s *OperationalService) VoidOrder(
 }
 
 type RefundPaymentInput struct {
-	Reason   string  `json:"reason"`
-	PIN      string  `json:"pin"`
-	OwnerPIN *string `json:"owner_pin"`
+	Reason     string     `json:"reason"`
+	PIN        string     `json:"pin"`
+	OwnerPIN   *string    `json:"owner_pin"`
+	ApprovalID *uuid.UUID `json:"approval_id"`
 	// RestoreStock must be sent explicitly: true returns the goods to stock, false records them as waste.
 	RestoreStock *bool `json:"restore_stock"`
 	// RefundMethod (RF1-c): "cash" from the actor's open drawer (default) or "bank_transfer" made by the
@@ -366,7 +378,8 @@ func (s *OperationalService) RefundPayment(
 		if err != nil {
 			return err
 		}
-		ownerOverrideID, err := s.authorizeAmount(ctx, tx, actor, payment.Amount, in.PIN, in.OwnerPIN, ownerWindow)
+		claim := &approvalClaim{ID: in.ApprovalID, Action: ApprovalRefund, Ref: payment.ID}
+		ownerOverrideID, err := s.authorizeAmount(ctx, tx, actor, payment.Amount, in.PIN, in.OwnerPIN, ownerWindow, claim)
 		if err != nil {
 			return err
 		}
@@ -506,6 +519,7 @@ func (s *OperationalService) RefundPayment(
 			"wasted_lines":      wastedLines,
 			"stock_after":       order.StockStatus,
 			"owner_override_by": ownerOverrideID,
+			"approval_id":       claim.usedID(),
 		})
 		if err := postgres.InsertAuditLog(ctx, tx, &domain.AuditLog{
 			StoreID:     storeID,
@@ -594,9 +608,10 @@ func (r *paymentRefund) insert(ctx context.Context, tx *sqlx.Tx) error {
 }
 
 type StockOverrideInput struct {
-	NewQuantity int    `json:"new_quantity"`
-	Reason      string `json:"reason"`
-	OwnerPIN    string `json:"owner_pin"`
+	NewQuantity int        `json:"new_quantity"`
+	Reason      string     `json:"reason"`
+	OwnerPIN    string     `json:"owner_pin"`
+	ApprovalID  *uuid.UUID `json:"approval_id"`
 	// EnableTracking must be true to start tracking a product that is not tracked yet.
 	EnableTracking bool `json:"enable_tracking"`
 }
@@ -632,16 +647,24 @@ func (s *OperationalService) OverrideStock(
 		return nil, &ValidationError{Fields: map[string]string{"reason": "alasan penyesuaian stok (opname/override) wajib diisi"}}
 	}
 	ownerPIN := strings.TrimSpace(in.OwnerPIN)
-	if ownerPIN == "" {
-		return nil, &ValidationError{Fields: map[string]string{"owner_pin": "PIN Owner wajib diisi untuk penyesuaian stok"}}
+	if ownerPIN == "" && in.ApprovalID == nil {
+		return nil, &ValidationError{Fields: map[string]string{"owner_pin": "PIN Owner atau approval_id wajib diisi untuk penyesuaian stok"}}
 	}
 
 	var result *StockOverrideResult
 	err := s.pins.withPINTx(ctx, actor.Staff.Store.ID, func(tx *sqlx.Tx) error {
 		storeID := actor.Staff.Store.ID
 
-		// Verify Owner PIN unconditionally (Decision O4)
-		verifiedOwnerID, err := s.pins.verifyOwner(ctx, tx, actor, ownerPIN)
+		// Owner PIN or a remote approval, unconditionally (Decision O4, ADR-007)
+		qty := in.NewQuantity
+		claim := &approvalClaim{ID: in.ApprovalID, Action: ApprovalStockOverride, Ref: productID, Params: approvalParams{NewQuantity: &qty}}
+		var verifiedOwnerID uuid.UUID
+		var err error
+		if ownerPIN != "" {
+			verifiedOwnerID, err = s.pins.verifyOwner(ctx, tx, actor, ownerPIN)
+		} else {
+			verifiedOwnerID, err = consumeApproval(ctx, tx, actor, claim, int64(in.NewQuantity), s.nowFunc().UTC())
+		}
 		if err != nil {
 			return err
 		}
@@ -689,6 +712,7 @@ func (s *OperationalService) OverrideStock(
 			"new_quantity":      in.NewQuantity,
 			"delta":             delta,
 			"owner_verified_by": verifiedOwnerID,
+			"approval_id":       claim.usedID(),
 			"tracking_enabled":  !product.TrackStock,
 		})
 		if err := postgres.InsertAuditLog(ctx, tx, &domain.AuditLog{

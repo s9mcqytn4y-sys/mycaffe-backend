@@ -136,6 +136,8 @@ func main() {
 	var kdsHandler *handler.KDSHandler
 	var receiptHandler *handler.ReceiptHandler
 	var reportHandler *handler.ReportHandler
+	var orderReadHandler *handler.OrderReadHandler
+	var approvalHandler *handler.ApprovalHandler
 	var mediaHandler *handler.MediaHandler
 	if db != nil {
 		emailService := newEmailService(cfg, db, workerCtx)
@@ -161,6 +163,7 @@ func main() {
 		operationalService := service.NewOperationalService(db, orderRepo, paymentRepo, postgres.NewShiftRepository(), postgres.NewAuthRepository(), postgres.NewSettingsRepository())
 		operationalService.SetPINPolicy(authPolicy, emailService)
 		posHandler.SetOperational(operationalService)
+		approvalHandler = handler.NewApprovalHandler(service.NewApprovalService(db, operationalService))
 		catalogHandler = handler.NewCatalogHandler(service.NewCatalogService(db))
 		shiftService := service.NewShiftService(db)
 		shiftService.SetPINPolicy(authPolicy, emailService)
@@ -171,6 +174,7 @@ func main() {
 		kdsHandler = handler.NewKDSHandler(service.NewKDSService(db))
 		receiptHandler = handler.NewReceiptHandler(service.NewReceiptService(db, cfg.AppPublicURL))
 		reportHandler = handler.NewReportHandler(service.NewReportService(db))
+		orderReadHandler = handler.NewOrderReadHandler(service.NewOrderReadService(db))
 		mediaStore, err := storage.NewR2(storage.R2Config{AccountID: cfg.R2AccountID, AccessKeyID: cfg.R2AccessKeyID,
 			SecretAccessKey: cfg.R2SecretAccessKey, Bucket: cfg.R2BucketName, PublicURL: cfg.R2PublicURL})
 		if err != nil {
@@ -238,11 +242,19 @@ func main() {
 			pos.POST("/tabs/:id/reopen", authHandler.RequirePermission(rbac.TabManage), tabHandler.ReopenTab)
 
 			// POS Operational: Void, Refund & Stock Override (Iteration 4d)
+			pos.POST("/approvals", authHandler.RequireStaff(), approvalHandler.Create)
+			pos.GET("/approvals/:id", authHandler.RequireStaff(), approvalHandler.Get)
+			approvals := v1.Group("/approvals", authHandler.RequirePermission(rbac.ApprovalDecide))
+			approvals.GET("", approvalHandler.ListPending)
+			approvals.POST("/:id/approve", approvalHandler.Approve)
+			approvals.POST("/:id/reject", approvalHandler.Reject)
 			pos.POST("/orders/:id/void", authHandler.RequirePermission(rbac.OrderVoid), posHandler.VoidOrder)
 			pos.POST("/orders/:id/payments/:payment_id/refund", authHandler.RequirePermission(rbac.PaymentRefund), posHandler.RefundPayment)
 			pos.POST("/products/:id/stock-override", authHandler.RequirePermission(rbac.StockOverride), posHandler.OverrideStock)
 
 			// Receipts (B1, decision R1): snapshot-only JSON or ESC/POS, 90-day digital link.
+			pos.GET("/orders", authHandler.RequirePermission(rbac.OrderReadStore), orderReadHandler.List)
+			pos.GET("/orders/:id", authHandler.RequirePermission(rbac.OrderReadStore), orderReadHandler.Get)
 			pos.GET("/orders/:id/receipt", authHandler.RequirePermission(rbac.OrderReadStore), receiptHandler.GetReceipt)
 			pos.POST("/orders/:id/receipt-link", authHandler.RequirePermission(rbac.OrderReadStore), receiptHandler.IssueLink)
 			v1.GET("/public/receipts/:token", receiptHandler.PublicReceipt)

@@ -68,6 +68,9 @@ func staffChannels(actor *AuthenticatedStaff) []string {
 	if actor.Can(rbac.KDSKitchenRead) {
 		out = append(out, realtime.ChannelKDSKitchen)
 	}
+	if actor.Can(rbac.ApprovalDecide) {
+		out = append(out, realtime.ChannelOwner)
+	}
 	return out
 }
 
@@ -241,6 +244,13 @@ func (r outboxRow) messages() []*realtime.EventMessage {
 	staff := []string{realtime.ChannelPOS}
 	if kdsEvents[r.EventType] || strings.HasPrefix(r.EventType, "kds.") {
 		staff = append(staff, realtime.ChannelKDSBar, realtime.ChannelKDSKitchen)
+	}
+	// ADR-007: a new request goes to the owners only; the decision also reaches the waiting cashier.
+	switch r.EventType {
+	case "approval.requested":
+		staff = []string{realtime.ChannelOwner}
+	case "approval.decided":
+		staff = append(staff, realtime.ChannelOwner)
 	}
 	out := []*realtime.EventMessage{{Seq: r.StoreSeq, Type: r.EventType, StoreID: store, Payload: r.Payload, Channels: staff}}
 	if r.GuestSessionID != nil && (strings.HasPrefix(r.EventType, "order.") || strings.HasPrefix(r.EventType, "payment.")) {

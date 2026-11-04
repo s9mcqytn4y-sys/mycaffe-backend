@@ -66,7 +66,7 @@ fi
 echo "[BACKUP] Authenticated GPG encryption completed. File size: ${FILESIZE} bytes."
 
 # Retention tiers: every run lands in hourly/; the first successful run of a UTC day / month is also
-# copied to daily/ and monthly/. R2 lifecycle rules expire each prefix (docs/setup/backup-and-restore.md).
+# copied to daily/ and monthly/. R2 lifecycle rules expire each prefix (docs/Setup/BackupAndRestore.md).
 BASE="s3://${R2_BACKUP_BUCKET}/${R2_BACKUP_PREFIX}"
 NAME="$(basename "${BACKUP_FILE}")"
 s3() { aws --endpoint-url "${R2_ENDPOINT}" s3 "$@"; }

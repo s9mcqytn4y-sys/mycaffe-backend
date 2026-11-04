@@ -194,7 +194,7 @@ services:
       - mycaffe-edge
     entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot --quiet; sleep 12h & wait $${!}; done;'"
 
-  # Metrics shipper (decision IN3, docs/setup/monitoring.md): API + host metrics to Grafana Cloud.
+  # Metrics shipper (decision IN3, docs/Setup/Monitoring.md): API + host metrics to Grafana Cloud.
   # Host paths are read-only; no docker.sock.
   alloy:
     image: grafana/alloy:v1.21.2

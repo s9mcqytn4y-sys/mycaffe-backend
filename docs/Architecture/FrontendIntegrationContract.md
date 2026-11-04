@@ -36,6 +36,8 @@ boleh dirender**, dan **celah yang harus ditutup backend**.
 
 ### POS kasir
 
+- **Daftar dan detail pesanan:** `GET /pos/orders` (filter `status`, `payment_status`, `billing_mode`, `from`/`to`, `shift_id`, `table_id`, `q`; paginasi `limit` + `after`) dan `GET /pos/orders/:id`. Tombol aksi mengikuti `allowed_actions`.
+
 - **Katalog:** `GET /pos/catalog` (ETag).
 - **Pesanan:** `POST /pos/orders/quote`, `POST /pos/orders`, `POST /pos/orders/:id/payments`.
 - **Tab dan meja:**
@@ -116,8 +118,8 @@ yang datang terlambat tidak menimpa `paid`.
 
 | # | Celah | Dampak ke frontend | Prioritas |
 |---|-------|--------------------|-----------|
-| G-1 | Tidak ada `GET /pos/orders` (daftar, filter status/tanggal/shift, paginasi) dan `GET /pos/orders/:id` | POS tidak bisa menampilkan riwayat, cetak ulang, void, atau refund dari daftar | **Wajib sebelum demo** |
-| G-2 | Tidak ada daftar tab terbuka | Kasir tidak bisa memilih tab tanpa id | Wajib sebelum demo |
+| G-1 | ~~Tidak ada daftar dan detail pesanan~~ | **Implemented & Tested (v0.7 PR 2):** `GET /pos/orders` (filter, cursor `after`) dan `GET /pos/orders/:id` (`allowed_actions`) | Selesai |
+| G-2 | ~~Tidak ada daftar tab terbuka~~ | **Implemented & Tested:** `GET /pos/orders?billing_mode=open_tab&status=open`; tab yang sudah ditutup dan menunggu bayar memakai `status=pending_payment` | Selesai |
 | G-3 | Tidak ada endpoint layar antrean TV | Modul "Queue Display" tidak bisa dibangun | Wajib bila TV ikut demo |
 | G-4 | Tidak ada `GET /audit-logs` dan `PATCH /staff/:id` (nonaktif/ganti peran) | Backoffice tidak lengkap | Sebelum go-live |
 | G-5 | Remote approval owner (P1-04) | Persetujuan masih memakai `owner_pin` di layar kasir | Sebelum go-live |

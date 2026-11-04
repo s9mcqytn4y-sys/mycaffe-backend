@@ -217,6 +217,8 @@ type StoreSettings struct {
 	OutletDailyExpenseLimit int64 `json:"outlet_daily_expense_limit" db:"outlet_daily_expense_limit"`
 	DefaultOpeningFloat     int64 `json:"default_opening_float" db:"default_opening_float"`
 	CashierSeesExpectedCash bool  `json:"cashier_sees_expected_cash" db:"cashier_sees_expected_cash"`
+	// GatewayPartialRefunds allows partial Midtrans refunds once proven in the sandbox (RF1-b).
+	GatewayPartialRefunds bool `json:"gateway_partial_refunds" db:"gateway_partial_refunds"`
 }
 
 // DefaultStoreSettings mirrors the column defaults of migration 000007.

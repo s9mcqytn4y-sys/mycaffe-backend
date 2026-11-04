@@ -332,6 +332,10 @@ func (h *POSHandler) RefundPayment(c *gin.Context) {
 		writeOperationalError(c, err)
 		return
 	}
+	if res.RefundStatus != "" {
+		c.JSON(http.StatusAccepted, res) // gateway refund waiting for bank confirmation (RF1-f)
+		return
+	}
 	c.JSON(http.StatusOK, res)
 }
 
@@ -368,6 +372,14 @@ func writeOperationalError(c *gin.Context, err error) {
 			"error":  "Periksa kembali isian yang ditandai.",
 			"fields": validation.Fields,
 		})
+	case errors.Is(err, service.ErrGatewayRefundUnsupported):
+		authError(c, http.StatusConflict, "GATEWAY_REFUND_UNSUPPORTED", "Pembayaran ini tidak bisa direfund lewat penyedia pembayaran. Gunakan refund tunai, kas outlet, atau transfer.")
+	case errors.Is(err, service.ErrGatewayPartialDisabled):
+		authError(c, http.StatusConflict, "GATEWAY_PARTIAL_REFUND_DISABLED", "Refund sebagian lewat penyedia pembayaran belum diaktifkan. Gunakan refund manual.")
+	case errors.Is(err, service.ErrGatewayRefundPending):
+		authError(c, http.StatusConflict, "GATEWAY_REFUND_PENDING", "Refund lewat penyedia pembayaran masih menunggu konfirmasi bank.")
+	case errors.Is(err, service.ErrGatewayRefundDenied):
+		authError(c, http.StatusConflict, "GATEWAY_REFUND_DENIED", "Bank menolak refund ini. Gunakan refund tunai, kas outlet, atau transfer.")
 	case errors.Is(err, service.ErrRefundExceedsPayment):
 		authError(c, http.StatusConflict, "REFUND_EXCEEDS_PAYMENT", "Nilai item yang direfund melebihi sisa pembayaran ini. Refund dari pembayaran lain.")
 	case errors.Is(err, service.ErrRefundLinesNotAllowed):

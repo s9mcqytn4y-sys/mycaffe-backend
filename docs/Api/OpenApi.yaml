@@ -2601,7 +2601,7 @@ paths:
                   description: true returns the goods to stock; false records them as waste. No default.
                 refund_method:
                   type: string
-                  enum: [cash, outlet_cash, bank_transfer]
+                  enum: [cash, outlet_cash, bank_transfer, gateway]
                   default: cash
                   description: outlet_cash pays from the outlet cash fund (V13); 409 OUTLET_INSUFFICIENT_FUNDS when it is too low.
                 lines:

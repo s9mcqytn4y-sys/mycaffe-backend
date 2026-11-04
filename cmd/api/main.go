@@ -167,6 +167,7 @@ func main() {
 		posHandler = handler.NewPOSHandler(orderService, paymentService, service.NewSettingsService(db))
 		operationalService := service.NewOperationalService(db, orderRepo, paymentRepo, postgres.NewShiftRepository(), postgres.NewAuthRepository(), postgres.NewSettingsRepository())
 		operationalService.SetPINPolicy(authPolicy, emailService)
+		operationalService.SetGateway(midtransClient) // RF1-a Direct Refund
 		posHandler.SetOperational(operationalService)
 		approvalHandler = handler.NewApprovalHandler(service.NewApprovalService(db, operationalService))
 		catalogHandler = handler.NewCatalogHandler(service.NewCatalogService(db))

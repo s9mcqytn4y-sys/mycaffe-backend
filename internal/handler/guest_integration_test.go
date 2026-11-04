@@ -38,6 +38,10 @@ func (qrisGateway) ChargeCoreAPI(_ context.Context, in midtrans.ChargeRequest) (
 	}, nil
 }
 
+func (qrisGateway) DirectRefund(context.Context, string, string, int64, string) (*coreapi.RefundResponse, error) {
+	return nil, errors.New("not used")
+}
+
 func (qrisGateway) CheckTransaction(context.Context, string) (*coreapi.TransactionStatusResponse, error) {
 	return nil, errors.New("not found")
 }

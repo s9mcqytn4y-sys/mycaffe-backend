@@ -29,6 +29,7 @@ const (
 	maxReplayEvents   = 500
 	relayBatchSize    = 100
 	relayPollInterval = 2 * time.Second
+	relayMaxAttempts  = 30 // ~1 minute of consecutive failures at the poll interval
 )
 
 var ErrInvalidWSTicket = errors.New("websocket ticket is invalid, used or expired")
@@ -308,36 +309,71 @@ func (s *RealtimeService) RelayOnce(ctx context.Context, hub Publisher) error {
 	if err := s.db.SelectContext(ctx, &stores, `SELECT store_id FROM list_stores_with_pending_outbox($1)`, relayBatchSize); err != nil {
 		return fmt.Errorf("failed to list stores with pending events: %w", err)
 	}
+	var errs []error // one failing store must not starve the others
 	for _, storeID := range stores {
-		err := database.WithTenantTx(ctx, s.db, storeID, func(tx *sqlx.Tx) error {
-			var rows []outboxRow
-			if err := tx.SelectContext(ctx, &rows, outboxSelect+`
+		if err := s.relayStore(ctx, hub, storeID); err != nil {
+			s.recordRelayFailure(ctx, storeID, err)
+			errs = append(errs, fmt.Errorf("relay store %s: %w", storeID, err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// relayStore publishes one store's pending events in sequence order and marks them processed.
+func (s *RealtimeService) relayStore(ctx context.Context, hub Publisher, storeID uuid.UUID) error {
+	return database.WithTenantTx(ctx, s.db, storeID, func(tx *sqlx.Tx) error {
+		var rows []outboxRow
+		if err := tx.SelectContext(ctx, &rows, outboxSelect+`
 				WHERE e.store_id = $1 AND e.processed_at IS NULL
 				ORDER BY e.store_seq LIMIT $2
 				FOR UPDATE OF e SKIP LOCKED`, storeID, relayBatchSize); err != nil {
-				return err
-			}
-			ids := make([]string, 0, len(rows))
-			for _, row := range rows {
-				for _, m := range row.messages() {
-					if err := hub.Publish(m); err != nil {
-						return err
-					}
-				}
-				ids = append(ids, row.ID.String())
-			}
-			if len(ids) == 0 {
-				return nil
-			}
-			_, err := tx.ExecContext(ctx, `UPDATE outbox_events SET processed_at = $3 WHERE store_id = $1 AND id = ANY($2::uuid[])`,
-				storeID, ids, s.nowFunc().UTC())
 			return err
-		})
-		if err != nil {
-			return fmt.Errorf("relay store %s: %w", storeID, err)
 		}
+		ids := make([]string, 0, len(rows))
+		for _, row := range rows {
+			for _, m := range row.messages() {
+				if err := hub.Publish(m); err != nil {
+					return err
+				}
+			}
+			ids = append(ids, row.ID.String())
+		}
+		if len(ids) == 0 {
+			return nil
+		}
+		_, err := tx.ExecContext(ctx, `UPDATE outbox_events SET processed_at = $3 WHERE store_id = $1 AND id = ANY($2::uuid[])`,
+			storeID, ids, s.nowFunc().UTC())
+		return err
+	})
+}
+
+// recordRelayFailure charges the failure to the store's oldest pending event. After relayMaxAttempts
+// that event is dead-lettered (dead_at + processed_at) so later events flow again (P0-08); it stays
+// in outbox_events, so a client that reconnects still replays it by seq.
+func (s *RealtimeService) recordRelayFailure(ctx context.Context, storeID uuid.UUID, cause error) {
+	msg := cause.Error()
+	if len(msg) > 500 {
+		msg = msg[:500]
 	}
-	return nil
+	var dead bool
+	err := database.WithTenantTx(ctx, s.db, storeID, func(tx *sqlx.Tx) error {
+		err := tx.GetContext(ctx, &dead, `
+			UPDATE outbox_events SET retry_count = retry_count + 1, last_error = $2,
+				dead_at = CASE WHEN retry_count + 1 >= $3 THEN $4::timestamptz END,
+				processed_at = CASE WHEN retry_count + 1 >= $3 THEN $4::timestamptz END
+			WHERE id = (SELECT id FROM outbox_events WHERE store_id = $1 AND processed_at IS NULL ORDER BY store_seq LIMIT 1)
+			RETURNING dead_at IS NOT NULL`, storeID, msg, relayMaxAttempts, s.nowFunc().UTC())
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		return err
+	})
+	switch {
+	case err != nil:
+		log.Printf("[RELAY] store %s: could not record failure: %v", storeID, err)
+	case dead:
+		log.Printf("[RELAY] store %s: event dead-lettered after %d attempts: %s", storeID, relayMaxAttempts, msg)
+	}
 }
 
 // RunRelay wakes on LISTEN outbox (fired by the sequence trigger) and polls every 2 s as a fallback.

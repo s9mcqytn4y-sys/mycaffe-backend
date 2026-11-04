@@ -34,7 +34,7 @@ gap not yet confirmed).
 | P1-01 | RF1 non-cash refunds | In progress | RF1-c, RF1-e done (B4, migration 000023); RF1-a/b/d/f after sandbox test |
 | P1-02 | Daily sales report | Done | PR B2, migration 000021; calendar business day until PD5 (04:00 cutoff) is approved |
 | P1-03 | Owner notifications (void/refund/cash variance/lockout) | Planned | Lockout warning starts in PR A F1 |
-| P1-04 | Remote approval (single-use `approval_requests`) | Planned | — |
+| P1-04 | Remote approval (single-use `approval_requests`) | Done | v0.7 PR 3, ADR-007, migration 000024; Web Push to a closed app still open |
 | P1-05 | Emergency staff revoke | To verify | `staff_admin.go` deactivates staff; WebSocket disconnect added in PR A |
 | P1-06 | Catalog price-change audit | To verify | Modifier price changes are audited (`catalog_modifier.go`); confirm variant prices |
 | P1-07 | ADR-006 stock ledger | **Frozen** | Inventory |

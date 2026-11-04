@@ -1,6 +1,6 @@
 # ADR-007: Remote Owner Approval from the Owner's Phone
 
-- **Status**: Proposed (2026-11-04). Implementation starts only after owner approval.
+- **Status**: Accepted (owner, 2026-11-04). **Implemented & Tested** in v0.7 PR 3 (migration 000024, `TestIntegrationRemoteApproval`).
 - **Deciders**: Product owner, backend
 - **Amends**: ADR-003. Adds one permission (`approval.decide`, owner only) and one WebSocket channel
   (`owner`). Roles do not change.

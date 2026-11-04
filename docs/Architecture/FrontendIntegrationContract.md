@@ -30,7 +30,7 @@ boleh dirender**, dan **celah yang harus ditutup backend**.
 | Logout | `POST /api/v1/auth/staff/logout` | |
 | Sesi tamu | `POST /api/v1/public/qr/:token/session` | Dari QR meja; cookie `__Secure-mc_guest` (HttpOnly, path `/api/v1/public`) untuk `/public/guest/*` |
 | Tiket WS | `POST /api/v1/pos/ws-ticket` (staf), `POST /api/v1/public/guest/ws-ticket` (tamu) | Tiket sekali pakai, lalu `GET /ws?ticket=…` |
-| WebSocket | `GET /ws` | Kanal: `pos`, `kds.bar`, `kds.kitchen`, `guest.<session>`. At-least-once: simpan `seq` tertinggi, abaikan event dengan `seq` ≤ nilai itu, kirim `last_seq` saat reconnect, dan muat ulang lewat REST saat menerima `resync_required` (ApiConventions §6). Batas koneksi menghasilkan `429 WS_CONNECTION_LIMIT`. |
+| WebSocket | `GET /ws` | Kanal: `pos`, `kds.bar`, `kds.kitchen`, `owner` (izin `approval.decide`), `guest.<session>`. At-least-once: simpan `seq` tertinggi, abaikan event dengan `seq` ≤ nilai itu, kirim `last_seq` saat reconnect, dan muat ulang lewat REST saat menerima `resync_required` (ApiConventions §6). Batas koneksi menghasilkan `429 WS_CONNECTION_LIMIT`. |
 
 ## 3. Endpoint per aplikasi
 
@@ -122,7 +122,7 @@ yang datang terlambat tidak menimpa `paid`.
 | G-2 | ~~Tidak ada daftar tab terbuka~~ | **Implemented & Tested:** `GET /pos/orders?billing_mode=open_tab&status=open`; tab yang sudah ditutup dan menunggu bayar memakai `status=pending_payment` | Selesai |
 | G-3 | Tidak ada endpoint layar antrean TV | Modul "Queue Display" tidak bisa dibangun | Wajib bila TV ikut demo |
 | G-4 | Tidak ada `GET /audit-logs` dan `PATCH /staff/:id` (nonaktif/ganti peran) | Backoffice tidak lengkap | Sebelum go-live |
-| G-5 | Remote approval owner (P1-04) | Persetujuan masih memakai `owner_pin` di layar kasir | Sebelum go-live |
+| G-5 | ~~Remote approval owner (P1-04)~~ | **Implemented & Tested (v0.7 PR 3, [ADR-007](Adr007RemoteOwnerApproval.md)):** kasir `POST /pos/approvals`, owner `GET /approvals` lalu `POST /approvals/:id/approve` dengan PIN, kasir mengirim `approval_id` sebagai pengganti `owner_pin` | Selesai |
 | G-6 | Tidak ada perintah buka laci di ESC/POS | Laci dibuka manual | Kecil |
 | G-7 | Branding toko (logo, warna, footer struk) belum ada di settings | White-label belum bisa diatur | Sebelum klien kedua |
 

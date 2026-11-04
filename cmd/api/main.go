@@ -137,6 +137,7 @@ func main() {
 	var receiptHandler *handler.ReceiptHandler
 	var reportHandler *handler.ReportHandler
 	var orderReadHandler *handler.OrderReadHandler
+	var approvalHandler *handler.ApprovalHandler
 	var mediaHandler *handler.MediaHandler
 	if db != nil {
 		emailService := newEmailService(cfg, db, workerCtx)
@@ -162,6 +163,7 @@ func main() {
 		operationalService := service.NewOperationalService(db, orderRepo, paymentRepo, postgres.NewShiftRepository(), postgres.NewAuthRepository(), postgres.NewSettingsRepository())
 		operationalService.SetPINPolicy(authPolicy, emailService)
 		posHandler.SetOperational(operationalService)
+		approvalHandler = handler.NewApprovalHandler(service.NewApprovalService(db, operationalService))
 		catalogHandler = handler.NewCatalogHandler(service.NewCatalogService(db))
 		shiftService := service.NewShiftService(db)
 		shiftService.SetPINPolicy(authPolicy, emailService)
@@ -240,6 +242,12 @@ func main() {
 			pos.POST("/tabs/:id/reopen", authHandler.RequirePermission(rbac.TabManage), tabHandler.ReopenTab)
 
 			// POS Operational: Void, Refund & Stock Override (Iteration 4d)
+			pos.POST("/approvals", authHandler.RequireStaff(), approvalHandler.Create)
+			pos.GET("/approvals/:id", authHandler.RequireStaff(), approvalHandler.Get)
+			approvals := v1.Group("/approvals", authHandler.RequirePermission(rbac.ApprovalDecide))
+			approvals.GET("", approvalHandler.ListPending)
+			approvals.POST("/:id/approve", approvalHandler.Approve)
+			approvals.POST("/:id/reject", approvalHandler.Reject)
 			pos.POST("/orders/:id/void", authHandler.RequirePermission(rbac.OrderVoid), posHandler.VoidOrder)
 			pos.POST("/orders/:id/payments/:payment_id/refund", authHandler.RequirePermission(rbac.PaymentRefund), posHandler.RefundPayment)
 			pos.POST("/products/:id/stock-override", authHandler.RequirePermission(rbac.StockOverride), posHandler.OverrideStock)

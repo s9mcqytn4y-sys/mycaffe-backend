@@ -35,6 +35,8 @@ tags:
     description: QR guest sessions, pay-first guest orders and the public order tracker (iteration 5b)
   - name: Realtime
     description: Outbox relay over WebSocket with single-use tickets, per-store sequence and replay (iteration 5c)
+  - name: Approvals
+    description: Remote owner approval from the phone for void, refund, stock override and shift variance (ADR-007)
   - name: Receipts
     description: Snapshot-only sale, refund and void receipts (JSON or ESC/POS) and 90-day digital receipt links (B1, decision R1)
   - name: Reports
@@ -1720,6 +1722,10 @@ paths:
                 owner_pin:
                   type: string
                   example: "482913"
+                approval_id:
+                  type: string
+                  format: uuid
+                  description: Approved remote request (ADR-007) used instead of owner_pin; consumed once. 409 APPROVAL_INVALID when it does not match.
                 notes:
                   type: string
       responses:
@@ -2063,6 +2069,238 @@ paths:
         "409":
           description: Tab has already settled payments or pending payment attempts
 
+  /api/v1/pos/approvals:
+    post:
+      tags: [Approvals]
+      operationId: createApproval
+      summary: Ask the owner's phone to approve one void, refund, stock override or shift variance (ADR-007)
+      x-implementation-status: implemented
+      description: |
+        Needs the permission of the underlying action; owners use their PIN directly and get 403. The
+        server computes amount and label from the reference: order total (void), payment amount
+        (refund), new quantity (stock override), or signed cash variance from counted_cash (shift).
+        The owner has 2 minutes to decide; after approval the requester has 2 minutes to use it.
+        Emits approval.requested on the owner WebSocket channel.
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateApprovalRequest"
+      responses:
+        "201":
+          description: Approval request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Approval"
+        "403":
+          description: FORBIDDEN (missing the action permission, or the caller is an owner)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: NOT_FOUND (reference not in the store, already voided, or not refundable/open)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: APPROVAL_NOT_NEEDED (within the cashier own limit)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: VALIDATION_FAILED (action, reference_id, reason, params.new_quantity, params.counted_cash)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationErrorResponse"
+        "429":
+          description: APPROVAL_LIMIT (3 pending requests per cashier)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/pos/approvals/{id}:
+    get:
+      tags: [Approvals]
+      operationId: getApproval
+      summary: One approval request, for its requester or an owner (polling fallback for WebSocket)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Approval request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Approval"
+        "404":
+          description: NOT_FOUND (unknown, or neither requester nor owner)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/approvals:
+    get:
+      tags: [Approvals]
+      operationId: listPendingApprovals
+      summary: Pending, unexpired approval requests for the owner's phone, newest first (approval.decide)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending]
+            default: pending
+      responses:
+        "200":
+          description: Pending requests (at most 50)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Approval"
+        "403":
+          description: FORBIDDEN (missing approval.decide)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/approvals/{id}/approve:
+    post:
+      tags: [Approvals]
+      operationId: approveApproval
+      summary: Approve with the deciding owner's own PIN (DM8, HF5 limits apply)
+      x-implementation-status: implemented
+      description: Emits approval.decided on the owner and pos channels.
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pin]
+              properties:
+                pin:
+                  type: string
+                  example: "482913"
+      responses:
+        "200":
+          description: Approval request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Approval"
+        "401":
+          description: INVALID_OWNER_PIN
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: FORBIDDEN / APPROVAL_SELF
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: NOT_FOUND
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: APPROVAL_NOT_PENDING / APPROVAL_EXPIRED
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: PIN_ATTEMPTS_EXCEEDED / OWNER_PIN_STORE_LIMIT
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/approvals/{id}/reject:
+    post:
+      tags: [Approvals]
+      operationId: rejectApproval
+      summary: Reject with an optional note shown to the cashier
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                note:
+                  type: string
+                  maxLength: 500
+      responses:
+        "200":
+          description: Approval request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Approval"
+        "403":
+          description: FORBIDDEN / APPROVAL_SELF
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: NOT_FOUND
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: APPROVAL_NOT_PENDING / APPROVAL_EXPIRED
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /api/v1/pos/orders/{id}/void:
     post:
       tags: [POS Operational]
@@ -2101,6 +2339,10 @@ paths:
                 owner_pin:
                   type: string
                   example: "482913"
+                approval_id:
+                  type: string
+                  format: uuid
+                  description: Approved remote request (ADR-007) used instead of owner_pin; consumed once. 409 APPROVAL_INVALID when it does not match.
       responses:
         "200":
           description: Order voided successfully
@@ -2177,6 +2419,10 @@ paths:
                 owner_pin:
                   type: string
                   example: "482913"
+                approval_id:
+                  type: string
+                  format: uuid
+                  description: Approved remote request (ADR-007) used instead of owner_pin; consumed once. 409 APPROVAL_INVALID when it does not match.
                 restore_stock:
                   type: boolean
                   description: true returns the goods to stock; false records them as waste. No default.
@@ -2265,6 +2511,10 @@ paths:
                 owner_pin:
                   type: string
                   example: "482913"
+                approval_id:
+                  type: string
+                  format: uuid
+                  description: Approved remote request (ADR-007) used instead of owner_pin; consumed once. 409 APPROVAL_INVALID when it does not match.
                 enable_tracking:
                   type: boolean
                   default: false
@@ -3856,6 +4106,36 @@ components:
           items:
             type: string
             enum: [pay, void, refund, print_receipt, add_round, close_tab, reopen_tab]
+    CreateApprovalRequest:
+      type: object
+      required: [action, reference_id, reason]
+      properties:
+        action: {type: string, enum: [void, refund, stock_override, shift_variance]}
+        reference_id: {type: string, format: uuid, description: "Order (void), payment (refund), product (stock_override) or shift (shift_variance)"}
+        params:
+          type: object
+          properties:
+            new_quantity: {type: integer, minimum: 0, description: Required for stock_override}
+            counted_cash: {type: integer, format: int64, minimum: 0, description: Required for shift_variance}
+        reason: {type: string}
+    Approval:
+      type: object
+      required: [id, action, reference_id, reference_label, amount, params, reason, status, requested_by_name, expires_at, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        action: {type: string, enum: [void, refund, stock_override, shift_variance]}
+        reference_id: {type: string, format: uuid}
+        reference_label: {type: string, description: "Order number, product name or drawer name"}
+        amount: {type: integer, format: int64, description: "Server-computed; signed for shift_variance"}
+        params: {type: object}
+        reason: {type: string}
+        status: {type: string, enum: [pending, approved, rejected, consumed, expired]}
+        requested_by_name: {type: string}
+        decided_by_name: {type: string}
+        decision_note: {type: string}
+        expires_at: {type: string, format: date-time, description: "Deadline to decide (pending) or to use (approved)"}
+        decided_at: {type: string, format: date-time}
+        created_at: {type: string, format: date-time}
     ValidationErrorResponse:
       type: object
       required: [code, error, fields]

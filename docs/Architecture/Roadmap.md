@@ -11,7 +11,7 @@ multi-tenant schema kept for future branches (owner decision M3). Audit tickets 
 **Owner direction (2026-11-03): large new features are frozen until go-live**: ADR-005 offline cash
 sync, inventory (C5), promotions/loyalty, delivery channels. Only the go-live plan below is in scope.
 
-**Schema (36 tables, 23 migrations):** receipt_tokens, media_uploads, payment_refunds (v0.6.0); stores, users, auth_sessions, account_tokens, email_outbox,
+**Schema (37 tables, 24 migrations):** approval_requests (v0.7); receipt_tokens, media_uploads, payment_refunds (v0.6.0); stores, users, auth_sessions, account_tokens, email_outbox,
 store_settings, audit_logs; categories, products, product_variants, modifier_groups, modifier_options,
 product_modifier_groups, option_modifier_groups; store_daily_sequences, orders, order_items,
 order_item_options, order_rounds, payment_splits, payment_split_items, payments,

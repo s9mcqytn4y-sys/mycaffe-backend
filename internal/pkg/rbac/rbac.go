@@ -45,6 +45,9 @@ const (
 
 	TableManage   Permission = "table.manage"
 	TableQRManage Permission = "table.qr.manage"
+
+	// ApprovalDecide approves or rejects a cashier's remote approval request (ADR-007), owner only.
+	ApprovalDecide Permission = "approval.decide"
 )
 
 // Options are per-store settings that widen a role (owner decision C3).
@@ -59,7 +62,7 @@ var all = []Permission{
 	ShiftOpen, ShiftClose, ShiftForceClose, CashMovementCreate, CashDrawerManage,
 	OrderVoid, PaymentRefund, OrderDiscountApply, StockOverride,
 	KDSBaristaRead, KDSBaristaUpdate, KDSKitchenRead, KDSKitchenUpdate,
-	AvailabilityToggleBeverage, AvailabilityToggleFood, TableManage, TableQRManage,
+	AvailabilityToggleBeverage, AvailabilityToggleFood, TableManage, TableQRManage, ApprovalDecide,
 }
 
 var cashierBase = []Permission{

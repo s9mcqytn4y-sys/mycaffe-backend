@@ -192,10 +192,7 @@ demo leak fixes L-1..L-3.
 
 ## Awaiting owner approval
 
-| Item | Needed for |
-|------|-----------|
-| API contract for G-1, G-2 (new endpoints) | v0.7 PR 1 |
-| Design and API contract for G-5 remote approval (`approval_requests`, WebSocket channel) | v0.7 PR 3 |
+None. The G-1/G-2 contract (PR #55) and ADR-007 (G-5) were approved on 2026-11-04.
 
 ## Resolved from existing sources (not re-asked)
 

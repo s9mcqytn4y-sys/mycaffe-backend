@@ -29,6 +29,7 @@ type StoreSettingsPatch struct {
 	OutletDailyExpenseLimit  *int64  `json:"outlet_daily_expense_limit"`
 	DefaultOpeningFloat      *int64  `json:"default_opening_float"`
 	CashierSeesExpectedCash  *bool   `json:"cashier_sees_expected_cash"`
+	GatewayPartialRefunds    *bool   `json:"gateway_partial_refunds"`
 }
 
 // SettingsService lets owners change operating policies without a developer (owner decision K3).
@@ -106,6 +107,9 @@ func (s *SettingsService) Update(ctx context.Context, actor *AuthenticatedStaff,
 		}
 		if patch.CashierSeesExpectedCash != nil {
 			after.CashierSeesExpectedCash = *patch.CashierSeesExpectedCash
+		}
+		if patch.GatewayPartialRefunds != nil {
+			after.GatewayPartialRefunds = *patch.GatewayPartialRefunds
 		}
 		if err := validateStoreSettings(after); err != nil {
 			return err

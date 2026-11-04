@@ -244,6 +244,9 @@ func (s *PaymentService) StartReconciliationWorker(
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			if err := s.ReconcileGatewayRefunds(ctx, olderThan); err != nil && !errors.Is(err, context.Canceled) {
+				log.Printf("[RECONCILIATION WORKER] gateway refunds: %v", err)
+			}
 			if err := s.RunReconciliationCycle(ctx, olderThan, batchLimit); err != nil {
 				if !errors.Is(err, context.Canceled) {
 					log.Printf("[RECONCILIATION WORKER] cycle error: %v", err)

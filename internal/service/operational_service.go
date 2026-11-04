@@ -36,6 +36,7 @@ type OperationalService struct {
 	shiftRepo   *postgres.ShiftRepository
 	settings    *postgres.SettingsRepository
 	pins        *pinGuard
+	gateway     GatewayClient // nil: refund_method gateway is unsupported
 	nowFunc     func() time.Time
 }
 
@@ -316,7 +317,9 @@ type RefundPaymentResult struct {
 	OpenDrawer    bool            `json:"open_drawer"`
 	StockRestored bool            `json:"stock_restored"`
 	Replay        bool            `json:"is_idempotent_replay,omitempty"`
-	Message       string          `json:"message"`
+	// RefundStatus is "pending" or "requested" for a gateway refund waiting for bank confirmation (RF1-f).
+	RefundStatus string `json:"refund_status,omitempty"`
+	Message      string `json:"message"`
 }
 
 // RefundPayment refunds one settled payment, wholly or by order lines (tax, service and discount follow
@@ -358,7 +361,7 @@ func (s *OperationalService) RefundPayment(
 	switch in.RefundMethod {
 	case "", RefundMethodCash:
 		in.RefundMethod = RefundMethodCash
-	case RefundMethodOutletCash:
+	case RefundMethodOutletCash, RefundMethodGateway:
 	case RefundMethodBankTransfer:
 		if bankName == "" || len(bankName) > 100 {
 			fields["bank_name"] = "nama bank wajib diisi (maks. 100 karakter)"
@@ -370,7 +373,7 @@ func (s *OperationalService) RefundPayment(
 			fields["transfer_reference"] = "nomor referensi transfer wajib diisi (maks. 100 karakter)"
 		}
 	default:
-		fields["refund_method"] = "harus cash, outlet_cash atau bank_transfer"
+		fields["refund_method"] = "harus cash, outlet_cash, bank_transfer atau gateway"
 	}
 	if len(fields) > 0 {
 		return nil, &ValidationError{Fields: fields}
@@ -382,6 +385,7 @@ func (s *OperationalService) RefundPayment(
 
 	storeID := actor.Staff.Store.ID
 	var result *RefundPaymentResult
+	var gatewayReq *gatewayRefundRequest
 	err := s.pins.withPINTx(ctx, storeID, func(tx *sqlx.Tx) error {
 		order, _, err := s.orderRepo.GetOrderByIDForUpdate(ctx, tx, storeID, orderID)
 		if err != nil {
@@ -408,6 +412,15 @@ func (s *OperationalService) RefundPayment(
 		}
 		if payment.Status == domain.PaymentStatusRefunded {
 			return ErrPaymentAlreadyRefunded
+		}
+		// A gateway refund waiting for the bank blocks every other refund of the payment (no double refund).
+		var gatewayOpen bool
+		if err := tx.GetContext(ctx, &gatewayOpen, `SELECT EXISTS (SELECT 1 FROM gateway_refunds
+			WHERE store_id = $1 AND payment_id = $2 AND status IN ('pending', 'requested'))`, storeID, payment.ID); err != nil {
+			return err
+		}
+		if gatewayOpen {
+			return ErrGatewayRefundPending
 		}
 		cancelTender := order.PaymentStatus == domain.OrderPaymentStatusPartiallyPaid && order.BillingMode != domain.BillingModeOpenTab
 		// Refunds start once the whole bill is settled; a half-paid pay-first bill can only hand a tender back.
@@ -450,6 +463,17 @@ func (s *OperationalService) RefundPayment(
 			return err
 		}
 
+		if in.RefundMethod == RefundMethodGateway {
+			gatewayReq, err = s.openGatewayRefundTx(ctx, tx, order, payment, amount, lineQty, allLinesRefunded, *in.RestoreStock,
+				cancelTender, reason, actor, ownerOverrideID, now)
+			if err != nil {
+				return err
+			}
+			result = &RefundPaymentResult{Payment: payment, Order: order, RefundAmount: amount, RefundStatus: "pending",
+				Message: "Permintaan refund dikirim ke penyedia pembayaran; menunggu konfirmasi bank."}
+			return nil
+		}
+
 		// RF1-c: any original method is refunded manually; the payment keeps its method and reference.
 		ledger := &paymentRefund{storeID: storeID, paymentID: payment.ID, orderID: order.ID, amount: amount,
 			method: in.RefundMethod, reason: reason, actorID: actor.Staff.UserID, approvedBy: ownerOverrideID, at: now}
@@ -484,137 +508,14 @@ func (s *OperationalService) RefundPayment(
 			}
 			ledger.cashMovementID = &movementID
 		}
-		refundID, err := ledger.insert(ctx, tx)
+		stockRestored, err := applyRefundTx(ctx, tx, s.orderRepo, &refundApplication{
+			order: order, payment: payment, amount: amount, lineQty: lineQty, splitMode: splitMode,
+			restoreStock: *in.RestoreStock, cancelTender: cancelTender, allLinesRefunded: allLinesRefunded,
+			ledger: ledger, actorID: actor.Staff.UserID, actorName: actor.Staff.FullName, reason: reason,
+			audit: map[string]any{"refund_method": in.RefundMethod, "owner_override_by": ownerOverrideID, "approval_id": claim.usedID()},
+		}, now)
 		if err != nil {
 			return err
-		}
-		for itemID, qty := range lineQty {
-			if _, err := tx.ExecContext(ctx, `INSERT INTO payment_refund_lines (store_id, refund_id, order_item_id, quantity) VALUES ($1, $2, $3, $4)`,
-				storeID, refundID, itemID, qty); err != nil {
-				return fmt.Errorf("failed to record refund lines: %w", err)
-			}
-		}
-
-		payment.RefundedAmount += amount
-		payment.Status = domain.PaymentStatusPartiallyRefunded
-		if payment.RefundedAmount == payment.Amount {
-			payment.Status = domain.PaymentStatusRefunded
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE payments SET status = $3, refunded_amount = $4, updated_at = $5 WHERE store_id = $1 AND id = $2`,
-			storeID, payment.ID, payment.Status, payment.RefundedAmount, now); err != nil {
-			return fmt.Errorf("failed to update refunded payment: %w", err)
-		}
-		payment.UpdatedAt = now
-
-		stockRestored := false
-		var wastedLines map[uuid.UUID]int
-		if cancelTender {
-			if payment.SplitID == nil {
-				return ErrOrderNotRefundable
-			}
-			// The tender is handed back: the split and the bill owe it again; stock was never committed.
-			// The CTE update is not visible to the outer SELECT, so the handed-back amount is subtracted there.
-			if err := tx.GetContext(ctx, &order.PaidAmount, `
-				WITH s AS (UPDATE payment_splits SET paid_amount = paid_amount - $3,
-					status = CASE WHEN paid_amount - $3 = 0 THEN 'unpaid' ELSE 'partially_paid' END, updated_at = $4
-					WHERE store_id = $1 AND id = $2 RETURNING order_id)
-				SELECT COALESCE(SUM(paid_amount), 0) - $3 FROM payment_splits WHERE store_id = $1 AND order_id = (SELECT order_id FROM s)`,
-				storeID, *payment.SplitID, amount, now); err != nil {
-				return fmt.Errorf("failed to hand the tender back: %w", err)
-			}
-			order.PaymentStatus = domain.OrderPaymentStatusPartiallyPaid
-			if order.PaidAmount == 0 {
-				order.PaymentStatus = domain.OrderPaymentStatusUnpaid
-			}
-		} else {
-			if payment.Status == domain.PaymentStatusRefunded && payment.SplitID != nil {
-				// paid_amount stays gross (like orders.paid_amount); the refunded value lives on the payment
-				// and orders.refunded_amount.
-				if _, err := tx.ExecContext(ctx, `UPDATE payment_splits SET status = 'refunded', updated_at = $3 WHERE store_id = $1 AND id = $2`,
-					storeID, *payment.SplitID, now); err != nil {
-					return fmt.Errorf("failed to mark split refunded: %w", err)
-				}
-			}
-			order.RefundedAmount += amount
-			fullyRefunded := order.RefundedAmount >= order.PaidAmount
-			order.PaymentStatus = domain.OrderPaymentStatusPartiallyRefunded
-			if fullyRefunded {
-				order.PaymentStatus = domain.OrderPaymentStatusRefunded
-			}
-			switch {
-			case len(lineQty) > 0 || splitMode == domain.SplitModeByItem:
-				var splitItems []struct {
-					OrderItemID uuid.UUID `db:"order_item_id"`
-					Quantity    int       `db:"quantity"`
-				}
-				if splitMode == domain.SplitModeByItem && payment.Status == domain.PaymentStatusRefunded {
-					if err := tx.SelectContext(ctx, &splitItems, `SELECT order_item_id, quantity FROM payment_split_items WHERE store_id = $1 AND split_id = $2`,
-						storeID, *payment.SplitID); err != nil {
-						return fmt.Errorf("failed to load split items for restock: %w", err)
-					}
-				}
-				for _, l := range splitItems {
-					lineQty[l.OrderItemID] += l.Quantity
-				}
-				if *in.RestoreStock {
-					products, options := computeItemStockQuantities(order, lineQty)
-					if err := restoreStockTx(ctx, tx, s.orderRepo, storeID, products, options); err != nil {
-						return err
-					}
-					stockRestored = len(lineQty) > 0
-				} else {
-					wastedLines = lineQty
-				}
-				// Every line has now been refunded and restocked or wasted (review follow-up F3).
-				if (fullyRefunded || allLinesRefunded) && (order.StockStatus == domain.OrderStockStatusReserved || order.StockStatus == domain.OrderStockStatusCommitted) {
-					order.StockStatus = domain.OrderStockStatusReleased
-				}
-			case fullyRefunded && *in.RestoreStock:
-				before := order.StockStatus
-				if err := releaseOrderStockTx(ctx, tx, s.orderRepo, order); err != nil {
-					return err
-				}
-				stockRestored = order.StockStatus != before
-			case fullyRefunded:
-				wastedLines = make(map[uuid.UUID]int, len(order.Items))
-				for _, item := range order.Items {
-					wastedLines[item.ID] += item.Quantity
-				}
-			}
-		}
-
-		if err := tx.QueryRowxContext(ctx, `
-			UPDATE orders SET payment_status = $3, refunded_amount = $4, stock_status = $5, paid_amount = $6, updated_at = $7
-			WHERE store_id = $1 AND id = $2
-			RETURNING updated_at
-		`, storeID, order.ID, order.PaymentStatus, order.RefundedAmount, order.StockStatus, order.PaidAmount, now).Scan(&order.UpdatedAt); err != nil {
-			return fmt.Errorf("failed to update refunded order: %w", err)
-		}
-
-		actorID := actor.Staff.UserID
-		auditPayload, _ := json.Marshal(map[string]any{
-			"payment_id":        payment.ID,
-			"refund_id":         refundID,
-			"order_id":          order.ID,
-			"split_id":          payment.SplitID,
-			"split_mode":        splitMode,
-			"amount":            amount,
-			"lines":             lineQty,
-			"cancel_tender":     cancelTender,
-			"method":            payment.Method,
-			"refund_method":     in.RefundMethod,
-			"restore_stock":     *in.RestoreStock,
-			"stock_restored":    stockRestored,
-			"wasted_lines":      wastedLines,
-			"stock_after":       order.StockStatus,
-			"owner_override_by": ownerOverrideID,
-			"approval_id":       claim.usedID(),
-		})
-		if err := postgres.InsertAuditLog(ctx, tx, &domain.AuditLog{
-			StoreID: storeID, ActorID: &actorID, ActorName: actor.Staff.FullName, Action: "REFUND", Reason: reason,
-			ReferenceID: payment.ID.String(), Metadata: string(auditPayload), CreatedAt: now,
-		}); err != nil {
-			return fmt.Errorf("failed to record refund audit log: %w", err)
 		}
 
 		result = &RefundPaymentResult{
@@ -632,7 +533,173 @@ func (s *OperationalService) RefundPayment(
 	if err != nil {
 		return nil, err
 	}
+	if gatewayReq != nil {
+		// RF1-f: the money moves only when the bank confirms; until then the request is pending.
+		status, err := s.dispatchGatewayRefund(ctx, storeID, gatewayReq)
+		if err != nil {
+			return nil, err
+		}
+		result.RefundStatus = status
+	}
 	return result, nil
+}
+
+// refundApplication is one refund whose money already left the store (drawer, outlet fund, owner's
+// transfer) or was confirmed by the bank (gateway). applyRefundTx writes its ledger row and every
+// effect on the payment, split, order and stock.
+type refundApplication struct {
+	order                                        *domain.Order
+	payment                                      *domain.Payment
+	amount                                       int64
+	lineQty                                      map[uuid.UUID]int
+	splitMode                                    domain.SplitMode
+	restoreStock, cancelTender, allLinesRefunded bool
+	ledger                                       *paymentRefund
+	actorID                                      uuid.UUID
+	actorName, reason                            string
+	audit                                        map[string]any
+}
+
+func applyRefundTx(ctx context.Context, tx *sqlx.Tx, orderRepo *postgres.OrderRepository, a *refundApplication, now time.Time) (bool, error) {
+	storeID, order, payment := a.ledger.storeID, a.order, a.payment
+	if a.lineQty == nil {
+		a.lineQty = map[uuid.UUID]int{}
+	}
+	refundID, err := a.ledger.insert(ctx, tx)
+	if err != nil {
+		return false, err
+	}
+	for itemID, qty := range a.lineQty {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO payment_refund_lines (store_id, refund_id, order_item_id, quantity) VALUES ($1, $2, $3, $4)`,
+			storeID, refundID, itemID, qty); err != nil {
+			return false, fmt.Errorf("failed to record refund lines: %w", err)
+		}
+	}
+
+	payment.RefundedAmount += a.amount
+	payment.Status = domain.PaymentStatusPartiallyRefunded
+	if payment.RefundedAmount == payment.Amount {
+		payment.Status = domain.PaymentStatusRefunded
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE payments SET status = $3, refunded_amount = $4, updated_at = $5 WHERE store_id = $1 AND id = $2`,
+		storeID, payment.ID, payment.Status, payment.RefundedAmount, now); err != nil {
+		return false, fmt.Errorf("failed to update refunded payment: %w", err)
+	}
+	payment.UpdatedAt = now
+
+	stockRestored := false
+	var wastedLines map[uuid.UUID]int
+	if a.cancelTender {
+		if payment.SplitID == nil {
+			return false, ErrOrderNotRefundable
+		}
+		// The tender is handed back: the split and the bill owe it again; stock was never committed.
+		// The CTE update is not visible to the outer SELECT, so the handed-back amount is subtracted there.
+		if err := tx.GetContext(ctx, &order.PaidAmount, `
+			WITH s AS (UPDATE payment_splits SET paid_amount = paid_amount - $3,
+				status = CASE WHEN paid_amount - $3 = 0 THEN 'unpaid' ELSE 'partially_paid' END, updated_at = $4
+				WHERE store_id = $1 AND id = $2 RETURNING order_id)
+			SELECT COALESCE(SUM(paid_amount), 0) - $3 FROM payment_splits WHERE store_id = $1 AND order_id = (SELECT order_id FROM s)`,
+			storeID, *payment.SplitID, a.amount, now); err != nil {
+			return false, fmt.Errorf("failed to hand the tender back: %w", err)
+		}
+		order.PaymentStatus = domain.OrderPaymentStatusPartiallyPaid
+		if order.PaidAmount == 0 {
+			order.PaymentStatus = domain.OrderPaymentStatusUnpaid
+		}
+	} else {
+		if payment.Status == domain.PaymentStatusRefunded && payment.SplitID != nil {
+			// paid_amount stays gross (like orders.paid_amount); the refunded value lives on the payment
+			// and orders.refunded_amount.
+			if _, err := tx.ExecContext(ctx, `UPDATE payment_splits SET status = 'refunded', updated_at = $3 WHERE store_id = $1 AND id = $2`,
+				storeID, *payment.SplitID, now); err != nil {
+				return false, fmt.Errorf("failed to mark split refunded: %w", err)
+			}
+		}
+		order.RefundedAmount += a.amount
+		fullyRefunded := order.RefundedAmount >= order.PaidAmount
+		order.PaymentStatus = domain.OrderPaymentStatusPartiallyRefunded
+		if fullyRefunded {
+			order.PaymentStatus = domain.OrderPaymentStatusRefunded
+		}
+		switch {
+		case len(a.lineQty) > 0 || a.splitMode == domain.SplitModeByItem:
+			var splitItems []struct {
+				OrderItemID uuid.UUID `db:"order_item_id"`
+				Quantity    int       `db:"quantity"`
+			}
+			if a.splitMode == domain.SplitModeByItem && payment.Status == domain.PaymentStatusRefunded {
+				if err := tx.SelectContext(ctx, &splitItems, `SELECT order_item_id, quantity FROM payment_split_items WHERE store_id = $1 AND split_id = $2`,
+					storeID, *payment.SplitID); err != nil {
+					return false, fmt.Errorf("failed to load split items for restock: %w", err)
+				}
+			}
+			for _, l := range splitItems {
+				a.lineQty[l.OrderItemID] += l.Quantity
+			}
+			if a.restoreStock {
+				products, options := computeItemStockQuantities(order, a.lineQty)
+				if err := restoreStockTx(ctx, tx, orderRepo, storeID, products, options); err != nil {
+					return false, err
+				}
+				stockRestored = len(a.lineQty) > 0
+			} else {
+				wastedLines = a.lineQty
+			}
+			// Every line has now been refunded and restocked or wasted (review follow-up F3).
+			if (fullyRefunded || a.allLinesRefunded) && (order.StockStatus == domain.OrderStockStatusReserved || order.StockStatus == domain.OrderStockStatusCommitted) {
+				order.StockStatus = domain.OrderStockStatusReleased
+			}
+		case fullyRefunded && a.restoreStock:
+			before := order.StockStatus
+			if err := releaseOrderStockTx(ctx, tx, orderRepo, order); err != nil {
+				return false, err
+			}
+			stockRestored = order.StockStatus != before
+		case fullyRefunded:
+			wastedLines = make(map[uuid.UUID]int, len(order.Items))
+			for _, item := range order.Items {
+				wastedLines[item.ID] += item.Quantity
+			}
+		}
+	}
+
+	if err := tx.QueryRowxContext(ctx, `
+		UPDATE orders SET payment_status = $3, refunded_amount = $4, stock_status = $5, paid_amount = $6, updated_at = $7
+		WHERE store_id = $1 AND id = $2
+		RETURNING updated_at
+	`, storeID, order.ID, order.PaymentStatus, order.RefundedAmount, order.StockStatus, order.PaidAmount, now).Scan(&order.UpdatedAt); err != nil {
+		return false, fmt.Errorf("failed to update refunded order: %w", err)
+	}
+
+	actorID := a.actorID
+	auditFields := map[string]any{
+		"payment_id":     payment.ID,
+		"refund_id":      refundID,
+		"order_id":       order.ID,
+		"split_id":       payment.SplitID,
+		"split_mode":     a.splitMode,
+		"amount":         a.amount,
+		"lines":          a.lineQty,
+		"cancel_tender":  a.cancelTender,
+		"method":         payment.Method,
+		"restore_stock":  a.restoreStock,
+		"stock_restored": stockRestored,
+		"wasted_lines":   wastedLines,
+		"stock_after":    order.StockStatus,
+	}
+	for k, v := range a.audit {
+		auditFields[k] = v
+	}
+	auditPayload, _ := json.Marshal(auditFields)
+	if err := postgres.InsertAuditLog(ctx, tx, &domain.AuditLog{
+		StoreID: storeID, ActorID: &actorID, ActorName: a.actorName, Action: "REFUND", Reason: a.reason,
+		ReferenceID: payment.ID.String(), Metadata: string(auditPayload), CreatedAt: now,
+	}); err != nil {
+		return false, fmt.Errorf("failed to record refund audit log: %w", err)
+	}
+
+	return stockRestored, nil
 }
 
 // refundLinesAmountTx checks the requested lines against what is still refundable and prices them:

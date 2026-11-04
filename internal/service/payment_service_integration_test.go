@@ -24,6 +24,7 @@ type fakeGatewayClient struct {
 	checkCalls  int
 	chargeFunc  func(ctx context.Context, input midtrans.ChargeRequest) (*coreapi.ChargeResponse, error)
 	checkFunc   func(ctx context.Context, providerOrderID string) (*coreapi.TransactionStatusResponse, error)
+	refundFunc  func(ctx context.Context, providerOrderID, refundKey string, amount int64) (*coreapi.RefundResponse, error)
 }
 
 func (f *fakeGatewayClient) ChargeCoreAPI(ctx context.Context, input midtrans.ChargeRequest) (*coreapi.ChargeResponse, error) {
@@ -47,6 +48,17 @@ func (f *fakeGatewayClient) ChargeCoreAPI(ctx context.Context, input midtrans.Ch
 		QRString:          "00020101021226610014COM.GO-JEK.WWW011893600914" + input.OrderID[:8],
 		ExpiryTime:        "2026-10-29 21:45:00",
 	}, nil
+}
+
+func (f *fakeGatewayClient) DirectRefund(ctx context.Context, providerOrderID, refundKey string, amount int64, reason string) (*coreapi.RefundResponse, error) {
+	f.mu.Lock()
+	fn := f.refundFunc
+	f.mu.Unlock()
+	if fn != nil {
+		return fn(ctx, providerOrderID, refundKey, amount)
+	}
+	return &coreapi.RefundResponse{StatusCode: "200", StatusMessage: "Success, refund request is approved", OrderID: providerOrderID,
+		RefundKey: refundKey, RefundAmount: fmt.Sprintf("%d.00", amount), TransactionStatus: "refund"}, nil
 }
 
 func (f *fakeGatewayClient) CheckTransaction(ctx context.Context, providerOrderID string) (*coreapi.TransactionStatusResponse, error) {

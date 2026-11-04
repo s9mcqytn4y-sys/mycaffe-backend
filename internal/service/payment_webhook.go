@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
+	"github.com/midtrans/midtrans-go/coreapi"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/domain"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/database"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/midtrans"
@@ -62,7 +63,9 @@ func (s *PaymentService) ProcessMidtransWebhook(
 	// refunds and chargebacks are routed to the dedicated reconciliation branch below.
 	// A provider lookup failure returns an error so Midtrans retries the notification.
 	ignoreIncoming := false
-	if resolved.CurrentStatus == domain.PaymentStatusPaid && mappedStatus != domain.PaymentStatusPaid {
+	refundOrChargeback := mappedStatus == domain.PaymentStatusRefunded || mappedStatus == domain.PaymentStatusPartiallyRefunded ||
+		mappedStatus == domain.PaymentStatusChargeback || mappedStatus == domain.PaymentStatusPartialChargeback
+	if resolved.CurrentStatus == domain.PaymentStatusPaid && mappedStatus != domain.PaymentStatusPaid && !refundOrChargeback {
 		latest, statusErr := s.midtransClient.CheckTransaction(ctx, input.OrderID)
 		if statusErr != nil {
 			return nil, fmt.Errorf("failed to reconcile out-of-order Midtrans notification: %w", statusErr)
@@ -74,7 +77,7 @@ func (s *PaymentService) ProcessMidtransWebhook(
 	}
 
 	result := &PaymentWebhookResult{Status: mappedStatus}
-	eventHash := midtransWebhookEventHash(input, grossAmountIDR)
+	eventHash := midtransWebhookEventHash(input, grossAmountIDR, refundConfirmations(sanitizedRawPayload))
 	err = database.WithTenantTx(ctx, s.db, resolved.StoreID, func(tx *sqlx.Tx) error {
 		order, _, err := s.orderRepo.GetOrderByIDForUpdate(ctx, tx, resolved.StoreID, resolved.OrderID)
 		if err != nil {
@@ -131,6 +134,20 @@ func (s *PaymentService) ProcessMidtransWebhook(
 			mappedStatus == domain.PaymentStatusPartiallyRefunded ||
 			mappedStatus == domain.PaymentStatusChargeback ||
 			mappedStatus == domain.PaymentStatusPartialChargeback {
+			if mappedStatus == domain.PaymentStatusRefunded || mappedStatus == domain.PaymentStatusPartiallyRefunded {
+				var body struct {
+					Refunds []coreapi.RefundDetails `json:"refunds"`
+				}
+				_ = json.Unmarshal([]byte(sanitizedRawPayload), &body)
+				n, err := confirmGatewayRefundsTx(ctx, tx, s.orderRepo, s.paymentRepo, resolved.StoreID, payment.ID, body.Refunds, s.nowFunc().UTC())
+				if err != nil {
+					return err
+				}
+				if n > 0 {
+					result.Status = mappedStatus
+					return s.paymentRepo.MarkNotificationProcessed(ctx, tx, resolved.StoreID, logEntry.ID)
+				}
+			}
 			message := "refund/chargeback event stored for dedicated reconciliation workflow"
 			if _, err := tx.ExecContext(ctx, "UPDATE payment_notification_logs SET error_message = $3 WHERE store_id = $1 AND id = $2", resolved.StoreID, logEntry.ID, message); err != nil {
 				return fmt.Errorf("failed to annotate deferred payment event: %w", err)
@@ -211,7 +228,24 @@ func (s *PaymentService) ProcessMidtransWebhook(
 	return result, nil
 }
 
-func midtransWebhookEventHash(input MidtransWebhookInput, grossAmount int64) string {
+// refundConfirmations lists refund_key@bank_confirmed_at of a refund notification. Midtrans sends one
+// notification before and one after the bank confirms; without this both hash the same and the
+// confirmation would be dropped as a duplicate. Empty for every other event, so their hashes do not change.
+func refundConfirmations(rawPayload string) string {
+	var body struct {
+		Refunds []coreapi.RefundDetails `json:"refunds"`
+	}
+	if json.Unmarshal([]byte(rawPayload), &body) != nil {
+		return ""
+	}
+	parts := make([]string, 0, len(body.Refunds))
+	for _, r := range body.Refunds {
+		parts = append(parts, r.RefundKey+"@"+r.BankConfirmedAt)
+	}
+	return strings.Join(parts, ",")
+}
+
+func midtransWebhookEventHash(input MidtransWebhookInput, grossAmount int64, refunds string) string {
 	canonical, _ := json.Marshal(struct {
 		ProviderOrderID   string `json:"provider_order_id"`
 		TransactionID     string `json:"transaction_id"`
@@ -219,10 +253,11 @@ func midtransWebhookEventHash(input MidtransWebhookInput, grossAmount int64) str
 		TransactionStatus string `json:"transaction_status"`
 		FraudStatus       string `json:"fraud_status"`
 		GrossAmount       int64  `json:"gross_amount"`
+		Refunds           string `json:"refunds,omitempty"`
 	}{
 		ProviderOrderID: input.OrderID, TransactionID: input.TransactionID,
 		StatusCode: input.StatusCode, TransactionStatus: input.TransactionStatus,
-		FraudStatus: input.FraudStatus, GrossAmount: grossAmount,
+		FraudStatus: input.FraudStatus, GrossAmount: grossAmount, Refunds: refunds,
 	})
 	sum := sha256.Sum256(canonical)
 	return hex.EncodeToString(sum[:])

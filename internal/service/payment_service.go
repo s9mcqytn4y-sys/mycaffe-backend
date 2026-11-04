@@ -39,6 +39,7 @@ var (
 type GatewayClient interface {
 	ChargeCoreAPI(ctx context.Context, input midtrans.ChargeRequest) (*coreapi.ChargeResponse, error)
 	CheckTransaction(ctx context.Context, providerOrderID string) (*coreapi.TransactionStatusResponse, error)
+	DirectRefund(ctx context.Context, providerOrderID, refundKey string, amount int64, reason string) (*coreapi.RefundResponse, error)
 }
 
 type PaymentServiceOption func(*PaymentService)

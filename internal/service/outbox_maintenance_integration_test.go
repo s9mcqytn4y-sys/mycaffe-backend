@@ -12,6 +12,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/config"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/database"
+	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/sms"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/realtime"
 )
 
@@ -146,3 +147,79 @@ func TestOutboxDeadLetterAndPurge(t *testing.T) {
 		}
 	})
 }
+
+// TestMessageOutcomes covers the SMS queue (V5): a sent or finally failed message has its body
+// scrubbed (codes are secrets), a transient failure is retried on the short schedule.
+func TestMessageOutcomes(t *testing.T) {
+	appDSN := strings.TrimSpace(os.Getenv("TEST_APP_DATABASE_URL"))
+	migratorDSN := strings.TrimSpace(os.Getenv("TEST_MIGRATOR_DATABASE_URL"))
+	if appDSN == "" || migratorDSN == "" {
+		t.Skip("TEST_APP_DATABASE_URL / TEST_MIGRATOR_DATABASE_URL not set; skipping message outcome test")
+	}
+	appDB, err := database.NewPostgresDB(&config.Config{DatabaseURL: appDSN})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = appDB.Close() })
+	migratorDB, err := database.NewPostgresDB(&config.Config{DatabaseURL: migratorDSN})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = migratorDB.Close() })
+	ctx := context.Background()
+	slug := "msg-" + uuid.NewString()[:8]
+	storeID, _, err := BootstrapStore(ctx, migratorDB, BootstrapStoreInput{Slug: slug, StoreName: "Kafe Pesan", OwnerName: "Pemilik", OwnerEmail: "o@" + slug + ".test", PIN: "731904"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := NewMessageService(appDB, recordingSMS{})
+	queue := func() queuedMessage {
+		t.Helper()
+		var m queuedMessage
+		if err := database.WithTenantTx(ctx, appDB, storeID, func(tx *sqlx.Tx) error {
+			if err := svc.EnqueueSMSTx(ctx, tx, storeID, "+6281234567890", "test", "Kode 123456", "ref"); err != nil {
+				return err
+			}
+			return tx.GetContext(ctx, &m, `UPDATE message_outbox SET attempts = 1, status = 'sending' WHERE store_id = $1 AND id =
+				(SELECT id FROM message_outbox WHERE store_id = $1 ORDER BY created_at DESC LIMIT 1) RETURNING id, store_id, to_phone, template, body, attempts`, storeID)
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return m
+	}
+	state := func(id uuid.UUID) (status, body string) {
+		var row struct {
+			Status string `db:"status"`
+			Body   string `db:"body"`
+		}
+		_ = migratorDB.GetContext(ctx, &row, `SELECT status, body FROM message_outbox WHERE id = $1`, id)
+		return row.Status, row.Body
+	}
+
+	sent := queue()
+	if err := svc.recordOutcome(ctx, sent, nil); err != nil {
+		t.Fatal(err)
+	}
+	if status, body := state(sent.ID); status != "sent" || body != messageScrubbed {
+		t.Fatalf("sent message: %s %q", status, body)
+	}
+	retry := queue()
+	if err := svc.recordOutcome(ctx, retry, errors.New("timeout")); err != nil {
+		t.Fatal(err)
+	}
+	if status, body := state(retry.ID); status != "pending" || body != "Kode 123456" {
+		t.Fatalf("transient failure must retry with the body kept: %s %q", status, body)
+	}
+	final := queue()
+	final.Attempts = len(messageRetrySchedule) + 1
+	if err := svc.recordOutcome(ctx, final, errors.New("timeout")); err != nil {
+		t.Fatal(err)
+	}
+	if status, body := state(final.ID); status != "failed" || body != messageScrubbed {
+		t.Fatalf("final failure must scrub: %s %q", status, body)
+	}
+}
+
+type recordingSMS struct{}
+
+func (recordingSMS) Send(context.Context, sms.Message) error { return nil }

@@ -110,7 +110,7 @@ func TestTabLifecycleIntegration(t *testing.T) {
 		return out.AccessToken
 	}
 
-	ownerToken := login("owner.central@mycaffe.local")
+	ownerToken := login("abdulaziz543333@gmail.com")
 	cashierToken := login("cashier.central@mycaffe.local")
 	baristaToken := login("barista.central@mycaffe.local")
 

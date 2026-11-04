@@ -48,8 +48,8 @@ live, including guest QR ordering (`/api/v1/public/*`) and `GET /ws` (single-use
 [FrontendIntegrationContract.md](../Architecture/FrontendIntegrationContract.md).
 
 Leaks L-1..L-3 from [DemoReadinessChecklist.md](DemoReadinessChecklist.md) §1 are closed: the public seed
-PIN is replaced at every start, the JWT secret has no default, and the seed uses `@mycaffe.local`
-addresses only. Log in with the seeded e-mails and your `DEMO_OWNER_PIN` / `DEMO_STAFF_PIN`.
+PIN is replaced at every start, the JWT secret has no default, and staff e-mails in the seed are `@mycaffe.local`
+(the owner account uses the owner's Gmail by decision V6). Log in with the seeded e-mails and your `DEMO_OWNER_PIN` / `DEMO_STAFF_PIN`.
 
 Media uploads answer `503 MEDIA_UNAVAILABLE` until `R2_*` is set.
 

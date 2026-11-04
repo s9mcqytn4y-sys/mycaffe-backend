@@ -66,6 +66,9 @@ type AuthService struct {
 	settingsRepo *postgres.SettingsRepository
 	publicURL    string
 	replyTo      string
+
+	// SMS one-time codes for PIN reset (WithAuthSMS); nil or disabled answers ErrSMSUnavailable.
+	messages *MessageService
 }
 
 type AuthServiceOption func(*AuthService)

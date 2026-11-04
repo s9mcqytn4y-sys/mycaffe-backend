@@ -144,7 +144,7 @@ func TestIntegrationReceipts(t *testing.T) {
 		return err
 	})
 	cashier := login(cashierEmail)
-	owner := login("owner.central@mycaffe.local")
+	owner := login("abdulaziz543333@gmail.com")
 	var drawer domain.CashDrawer
 	_ = json.Unmarshal(call("POST", "/pos/drawers", owner, map[string]any{"name": "Laci Struk " + suffix}).Body.Bytes(), &drawer)
 	shiftRes := call("POST", "/pos/shifts", cashier, map[string]any{"drawer_id": drawer.ID, "opening_float": 500000})

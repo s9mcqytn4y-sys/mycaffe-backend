@@ -90,6 +90,7 @@ services:
       MIDTRANS_IS_PRODUCTION: "false"
       # Email: log driver by default; set SMTP_* (Gmail app password) to really send.
       EMAIL_DRIVER: ${EMAIL_DRIVER:-log}
+      SMS_DRIVER: ${SMS_DRIVER:-disabled} # log is refused in staging (docs/Setup/Sms.md)
       SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USERNAME: ${SMTP_USERNAME:-}

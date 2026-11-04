@@ -96,7 +96,7 @@ func TestIntegrationMedia(t *testing.T) {
 
 	centralID := uuid.MustParse("11111111-1111-4111-8111-111111111111")
 	expressID := uuid.MustParse("22222222-2222-4222-8222-222222222222")
-	owner := login("central-cafe", "owner.central@mycaffe.local")
+	owner := login("central-cafe", "abdulaziz543333@gmail.com")
 	cashier := login("central-cafe", "cashier.central@mycaffe.local")
 	newProduct := func(storeID uuid.UUID) uuid.UUID {
 		id := uuid.New()

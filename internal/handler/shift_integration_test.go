@@ -90,7 +90,7 @@ func TestShiftLifecycleIntegration(t *testing.T) {
 		return out.AccessToken
 	}
 
-	ownerToken := login("owner.central@mycaffe.local")
+	ownerToken := login("abdulaziz543333@gmail.com")
 	cashierToken := login("cashier.central@mycaffe.local")
 
 	var drawerID string

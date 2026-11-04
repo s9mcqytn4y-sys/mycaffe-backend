@@ -16,7 +16,7 @@ ON CONFLICT (id) DO NOTHING;
 -- store_slug "central-cafe" or "express-counter" + the email below. Never seed PINs in production.
 INSERT INTO users (id, store_id, email, full_name, role, pin_hash, is_active, pin_set_at)
 VALUES
-    ('a0000001-0000-4000-8000-000000000001', '11111111-1111-4111-8111-111111111111', 'owner.central@mycaffe.local', 'Alexander (Owner)', 'owner', '$argon2id$v=19$m=19456,t=2,p=1$asaQjWwUQ7vf35jdVNPtlw$giPi5ZwfklHxgmJ2rcCuvkNw3zn5mEfDTdbaGvy+sFY', true, NOW()),
+    ('a0000001-0000-4000-8000-000000000001', '11111111-1111-4111-8111-111111111111', 'abdulaziz543333@gmail.com', 'Alexander (Owner)', 'owner', '$argon2id$v=19$m=19456,t=2,p=1$asaQjWwUQ7vf35jdVNPtlw$giPi5ZwfklHxgmJ2rcCuvkNw3zn5mEfDTdbaGvy+sFY', true, NOW()),
     ('a0000002-0000-4000-8000-000000000002', '11111111-1111-4111-8111-111111111111', 'kitchen.central@mycaffe.local', 'Sarah Jenkins (Kitchen)', 'kitchen', '$argon2id$v=19$m=19456,t=2,p=1$asaQjWwUQ7vf35jdVNPtlw$giPi5ZwfklHxgmJ2rcCuvkNw3zn5mEfDTdbaGvy+sFY', true, NOW()),
     ('a0000003-0000-4000-8000-000000000003', '11111111-1111-4111-8111-111111111111', 'cashier.central@mycaffe.local', 'Maya Putri (Cashier)', 'cashier', '$argon2id$v=19$m=19456,t=2,p=1$asaQjWwUQ7vf35jdVNPtlw$giPi5ZwfklHxgmJ2rcCuvkNw3zn5mEfDTdbaGvy+sFY', true, NOW()),
     ('a0000004-0000-4000-8000-000000000004', '11111111-1111-4111-8111-111111111111', 'barista.central@mycaffe.local', 'Doni Pratama (Barista)', 'barista', '$argon2id$v=19$m=19456,t=2,p=1$asaQjWwUQ7vf35jdVNPtlw$giPi5ZwfklHxgmJ2rcCuvkNw3zn5mEfDTdbaGvy+sFY', true, NOW()),

@@ -36,7 +36,9 @@ type Config struct {
 
 	// Email (owner decision E5): "log" writes emails to the server log (dev/test only),
 	// "smtp" delivers through SMTP (Gmail app password for dev/demo, Hostinger for production).
-	EmailDriver    string
+	EmailDriver string
+	// SMSDriver is log (development/test only: OTPs are secrets) or disabled (V4, V5).
+	SMSDriver      string
 	SMTPHost       string
 	SMTPPort       int
 	SMTPUsername   string
@@ -126,6 +128,11 @@ func LoadConfig() (*Config, error) {
 		defaultEmailDriver = "log"
 	}
 	emailDriver := strings.ToLower(strings.TrimSpace(getEnv("EMAIL_DRIVER", defaultEmailDriver)))
+	defaultSMSDriver := "disabled"
+	if appEnv == "development" || appEnv == "test" {
+		defaultSMSDriver = "log"
+	}
+	smsDriver := strings.ToLower(strings.TrimSpace(getEnv("SMS_DRIVER", defaultSMSDriver)))
 	smtpTLSMode := strings.ToLower(strings.TrimSpace(getEnv("SMTP_TLS_MODE", "")))
 	if smtpTLSMode == "" {
 		smtpTLSMode = "starttls"
@@ -165,6 +172,7 @@ func LoadConfig() (*Config, error) {
 		StaffPINMaxFailures:     staffPINMaxFailures,
 		StaffPINLockout:         staffPINLockout,
 		EmailDriver:             emailDriver,
+		SMSDriver:               smsDriver,
 		SMTPHost:                getEnv("SMTP_HOST", ""),
 		SMTPPort:                smtpPort,
 		SMTPUsername:            getEnv("SMTP_USERNAME", ""),
@@ -331,7 +339,23 @@ func ValidateConfig(cfg *Config) error {
 		}
 	}
 
+	if err := validateSMSConfig(cfg); err != nil {
+		return err
+	}
 	return validateEmailConfig(cfg)
+}
+
+func validateSMSConfig(cfg *Config) error {
+	switch cfg.SMSDriver {
+	case "", "disabled":
+		return nil
+	case "log":
+		if cfg.AppEnv == "staging" || cfg.AppEnv == "production" {
+			return fmt.Errorf("[SECURITY FAIL-CLOSED] SMS_DRIVER=log would print OTP codes; not allowed in %s", cfg.AppEnv)
+		}
+		return nil
+	}
+	return fmt.Errorf("invalid SMS_DRIVER %q: allowed values are log, disabled", cfg.SMSDriver)
 }
 
 func containsPlaceholderPattern(val string) bool {

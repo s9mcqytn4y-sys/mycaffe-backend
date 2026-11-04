@@ -144,7 +144,7 @@ func TestGuestQROrderingIteration5bIntegration(t *testing.T) {
 		_, err := tx.ExecContext(ctx, `INSERT INTO tables (store_id, table_number, qr_token) VALUES ($1, $2, $3)`, expressID, "GX-"+expressQR[:6], expressQR)
 		return err
 	})
-	loginRes := call("POST", "/login", req{}, map[string]string{"store_slug": "central-cafe", "email": "owner.central@mycaffe.local", "pin": "482913"})
+	loginRes := call("POST", "/login", req{}, map[string]string{"store_slug": "central-cafe", "email": "abdulaziz543333@gmail.com", "pin": "482913"})
 	var owner struct {
 		AccessToken string `json:"access_token"`
 	}

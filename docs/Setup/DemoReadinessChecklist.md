@@ -24,7 +24,7 @@ Keputusan demo DM1–DM8 ada di [DecisionRegister.md](../Architecture/DecisionRe
 |------|---------|------|
 | G-1 `GET /pos/orders` + `GET /pos/orders/:id` | Backend | Selesai (PR 2) |
 | G-2 daftar tab terbuka (DM5) | Backend | Selesai (PR 2): filter `billing_mode=open_tab&status=open` |
-| G-5 persetujuan owner dari HP dengan PIN (DM7, DM8) | Backend + frontend | Desain auth disetujui owner |
+| G-5 persetujuan owner dari HP dengan PIN (DM7, DM8) | Backend selesai (PR 3); frontend: layar owner + kanal WS `owner` | Buka aplikasi owner di HP sebelum demo |
 | L-1, L-2, L-3 | Backend | Sebelum URL dibagikan |
 | Printer Bluetooth 58 mm + RawBT diuji dengan struk asli (DM3, DM6) | Owner + frontend | H-7 |
 | Video cadangan alur lengkap (DM2) | Owner | H-2 |

@@ -26,6 +26,7 @@ const (
 	ChannelPOS         = "pos"
 	ChannelKDSBar      = "kds.bar"
 	ChannelKDSKitchen  = "kds.kitchen"
+	ChannelOwner       = "owner" // ADR-007 approval requests, staff with approval.decide
 	ChannelGuestPrefix = "guest."
 )
 

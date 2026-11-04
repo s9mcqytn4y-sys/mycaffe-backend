@@ -363,6 +363,8 @@ func writeOperationalError(c *gin.Context, err error) {
 			"error":  "Periksa kembali isian yang ditandai.",
 			"fields": validation.Fields,
 		})
+	case errors.Is(err, service.ErrApprovalInvalid):
+		authError(c, http.StatusConflict, "APPROVAL_INVALID", "Persetujuan owner tidak cocok, sudah dipakai, atau kedaluwarsa. Minta persetujuan baru.")
 	case errors.Is(err, service.ErrOwnerPINRequired):
 		c.JSON(http.StatusUnprocessableEntity, gin.H{
 			"code":  "OWNER_PIN_REQUIRED",

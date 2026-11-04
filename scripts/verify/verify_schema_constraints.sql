@@ -355,6 +355,14 @@ BEGIN
     IF has_table_privilege('mycaffe_app', 'public.kds_tickets', 'DELETE') THEN
         RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may DELETE kds_tickets!';
     END IF;
+    -- 10F-12. Refund lines (migration 000029): RLS on, insert-only for the app role.
+    IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.payment_refund_lines'::regclass) THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: payment_refund_lines does not have row-level security enabled!';
+    END IF;
+    IF has_table_privilege('mycaffe_app', 'public.payment_refund_lines', 'UPDATE')
+       OR has_table_privilege('mycaffe_app', 'public.payment_refund_lines', 'DELETE') THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may UPDATE or DELETE payment_refund_lines!';
+    END IF;
     -- 10F-11. Outlet cash ledger (migration 000028): RLS on, insert-only for the app role.
     IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.outlet_cash_movements'::regclass) THEN
         RAISE EXCEPTION 'SECURITY FAILURE: outlet_cash_movements does not have row-level security enabled!';

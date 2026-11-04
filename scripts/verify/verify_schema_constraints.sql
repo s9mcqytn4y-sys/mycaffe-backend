@@ -355,6 +355,14 @@ BEGIN
     IF has_table_privilege('mycaffe_app', 'public.kds_tickets', 'DELETE') THEN
         RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may DELETE kds_tickets!';
     END IF;
+    -- 10F-11. Outlet cash ledger (migration 000028): RLS on, insert-only for the app role.
+    IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.outlet_cash_movements'::regclass) THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: outlet_cash_movements does not have row-level security enabled!';
+    END IF;
+    IF has_table_privilege('mycaffe_app', 'public.outlet_cash_movements', 'UPDATE')
+       OR has_table_privilege('mycaffe_app', 'public.outlet_cash_movements', 'DELETE') THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may UPDATE or DELETE outlet_cash_movements!';
+    END IF;
     -- 10F-10. Messaging (migration 000026): RLS on, never deleted by the app role.
     IF NOT (SELECT bool_and(relrowsecurity) FROM pg_class WHERE oid IN
             ('public.customers'::regclass, 'public.otp_challenges'::regclass, 'public.message_outbox'::regclass)) THEN

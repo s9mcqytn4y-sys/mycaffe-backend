@@ -26,6 +26,9 @@ type StoreSettingsPatch struct {
 	RefundWindowCashierDays  *int    `json:"refund_window_cashier_days"`
 	RefundWindowOwnerDays    *int    `json:"refund_window_owner_days"`
 	CashRoundingStep         *int    `json:"cash_rounding_step"`
+	OutletDailyExpenseLimit  *int64  `json:"outlet_daily_expense_limit"`
+	DefaultOpeningFloat      *int64  `json:"default_opening_float"`
+	CashierSeesExpectedCash  *bool   `json:"cashier_sees_expected_cash"`
 }
 
 // SettingsService lets owners change operating policies without a developer (owner decision K3).
@@ -95,6 +98,15 @@ func (s *SettingsService) Update(ctx context.Context, actor *AuthenticatedStaff,
 		if patch.CashRoundingStep != nil {
 			after.CashRoundingStep = *patch.CashRoundingStep
 		}
+		if patch.OutletDailyExpenseLimit != nil {
+			after.OutletDailyExpenseLimit = *patch.OutletDailyExpenseLimit
+		}
+		if patch.DefaultOpeningFloat != nil {
+			after.DefaultOpeningFloat = *patch.DefaultOpeningFloat
+		}
+		if patch.CashierSeesExpectedCash != nil {
+			after.CashierSeesExpectedCash = *patch.CashierSeesExpectedCash
+		}
 		if err := validateStoreSettings(after); err != nil {
 			return err
 		}
@@ -125,6 +137,8 @@ func validateStoreSettings(s domain.StoreSettings) error {
 		return errors.Join(ErrInvalidSettings, errors.New("waktu tutup meja otomatis harus 5-240 menit"))
 	case s.RefundWindowCashierDays < 0 || s.RefundWindowCashierDays > 30 || s.RefundWindowOwnerDays < 0 || s.RefundWindowOwnerDays > 30:
 		return errors.Join(ErrInvalidSettings, errors.New("batas waktu refund harus 0-30 hari"))
+	case s.OutletDailyExpenseLimit < 0 || s.OutletDailyExpenseLimit > 100_000_000 || s.DefaultOpeningFloat < 0 || s.DefaultOpeningFloat > 100_000_000:
+		return errors.Join(ErrInvalidSettings, errors.New("batas pengeluaran kas outlet dan modal awal default harus 0 - Rp100.000.000"))
 	case s.CashRoundingStep != 0 && s.CashRoundingStep != 100 && s.CashRoundingStep != 500:
 		return errors.Join(ErrInvalidSettings, errors.New("pembulatan tunai harus 0 (nonaktif), 100, atau 500"))
 	case s.RefundWindowOwnerDays < s.RefundWindowCashierDays:

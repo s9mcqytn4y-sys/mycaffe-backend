@@ -139,6 +139,7 @@ func main() {
 	var reportHandler *handler.ReportHandler
 	var orderReadHandler *handler.OrderReadHandler
 	var customerHandler *handler.CustomerHandler
+	var outletCashHandler *handler.OutletCashHandler
 	var approvalHandler *handler.ApprovalHandler
 	var mediaHandler *handler.MediaHandler
 	if db != nil {
@@ -179,6 +180,7 @@ func main() {
 		receiptHandler = handler.NewReceiptHandler(service.NewReceiptService(db, cfg.AppPublicURL))
 		reportHandler = handler.NewReportHandler(service.NewReportService(db))
 		orderReadHandler = handler.NewOrderReadHandler(service.NewOrderReadService(db))
+		outletCashHandler = handler.NewOutletCashHandler(service.NewOutletCashService(db))
 		mediaStore, err := storage.NewR2(storage.R2Config{AccountID: cfg.R2AccountID, AccessKeyID: cfg.R2AccessKeyID,
 			SecretAccessKey: cfg.R2SecretAccessKey, Bucket: cfg.R2BucketName, PublicURL: cfg.R2PublicURL})
 		if err != nil {
@@ -235,6 +237,8 @@ func main() {
 
 			pos.POST("/shifts", authHandler.RequirePermission(rbac.ShiftOpen), shiftHandler.OpenShift)
 			pos.GET("/shifts/current", authHandler.RequireStaff(), shiftHandler.GetCurrentShift)
+			pos.GET("/outlet-cash", authHandler.RequirePermission(rbac.CashMovementCreate), outletCashHandler.Summary)
+			pos.POST("/outlet-cash/movements", authHandler.RequirePermission(rbac.CashMovementCreate), outletCashHandler.Record)
 			pos.POST("/shifts/movements", authHandler.RequirePermission(rbac.CashMovementCreate), shiftHandler.CreateCashMovement)
 			pos.POST("/shifts/:id/close", authHandler.RequirePermission(rbac.ShiftClose), shiftHandler.CloseShift)
 			pos.POST("/shifts/:id/force-close", authHandler.RequirePermission(rbac.ShiftForceClose), shiftHandler.ForceCloseShift)

@@ -88,7 +88,12 @@ or shift), `amount`, `params`, `reason`, `status` (`pending`, `approved`, `rejec
 - Cost: one table, five endpoints, one channel, one permission, and an `approval_id` field on four
   existing requests. No new dependency.
 
-## 7. Not decided here
+## 7. Later additions
+
+- **`outlet_expense`** (PR 8.4, V13): a cashier expense from the outlet fund that takes the store day over
+  `outlet_daily_expense_limit`. `reference_id` is the store; `params` binds `amount` and `category`.
+
+## 8. Not decided here
 
 - Web Push notifications to a closed app (needs a domain and VAPID keys).
 - Approval for discounts above `cashier_max_discount_bps`: today that path has no owner PIN at all.

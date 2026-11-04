@@ -56,6 +56,13 @@ boleh dirender**, dan **celah yang harus ditutup backend**.
 - QRIS dinamis selalu melunasi sisa tagihan. Selama QRIS menunggu, pembayaran sebagian ditolak dengan `409 SPLIT_PAYMENT_PENDING`.
 - Bila `cash_rounding_step` aktif, tunai penutup harus mencakup nominal yang dibulatkan. Tampilkan `rounding_amount` sebagai "Pembulatan", dan hitung kembalian dari respons, bukan di klien.
 
+### Kas outlet (v0.8, V13)
+
+- `GET /pos/outlet-cash` menampilkan saldo, pengeluaran hari ini, sisa tanpa approval, dan 50 mutasi terakhir.
+- `POST /pos/outlet-cash/movements` mencatat `top_up` (owner), `expense` (kategori wajib), `to_drawer`, dan `from_drawer`.
+- `409 OUTLET_EXPENSE_APPROVAL_REQUIRED` berarti kirim approval `outlet_expense` dengan `params {amount, category}`, lalu ulangi dengan `approval_id`.
+- Buka shift tanpa `opening_float` memakai modal awal default toko. X-report kasir menyembunyikan kas yang diharapkan kecuali `cashier_sees_expected_cash` aktif.
+
 ### OTP SMS (v0.8, [Sms.md](../Setup/Sms.md))
 
 - **Reset PIN staf:** `POST /auth/staff/pin/forgot-sms` (selalu 202), lalu `POST /auth/staff/pin/reset-sms`. Owner mengatur nomor staf dengan `POST /staff/:id/phone`.

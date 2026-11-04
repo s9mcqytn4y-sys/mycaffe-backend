@@ -179,6 +179,7 @@ type POSInitiatePaymentRequest struct {
 	Method             domain.PaymentMethod `json:"method" binding:"required"`
 	Bank               string               `json:"bank,omitempty"`
 	CashTenderedAmount int64                `json:"cash_tendered_amount,omitempty"`
+	Amount             *int64               `json:"amount,omitempty"`
 	ReconciliationRef  string               `json:"reconciliation_ref,omitempty" binding:"max=100"`
 	CallbackURL        string               `json:"callback_url,omitempty" binding:"max=500"`
 	DrawerID           *uuid.UUID           `json:"drawer_id,omitempty"`
@@ -210,7 +211,7 @@ func (h *POSHandler) InitiatePayment(c *gin.Context) {
 	actorID := actor.Staff.UserID
 	res, err := h.payments.InitiatePayment(c.Request.Context(), actor.Staff.Store.ID, service.InitiatePaymentInput{
 		OrderID: orderID, SplitID: req.SplitID, IdempotencyKey: req.IdempotencyKey, Method: req.Method, Bank: req.Bank,
-		CashTenderedAmount: req.CashTenderedAmount, ReconciliationRef: req.ReconciliationRef, CallbackURL: req.CallbackURL,
+		CashTenderedAmount: req.CashTenderedAmount, Amount: req.Amount, ReconciliationRef: req.ReconciliationRef, CallbackURL: req.CallbackURL,
 		ActorUserID: &actorID,
 		DrawerID:    req.DrawerID,
 	})
@@ -228,6 +229,10 @@ func paymentError(c *gin.Context, err error) {
 		errors.Is(err, service.ErrReconciliationRefRequired), errors.Is(err, service.ErrSplitIDRequired),
 		errors.Is(err, service.ErrSplitIDNotAllowed):
 		authError(c, http.StatusBadRequest, "INVALID_PAYMENT", err.Error())
+	case errors.Is(err, service.ErrInvalidTenderAmount):
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"code": "VALIDATION_FAILED", "error": "Periksa kembali isian yang ditandai.", "fields": map[string]string{"amount": "harus lebih dari 0 dan tidak melebihi sisa tagihan"}})
+	case errors.Is(err, service.ErrGatewayMustPayRemaining):
+		authError(c, http.StatusConflict, "GATEWAY_AMOUNT_MUST_BE_REMAINING", "QRIS dan pembayaran gateway harus melunasi seluruh sisa tagihan.")
 	case errors.Is(err, service.ErrUnauthorizedCashierTender):
 		authError(c, http.StatusForbidden, "FORBIDDEN", err.Error())
 	case errors.Is(err, postgres.ErrOrderNotFound), errors.Is(err, postgres.ErrStoreNotFound):

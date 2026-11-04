@@ -176,7 +176,7 @@ func (s *PaymentService) ProcessMidtransWebhook(
 				result.Anomaly = true
 				return nil
 			}
-			if split.OrderID != order.ID || split.TotalAmount != payment.Amount {
+			if split.OrderID != order.ID || split.TotalAmount-split.PaidAmount != payment.Amount {
 				message := "payment amount does not match the full payment split; manual reconciliation required"
 				if _, err := tx.ExecContext(ctx, "UPDATE payment_notification_logs SET error_message = $3 WHERE store_id = $1 AND id = $2", resolved.StoreID, logEntry.ID, message); err != nil {
 					return err

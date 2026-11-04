@@ -4658,6 +4658,7 @@ components:
               amount: {type: integer, format: int64}
               cash_tendered_amount: {type: integer, format: int64}
               change_amount: {type: integer, format: int64}
+              rounding_amount: {type: integer, format: int64, description: "Cash rounding of this tender (V11); printed as Pembulatan"}
               status: {type: string}
         refund:
           type: object
@@ -4725,6 +4726,7 @@ components:
         cash_sales: {type: integer, format: int64}
         cash_refunds: {type: integer, format: int64}
         cash_net: {type: integer, format: int64}
+        cash_rounding: {type: integer, format: int64, description: "Net cash rounding inside cash_sales (V11); not part of total_amount"}
     ErrorResponse:
       type: object
       required: [error]
@@ -5292,10 +5294,23 @@ components:
           type: string
           enum: [bca, bni, bri, mandiri, permata]
           description: Required only when `method` is `bank_transfer`
+        amount:
+          type: integer
+          format: int64
+          minimum: 1
+          description: >-
+            Optional partial tender for direct methods (cash, static_qris, edc), decision V12. Omitted pays
+            the whole remaining balance of the split. Several direct tenders may close one bill; a partial
+            tender is refused (409 SPLIT_PAYMENT_PENDING) while a gateway attempt is pending. Gateway
+            methods (qris, gopay, shopeepay, bank_transfer) always charge exactly the remaining balance;
+            any other amount answers 409 GATEWAY_AMOUNT_MUST_BE_REMAINING. Out of range answers 422.
         cash_tendered_amount:
           type: integer
           format: int64
-          description: Required when `method` is `cash`; must be `>= split.total_amount` (integer Rupiah)
+          description: >-
+            Required when `method` is `cash`; must cover the tendered amount. When this cash tender closes
+            the bill and store_settings.cash_rounding_step is set, it must cover the amount rounded to the
+            nearest step (V11); the payment keeps the exact amount and records rounding_amount.
         reconciliation_ref:
           type: string
           maxLength: 100
@@ -5353,6 +5368,10 @@ components:
           minimum: 0
           maximum: 30
           description: Business days after paid_at the owner (or a cashier with owner PIN) may refund; at least the cashier window. Default 7.
+        cash_rounding_step:
+          type: integer
+          enum: [0, 100, 500]
+          description: Round the closing cash tender to the nearest step (V11); 0 disables. Never applied to non-cash methods and never taxed.
 
     InitiatePaymentResponse:
       type: object
@@ -5383,6 +5402,10 @@ components:
             cash_tendered_amount:
               type: integer
               format: int64
+            rounding_amount:
+              type: integer
+              format: int64
+              description: Cash received minus amount on a rounded closing cash tender (V11)
             change_given_amount:
               type: integer
               format: int64

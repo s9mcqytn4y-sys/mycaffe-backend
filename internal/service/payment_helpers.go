@@ -87,6 +87,7 @@ func computePaymentInitiationHash(storeID uuid.UUID, input InitiatePaymentInput)
 		Method             domain.PaymentMethod `json:"method"`
 		Bank               string               `json:"bank"`
 		CashTenderedAmount int64                `json:"cash_tendered_amount"`
+		Amount             *int64               `json:"amount"`
 		ReconciliationRef  string               `json:"reconciliation_ref"`
 		ActorUserID        string               `json:"actor_user_id"`
 		DrawerID           string               `json:"drawer_id"`
@@ -97,6 +98,7 @@ func computePaymentInitiationHash(storeID uuid.UUID, input InitiatePaymentInput)
 		Method:             input.Method,
 		Bank:               input.Bank,
 		CashTenderedAmount: input.CashTenderedAmount,
+		Amount:             input.Amount,
 		ReconciliationRef:  input.ReconciliationRef,
 		ActorUserID:        actorIDStr,
 		DrawerID:           drawerIDStr,

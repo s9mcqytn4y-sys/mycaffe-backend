@@ -31,6 +31,8 @@ var (
 	ErrSplitIDRequired               = errors.New("split_id is required for open_tab payments")
 	ErrSplitIDNotAllowed             = errors.New("split_id is not allowed for pay_first payments")
 	ErrSplitPaymentPending           = errors.New("split bill memiliki transaksi pembayaran yang sedang gantung (pending)")
+	ErrInvalidTenderAmount           = errors.New("amount must be between 1 and the remaining balance")
+	ErrGatewayMustPayRemaining       = errors.New("dynamic QRIS and gateway payments must cover exactly the remaining balance")
 )
 
 // GatewayClient abstracts Midtrans Core API operations for deterministic unit and integration testing.
@@ -81,10 +83,12 @@ type InitiatePaymentInput struct {
 	Method             domain.PaymentMethod
 	Bank               string
 	CashTenderedAmount int64
-	ReconciliationRef  string
-	CallbackURL        string
-	ActorUserID        *uuid.UUID
-	DrawerID           *uuid.UUID
+	// Amount is an optional partial tender (V12); nil pays the whole remaining balance of the split.
+	Amount            *int64
+	ReconciliationRef string
+	CallbackURL       string
+	ActorUserID       *uuid.UUID
+	DrawerID          *uuid.UUID
 }
 
 type InitiatePaymentResult struct {

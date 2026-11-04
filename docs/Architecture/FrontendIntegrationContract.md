@@ -49,6 +49,13 @@ boleh dirender**, dan **celah yang harus ditutup backend**.
 - **Koreksi:** `POST /pos/orders/:id/void`, `POST /pos/orders/:id/payments/:payment_id/refund`, `POST /pos/products/:id/stock-override`.
 - **Struk:** `GET /pos/orders/:id/receipt?kind=&format=json|escpos&width=58|80`, `POST /pos/orders/:id/receipt-link`.
 
+### Multi-payment dan pembulatan (v0.8, V11/V12)
+
+- `POST /pos/orders/:id/payments` menerima `amount` opsional untuk tunai, EDC, dan QRIS statis. Tanpa `amount`, pembayaran melunasi sisa tagihan. Sisa tagihan adalah `split.total_amount - split.paid_amount` dari respons.
+- Selama `payment_status = partially_paid`, tampilkan sisa tagihan dan tombol bayar lagi. Pesanan baru masuk dapur setelah lunas.
+- QRIS dinamis selalu melunasi sisa tagihan. Selama QRIS menunggu, pembayaran sebagian ditolak dengan `409 SPLIT_PAYMENT_PENDING`.
+- Bila `cash_rounding_step` aktif, tunai penutup harus mencakup nominal yang dibulatkan. Tampilkan `rounding_amount` sebagai "Pembulatan", dan hitung kembalian dari respons, bukan di klien.
+
 ### OTP SMS (v0.8, [Sms.md](../Setup/Sms.md))
 
 - **Reset PIN staf:** `POST /auth/staff/pin/forgot-sms` (selalu 202), lalu `POST /auth/staff/pin/reset-sms`. Owner mengatur nomor staf dengan `POST /staff/:id/phone`.

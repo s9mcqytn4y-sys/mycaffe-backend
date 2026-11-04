@@ -88,6 +88,8 @@ and no blurhash yet. At most two images are processed at once (memory bound on t
 
 ## 6. Realtime delivery (WebSocket)
 
+- **Dead letter.** An event that fails to relay 30 times in a row (about 1 minute) is marked `dead_at`,
+  so later events of the store flow again. It stays replayable by `seq` until the 7-day purge.
 - **At-least-once.** Outbox events reach `/ws` clients at least once, in per-store sequence order. A
   replay after reconnect (`last_seq`) can resend an event the client already has. Clients must keep
   the highest `seq` (`store_seq`) they processed and ignore any event with `seq` ≤ that value.

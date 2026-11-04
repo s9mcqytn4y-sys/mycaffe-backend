@@ -89,7 +89,7 @@ promotions & bundles (K7), loyalty (K6), static QRIS fallback (K8), delivery cha
 | Grafana Cloud metrics and tested alert rules (P0-04) | Implemented; Grafana Cloud account pending (owner) |
 | Nginx TLS bootstrap, HSTS, request id, rate limits; internal-only DB network | Implemented |
 | Real client IP + Named Cloudflare Tunnel + VPS firewall (P0-07, IN1) | Planned (deployment change, needs approval) |
-| Outbox dead-letter and purge (P0-08) | Planned |
+| Outbox dead-letter and purge (P0-08) | Implemented (v0.8 PR 8.1); cron runs once a VPS exists |
 | Provisioning and incident runbook (P0-09) | Planned |
 | Hostinger SMTP + SPF/DKIM/DMARC runbook | Documented ([Email.md](../Setup/Email.md)); blocked (no domain) |
 | Operator bootstrap (`bootstrap-store`) + `DEFAULT_STORE_SLUG` | Implemented |

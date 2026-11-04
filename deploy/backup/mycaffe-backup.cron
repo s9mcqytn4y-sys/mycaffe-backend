@@ -10,3 +10,6 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 # Monthly restore drill, 2nd of the month 20:30 UTC (03:30 WIB, outside opening hours).
 30 20 2 * * mycaffe flock -n /tmp/mycaffe-backup.lock bash -c 'set -a; . /etc/mycaffe/backup.env; set +a; /opt/mycaffe/scripts/backup/restore_drill.sh' >> /var/log/mycaffe/restore-drill.log 2>&1
+
+# Daily purge of technical rows (P0-08, docs/Setup/Deploy.md §5), 20:00 UTC = 03:00 WIB.
+0 20 * * * mycaffe bash -c 'set -a; . /var/lib/mycaffe/deploy/current.env; set +a; docker compose -f /opt/mycaffe/deploy/docker/docker-compose.prod.yml run --rm --no-deps --entrypoint /app/mycaffe-migrate migrate -action=purge' >> /var/log/mycaffe/purge.log 2>&1

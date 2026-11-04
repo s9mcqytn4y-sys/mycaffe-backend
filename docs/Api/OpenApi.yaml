@@ -2601,8 +2601,27 @@ paths:
                   description: true returns the goods to stock; false records them as waste. No default.
                 refund_method:
                   type: string
-                  enum: [cash, bank_transfer]
+                  enum: [cash, outlet_cash, bank_transfer]
                   default: cash
+                  description: outlet_cash pays from the outlet cash fund (V13); 409 OUTLET_INSUFFICIENT_FUNDS when it is too low.
+                lines:
+                  type: array
+                  description: >-
+                    Partial refund by order lines (PR 8.5a). Amount = total_amount x lines subtotal / order
+                    subtotal, so tax, service and discount follow the lines; the refund returning the last lines
+                    takes what is left. Needs idempotency_key; not allowed on a by-item split payment or a bill
+                    that is only partly paid (409 REFUND_LINES_NOT_ALLOWED); more than the payment has left answers
+                    409 REFUND_EXCEEDS_PAYMENT.
+                  items:
+                    type: object
+                    required: [order_item_id, quantity]
+                    properties:
+                      order_item_id: {type: string, format: uuid}
+                      quantity: {type: integer, minimum: 1}
+                idempotency_key:
+                  type: string
+                  maxLength: 100
+                  description: Required with lines; a retry with the same key returns is_idempotent_replay without refunding again.
                 bank_name:
                   type: string
                   maxLength: 100
@@ -2627,9 +2646,14 @@ paths:
                     $ref: "#/components/schemas/InitiatePaymentResponse/properties/payment"
                   order:
                     $ref: "#/components/schemas/Order"
+                  refund_amount:
+                    type: integer
+                    format: int64
                   open_drawer:
                     type: boolean
                   stock_restored:
+                    type: boolean
+                  is_idempotent_replay:
                     type: boolean
                   message:
                     type: string

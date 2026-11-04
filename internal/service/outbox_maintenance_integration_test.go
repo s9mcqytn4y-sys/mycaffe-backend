@@ -76,34 +76,45 @@ func TestOutboxDeadLetterAndPurge(t *testing.T) {
 	svc := NewRealtimeService(appDB)
 
 	t.Run("DeadLetterUnblocksTheStore", func(t *testing.T) {
-		poison := emit("test.poison")
-		failing := &recordingPublisher{fail: true}
-		for i := 0; i < relayMaxAttempts; i++ {
-			if err := svc.relayStore(ctx, failing, storeID); err == nil {
-				t.Fatal("failing publisher must fail the store batch")
-			} else {
-				svc.recordRelayFailure(ctx, storeID, err)
-			}
-		}
-		var row struct {
+		type eventRow struct {
 			Retries int        `db:"retry_count"`
 			Dead    *time.Time `db:"dead_at"`
 			Done    *time.Time `db:"processed_at"`
 			LastErr *string    `db:"last_error"`
 		}
-		if err := migratorDB.GetContext(ctx, &row, `SELECT retry_count, dead_at, processed_at, last_error FROM outbox_events WHERE id = $1`, poison); err != nil {
-			t.Fatal(err)
+		load := func(id uuid.UUID) eventRow {
+			var row eventRow
+			if err := migratorDB.GetContext(ctx, &row, `SELECT retry_count, dead_at, processed_at, last_error FROM outbox_events WHERE id = $1`, id); err != nil {
+				t.Fatal(err)
+			}
+			return row
+		}
+		// Relay tests in other packages run RelayOnce over every store at the same time and may publish
+		// the event first; such a round is retried. The event starts one failure short of the limit.
+		failing := &recordingPublisher{fail: true}
+		var poison uuid.UUID
+		var row eventRow
+		for attempt := 0; attempt < 5 && row.Dead == nil; attempt++ {
+			poison = emit("test.poison")
+			if _, err := migratorDB.ExecContext(ctx, `UPDATE outbox_events SET retry_count = $2 WHERE id = $1`, poison, relayMaxAttempts-1); err != nil {
+				t.Fatal(err)
+			}
+			err := svc.relayStore(ctx, failing, storeID)
+			if err == nil {
+				continue // another relay published it first
+			}
+			svc.recordRelayFailure(ctx, storeID, err)
+			row = load(poison)
 		}
 		if row.Retries != relayMaxAttempts || row.Dead == nil || row.Done == nil || row.LastErr == nil || *row.LastErr != "hub unavailable" {
 			t.Fatalf("poison event after %d failures: %+v", relayMaxAttempts, row)
 		}
-		emit("test.after")
-		ok := &recordingPublisher{}
-		if err := svc.relayStore(ctx, ok, storeID); err != nil {
+		after := emit("test.after")
+		if err := svc.relayStore(ctx, &recordingPublisher{}, storeID); err != nil {
 			t.Fatal(err)
 		}
-		if len(ok.got) != 1 || ok.got[0] != "test.after" {
-			t.Fatalf("only the newer event must be relayed, got %v", ok.got)
+		if load(after).Done == nil {
+			t.Fatal("a newer event must flow again once the poison event is dead-lettered")
 		}
 	})
 

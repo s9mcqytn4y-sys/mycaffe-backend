@@ -368,6 +368,12 @@ func writeOperationalError(c *gin.Context, err error) {
 			"error":  "Periksa kembali isian yang ditandai.",
 			"fields": validation.Fields,
 		})
+	case errors.Is(err, service.ErrRefundExceedsPayment):
+		authError(c, http.StatusConflict, "REFUND_EXCEEDS_PAYMENT", "Nilai item yang direfund melebihi sisa pembayaran ini. Refund dari pembayaran lain.")
+	case errors.Is(err, service.ErrRefundLinesNotAllowed):
+		authError(c, http.StatusConflict, "REFUND_LINES_NOT_ALLOWED", "Refund per item hanya untuk tagihan yang sudah lunas dan bukan split per item.")
+	case errors.Is(err, service.ErrOutletInsufficientFunds):
+		authError(c, http.StatusConflict, "OUTLET_INSUFFICIENT_FUNDS", "Saldo kas outlet tidak mencukupi.")
 	case errors.Is(err, service.ErrApprovalInvalid):
 		authError(c, http.StatusConflict, "APPROVAL_INVALID", "Persetujuan owner tidak cocok, sudah dipakai, atau kedaluwarsa. Minta persetujuan baru.")
 	case errors.Is(err, service.ErrOwnerPINRequired):

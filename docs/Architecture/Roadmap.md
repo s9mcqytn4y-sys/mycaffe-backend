@@ -8,8 +8,24 @@ only when its route, authorization, tests, and docs exist. MVP scope: **one cafe
 multi-tenant schema kept for future branches (owner decision M3). Audit tickets and their status:
 [AuditBacklog.md](../Engineering/AuditBacklog.md).
 
-**Owner direction (2026-11-03): large new features are frozen until go-live**: ADR-005 offline cash
-sync, inventory (C5), promotions/loyalty, delivery channels. Only the go-live plan below is in scope.
+**Owner direction (2026-11-04, V1–V15): the freeze is lifted.** Release train v0.8 money & operations →
+v0.9 cafe floor → v0.10 per-device offline → v0.11 channels & customers → v0.12 services; the
+prospective-client demo waits for v0.8. Benchmark: [CompetitorAnalysisMajoo.md](../Product/CompetitorAnalysisMajoo.md).
+
+## v0.8 plan (one PR per row, merged into `staging` on green CI per V3)
+
+| PR | Scope | Decisions | Notes |
+|----|-------|-----------|-------|
+| 8.1 | Outbox dead-letter, attempts, backoff, purge of technical tables (P0-08) | — | Foundation for the message and print queues |
+| 8.2 | Messaging: `message_outbox` + sender interface (`log`, SMS aggregator), `otp_challenges`, `customers` with verified phone, staff PIN reset by SMS; demo owner e-mail back to the owner's Gmail | V4, V5, V6 | SMS provider picked by price; WhatsApp driver waits for a domain (V8) |
+| 8.3 | Multi-payment (direct methods free, dynamic QRIS last), split by amount, cash rounding | V11, V12 | Changes payment initiation; extends the 4b/4c tests |
+| 8.4 | Outlet cash fund, expense categories, daily limit with `outlet_expense` approval, cashier settings (default float, blind count) | V13 | New ADR-007 action |
+| 8.5 | Partial refunds per item (proportional tax/service/discount), outlet cash as a refund source, RF1-a/b/d/f Midtrans refunds with `refund_pending` | RF1, V13 | A live sandbox proof needs the owner's sandbox keys in `.env` |
+| 8.6 | Discount approval above `cashier_max_discount_bps` (ADR-007 action `discount`), compliment as an approved 100 % discount | V12 | — |
+| 8.7 | Staff QR badges (revocable token) + PIN login | V14 | ADR-003 amendment |
+| 8.8 | P0-07 configuration (real client IP, Named Tunnel template, firewall runbook) and P0-09 provisioning/incident runbook | V8 | Live tunnel test waits for a domain |
+
+Blocked by dependency: Web Push (no domain), WhatsApp sending (Meta business verification).
 
 **Schema (37 tables, 24 migrations):** approval_requests (v0.7); receipt_tokens, media_uploads, payment_refunds (v0.6.0); stores, users, auth_sessions, account_tokens, email_outbox,
 store_settings, audit_logs; categories, products, product_variants, modifier_groups, modifier_options,

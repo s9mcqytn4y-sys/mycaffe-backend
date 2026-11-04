@@ -49,6 +49,12 @@ boleh dirender**, dan **celah yang harus ditutup backend**.
 - **Koreksi:** `POST /pos/orders/:id/void`, `POST /pos/orders/:id/payments/:payment_id/refund`, `POST /pos/products/:id/stock-override`.
 - **Struk:** `GET /pos/orders/:id/receipt?kind=&format=json|escpos&width=58|80`, `POST /pos/orders/:id/receipt-link`.
 
+### OTP SMS (v0.8, [Sms.md](../Setup/Sms.md))
+
+- **Reset PIN staf:** `POST /auth/staff/pin/forgot-sms` (selalu 202), lalu `POST /auth/staff/pin/reset-sms`. Owner mengatur nomor staf dengan `POST /staff/:id/phone`.
+- **Verifikasi pelanggan di POS:** `POST /pos/customers/verify` → `POST /pos/customers/verify/:id/confirm`.
+- `503 SMS_UNAVAILABLE` berarti SMS belum aktif; sembunyikan tombolnya.
+
 ### KDS
 
 `GET /kds/tickets`, `POST /kds/tickets/:id/transition` (`expected_status` untuk optimistic

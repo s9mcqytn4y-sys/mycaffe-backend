@@ -60,6 +60,8 @@ It logs the deleted count per table.
 | `receipt_tokens`, `account_tokens`, `auth_sessions` | Expired more than 30 days ago |
 | `email_outbox` | Sent or failed, created more than 90 days ago |
 | `media_uploads` | Still pending 1 day after expiry |
+| `otp_challenges` | Expired more than 1 day ago |
+| `message_outbox` | Sent or failed, created more than 90 days ago |
 
 The job never purges money, audit or webhook evidence: payments, ledgers, `payment_notification_logs`,
 `audit_logs` and `approval_requests` are kept.

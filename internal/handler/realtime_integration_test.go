@@ -312,7 +312,7 @@ func TestRealtimeIteration5cIntegration(t *testing.T) {
 	})
 
 	t.Run("GuestSeesOnlyOwnOrderWithMinimalPayload", func(t *testing.T) {
-		owner := login("central-cafe", "owner.central@mycaffe.local")
+		owner := login("central-cafe", "abdulaziz543333@gmail.com")
 		var drawer domain.CashDrawer
 		_ = json.Unmarshal(call("POST", "/pos/drawers", owner, "", map[string]any{"name": "Laci RT " + uuid.NewString()[:6]}).Body.Bytes(), &drawer)
 		var opened struct {

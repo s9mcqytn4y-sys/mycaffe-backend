@@ -173,6 +173,8 @@ var purgeRules = []struct{ table, query string }{
 	{"auth_sessions", `DELETE FROM auth_sessions WHERE expires_at < $1::timestamptz - interval '30 days'`},
 	{"email_outbox", `DELETE FROM email_outbox WHERE status IN ('sent', 'failed') AND created_at < $1::timestamptz - interval '90 days'`},
 	{"media_uploads", `DELETE FROM media_uploads WHERE status = 'pending' AND expires_at < $1::timestamptz - interval '1 day'`},
+	{"otp_challenges", `DELETE FROM otp_challenges WHERE expires_at < $1::timestamptz - interval '1 day'`},
+	{"message_outbox", `DELETE FROM message_outbox WHERE status IN ('sent', 'failed') AND created_at < $1::timestamptz - interval '90 days'`},
 }
 
 // PurgeTechnicalRows runs every purge rule with the migrator connection (cron: migrate -action=purge)

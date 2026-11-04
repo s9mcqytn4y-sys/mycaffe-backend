@@ -245,3 +245,114 @@ func (h *AuthHandler) IssueTemporaryPIN(c *gin.Context) {
 	}
 	c.Status(http.StatusNoContent)
 }
+
+// otpError maps the SMS one-time-code errors (decision V4) and falls back to lifecycleError.
+func otpError(c *gin.Context, err error) {
+	var conflict *service.ConflictError
+	var validation *service.ValidationError
+	switch {
+	case errors.Is(err, service.ErrSMSUnavailable):
+		authError(c, http.StatusServiceUnavailable, "SMS_UNAVAILABLE", "Pengiriman SMS belum diaktifkan di toko ini.")
+	case errors.Is(err, service.ErrOTPInvalid):
+		authError(c, http.StatusBadRequest, "OTP_INVALID", "Kode OTP salah atau kedaluwarsa. Minta kode baru.")
+	case errors.Is(err, service.ErrOTPRateLimited):
+		c.Header("Retry-After", "60")
+		authError(c, http.StatusTooManyRequests, "OTP_RATE_LIMITED", "Tunggu sebentar sebelum meminta kode OTP lagi.")
+	case errors.Is(err, service.ErrInvalidPhone):
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"code": "VALIDATION_FAILED", "error": "Periksa kembali isian yang ditandai.", "fields": map[string]string{"phone": "nomor HP tidak valid (contoh 081234567890)"}})
+	case errors.As(err, &validation):
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"code": "VALIDATION_FAILED", "error": "Periksa kembali isian yang ditandai.", "fields": validation.Fields})
+	case errors.As(err, &conflict):
+		c.JSON(http.StatusConflict, gin.H{"code": "CONFLICT", "error": conflict.Message, "field": conflict.Field})
+	case errors.Is(err, service.ErrVerificationNotFound):
+		authError(c, http.StatusNotFound, "NOT_FOUND", "Verifikasi tidak ditemukan.")
+	default:
+		lifecycleError(c, err)
+	}
+}
+
+// smsBudget caps public SMS requests per client IP: each one costs money (shared with login failures).
+func (h *AuthHandler) smsBudget(c *gin.Context) bool {
+	ip := c.ClientIP()
+	if h.limiter.Blocked(ip) {
+		c.Header("Retry-After", "900")
+		authError(c, http.StatusTooManyRequests, "RATE_LIMITED", "Terlalu banyak percobaan. Coba lagi nanti.")
+		return false
+	}
+	h.limiter.RecordFailure(ip)
+	return true
+}
+
+// ForgotPINSMS handles POST /api/v1/auth/staff/pin/forgot-sms. Always 202 (unless SMS is off) so it
+// cannot be used to find staff phone numbers.
+func (h *AuthHandler) ForgotPINSMS(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxAuthBodyBytes)
+	var req struct {
+		StoreSlug string `json:"store_slug"`
+		Phone     string `json:"phone" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		authError(c, http.StatusBadRequest, "INVALID_REQUEST", "Kode toko dan nomor HP wajib diisi.")
+		return
+	}
+	if !h.smsBudget(c) {
+		return
+	}
+	if req.StoreSlug == "" {
+		req.StoreSlug = h.DefaultStoreSlug
+	}
+	if err := h.authService.RequestPINResetSMS(c.Request.Context(), req.StoreSlug, req.Phone); err != nil {
+		otpError(c, err)
+		return
+	}
+	c.JSON(http.StatusAccepted, gin.H{"message": "Jika nomor HP terdaftar, kode OTP untuk membuat PIN baru sudah dikirim lewat SMS."})
+}
+
+// ResetPINSMS handles POST /api/v1/auth/staff/pin/reset-sms {store_slug, phone, code, pin}.
+func (h *AuthHandler) ResetPINSMS(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxAuthBodyBytes)
+	var req struct {
+		StoreSlug string `json:"store_slug"`
+		Phone     string `json:"phone" binding:"required"`
+		Code      string `json:"code" binding:"required"`
+		PIN       string `json:"pin" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		authError(c, http.StatusBadRequest, "INVALID_REQUEST", "Nomor HP, kode OTP, dan PIN baru wajib diisi.")
+		return
+	}
+	if !h.smsBudget(c) {
+		return
+	}
+	if req.StoreSlug == "" {
+		req.StoreSlug = h.DefaultStoreSlug
+	}
+	res, err := h.authService.ResetPINWithSMS(c.Request.Context(), req.StoreSlug, req.Phone, req.Code, req.PIN)
+	if err != nil {
+		otpError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, res)
+}
+
+// SetStaffPhone handles POST /api/v1/staff/:id/phone {phone} (owner).
+func (h *AuthHandler) SetStaffPhone(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		authError(c, http.StatusNotFound, "STAFF_NOT_FOUND", "Staf tidak ditemukan.")
+		return
+	}
+	var req struct {
+		Phone string `json:"phone" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		authError(c, http.StatusBadRequest, "INVALID_REQUEST", "Nomor HP wajib diisi.")
+		return
+	}
+	phone, err := h.authService.SetStaffPhone(c.Request.Context(), currentStaff(c), id, req.Phone)
+	if err != nil {
+		otpError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"id": id, "phone": phone})
+}

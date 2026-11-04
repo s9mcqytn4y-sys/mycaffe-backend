@@ -355,6 +355,16 @@ BEGIN
     IF has_table_privilege('mycaffe_app', 'public.kds_tickets', 'DELETE') THEN
         RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may DELETE kds_tickets!';
     END IF;
+    -- 10F-10. Messaging (migration 000026): RLS on, never deleted by the app role.
+    IF NOT (SELECT bool_and(relrowsecurity) FROM pg_class WHERE oid IN
+            ('public.customers'::regclass, 'public.otp_challenges'::regclass, 'public.message_outbox'::regclass)) THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: customers/otp_challenges/message_outbox must have row-level security enabled!';
+    END IF;
+    IF has_table_privilege('mycaffe_app', 'public.customers', 'DELETE')
+       OR has_table_privilege('mycaffe_app', 'public.otp_challenges', 'DELETE')
+       OR has_table_privilege('mycaffe_app', 'public.message_outbox', 'DELETE') THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may DELETE messaging rows!';
+    END IF;
     -- 10F-9. Approval requests (migration 000024, ADR-007): RLS on, never deleted by the app role.
     IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.approval_requests'::regclass) THEN
         RAISE EXCEPTION 'SECURITY FAILURE: approval_requests does not have row-level security enabled!';

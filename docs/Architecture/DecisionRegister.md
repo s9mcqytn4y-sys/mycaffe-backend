@@ -80,7 +80,7 @@ Designs: [CatalogInventoryDesign.md](CatalogInventoryDesign.md), requirements:
 | ---- | ---------- | ----------------- |
 | M1 | Docker cleanup | MyCaffe + safe garbage only (stopped containers, unused anonymous volumes, unused images, build cache); other projects' volumes and the MyCaffe demo/dev volumes kept |
 | M2 | Supabase | Removed from the repo, local `.env`, local MCP config, global CLI and `~/.supabase`; the Claude account connector is disconnected by the owner |
-| M3 | Single-tenant MVP | Multi-tenant schema kept for future branches; optional `DEFAULT_STORE_SLUG` so staff log in with email + PIN only; demo seed keeps two stores for isolation tests; demo owner email `owner.central@mycaffe.local` (was the owner's Gmail; changed 2026-11-04 by leak fix L-3, PR #54, approved with the v0.7 plan) |
+| M3 | Single-tenant MVP | Multi-tenant schema kept for future branches; optional `DEFAULT_STORE_SLUG` so staff log in with email + PIN only; demo seed keeps two stores for isolation tests; demo owner email is the owner's Gmail again in the seed (V6, PR 8.2; it was `owner.central@mycaffe.local` between PR #54 and PR 8.2) |
 | M4 | Iteration 3 priority | Catalog C1–C3 with the standard CRUD contract; media upload after the R2 bucket exists |
 
 ## Iteration 4: modifiers, cart, tabs, shifts, void/refund (recorded 2026-10-31, sixth interview)

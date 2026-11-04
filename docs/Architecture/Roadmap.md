@@ -16,8 +16,8 @@ prospective-client demo waits for v0.8. Benchmark: [CompetitorAnalysisMajoo.md](
 
 | PR | Scope | Decisions | Notes |
 |----|-------|-----------|-------|
-| 8.1 | Outbox dead-letter, attempts, backoff, purge of technical tables (P0-08) | — | Foundation for the message and print queues |
-| 8.2 | Messaging: `message_outbox` + sender interface (`log`, SMS aggregator), `otp_challenges`, `customers` with verified phone, staff PIN reset by SMS; demo owner e-mail back to the owner's Gmail | V4, V5, V6 | SMS provider picked by price; WhatsApp driver waits for a domain (V8) |
+| 8.1 | Outbox dead-letter, attempts, backoff, purge of technical tables (P0-08) | — | **Done** (PR #59, migration 000025) |
+| 8.2 | Messaging: `message_outbox` + sender interface (`log`, SMS aggregator), `otp_challenges`, `customers` with verified phone, staff PIN reset by SMS; demo owner e-mail back to the owner's Gmail | V4, V5, V6 | **Done** (migration 000026): drivers `log`/`disabled`; the provider driver waits for the owner to pick a vendor; WhatsApp waits for a domain (V8) |
 | 8.3 | Multi-payment (direct methods free, dynamic QRIS last), split by amount, cash rounding | V11, V12 | Changes payment initiation; extends the 4b/4c tests |
 | 8.4 | Outlet cash fund, expense categories, daily limit with `outlet_expense` approval, cashier settings (default float, blind count) | V13 | New ADR-007 action |
 | 8.5 | Partial refunds per item (proportional tax/service/discount), outlet cash as a refund source, RF1-a/b/d/f Midtrans refunds with `refund_pending` | RF1, V13 | A live sandbox proof needs the owner's sandbox keys in `.env` |

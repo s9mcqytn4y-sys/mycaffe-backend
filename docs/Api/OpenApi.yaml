@@ -35,6 +35,8 @@ tags:
     description: QR guest sessions, pay-first guest orders and the public order tracker (iteration 5b)
   - name: Realtime
     description: Outbox relay over WebSocket with single-use tickets, per-store sequence and replay (iteration 5c)
+  - name: Customers
+    description: Customer phone verification by SMS code (V4); verified phones unlock receipts, points and invoices later
   - name: Approvals
     description: Remote owner approval from the phone for void, refund, stock override and shift variance (ADR-007)
   - name: Receipts
@@ -667,6 +669,105 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /api/v1/pos/customers/verify:
+    post:
+      tags: [Customers]
+      operationId: startCustomerVerification
+      summary: Upsert a customer by phone and text a verification code (V4, order.pos.create)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phone]
+              properties:
+                phone:
+                  type: string
+                name:
+                  type: string
+      responses:
+        "202":
+          description: Code sent
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  challenge_id: {type: string, format: uuid}
+                  customer_id: {type: string, format: uuid}
+                  phone: {type: string}
+                  expires_at: {type: string, format: date-time}
+        "422":
+          description: VALIDATION_FAILED (phone, name)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: OTP_RATE_LIMITED (one code per minute, 5 per hour per phone)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: SMS_UNAVAILABLE (SMS_DRIVER=disabled)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/pos/customers/verify/{id}/confirm:
+    post:
+      tags: [Customers]
+      operationId: confirmCustomerVerification
+      summary: Confirm the code read out by the customer; marks the phone verified (audited)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code:
+                  type: string
+      responses:
+        "200":
+          description: Verified customer
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: {type: string, format: uuid}
+                  phone: {type: string}
+                  name: {type: string}
+                  phone_verified_at: {type: string, format: date-time}
+        "400":
+          description: OTP_INVALID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: NOT_FOUND
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /api/v1/pos/orders:
     get:
       tags: [Orders]
@@ -3167,6 +3268,92 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /api/v1/auth/staff/pin/forgot-sms:
+    post:
+      tags: [Auth]
+      operationId: forgotStaffPINSMS
+      summary: Text a 6-digit reset code to the staff phone (V4); always 202 so phones cannot be enumerated
+      x-implementation-status: implemented
+      security: []
+      description: One code per phone per minute and 5 per hour (excess requests are silently dropped); per-IP budget shared with login failures; strict Nginx limit.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phone]
+              properties:
+                store_slug:
+                  type: string
+                phone:
+                  type: string
+      responses:
+        "202":
+          description: Accepted
+        "400":
+          description: INVALID_REQUEST
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: RATE_LIMITED (per IP)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: SMS_UNAVAILABLE (SMS_DRIVER=disabled)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/auth/staff/pin/reset-sms:
+    post:
+      tags: [Auth]
+      operationId: resetStaffPINSMS
+      summary: Set a new PIN with the SMS code; revokes every session and e-mails a PIN-changed notice
+      x-implementation-status: implemented
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phone, code, pin]
+              properties:
+                store_slug:
+                  type: string
+                phone:
+                  type: string
+                code:
+                  type: string
+                pin:
+                  type: string
+      responses:
+        "200":
+          description: PIN set
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  store_slug: {type: string}
+                  email: {type: string}
+        "400":
+          description: OTP_INVALID (wrong, used or expired code; 5 tries per code) / PIN_REJECTED / INVALID_REQUEST
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: RATE_LIMITED (per IP)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /api/v1/auth/staff/pin/forgot:
     post:
       tags: [Auth]
@@ -3400,6 +3587,65 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /api/v1/staff/{id}/phone:
+    post:
+      tags: [Staff]
+      operationId: setStaffPhone
+      summary: Record the staff phone that receives PIN reset codes (owner; audited STAFF_PHONE_SET)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phone]
+              properties:
+                phone:
+                  type: string
+      responses:
+        "200":
+          description: Normalised E.164 phone
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: {type: string, format: uuid}
+                  phone: {type: string, example: "+6281234567890"}
+        "403":
+          description: FORBIDDEN
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: STAFF_NOT_FOUND
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: CONFLICT (phone used by another staff member)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: VALIDATION_FAILED (phone)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /api/v1/staff/{id}/temporary-pin:
     post:
       tags: [Staff]

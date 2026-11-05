@@ -36,3 +36,6 @@ Thumbs.db
 !.vscode/launch.json
 !.vscode/tasks.json
 .idea/
+
+# Generated seed WebP binaries (hosted on R2 CDN https://cdn.abbdullaziz.online/seeds/ and reproducible via scripts/generate_seed_assets.py)
+docs/assets/seeds/**/*.webp

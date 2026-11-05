@@ -32,6 +32,8 @@ func openIntegrationAppDB(t *testing.T) *sqlx.DB {
 	if err != nil {
 		t.Fatalf("failed to connect to PostgreSQL as mycaffe_app: %v", err)
 	}
+	db.SetMaxOpenConns(6)
+	db.SetMaxIdleConns(2)
 	t.Cleanup(func() {
 		_ = db.Close()
 	})
@@ -603,8 +605,25 @@ func TestOrderServiceIntegration_EndToEnd(t *testing.T) {
 	})
 
 	t.Run("8_LegacyEmptyRequestHashAndBillingModeGuards", func(t *testing.T) {
-		// Seeded order e0000001-0000-4000-8000-000000000001 has idempotency_key 'idem-seed-order-0001' and request_hash ''
-		_, err := svc.CreateOrder(ctx, storeAID, service.OrderCreationInput{
+		// Ensure a legacy order row with idempotency_key 'idem-seed-order-0001' and empty request_hash '' exists
+		err := database.WithTenantTx(ctx, db, storeAID, func(tx *sqlx.Tx) error {
+			_, execErr := tx.ExecContext(ctx, `
+				INSERT INTO orders (
+					id, store_id, idempotency_key, request_hash, order_number, queue_number, table_number,
+					customer_name, customer_phone, order_type, billing_mode, status, payment_status,
+					subtotal_amount, discount_amount, tax_amount, service_charge_amount, total_amount, paid_amount
+				) VALUES (
+					'e0000001-0000-4000-8000-000000000001', $1, 'idem-seed-order-0001', '',
+					'ORD-LEGACY-0001', 'A98', 'Meja 04', 'Alexander Budi', '081311223344',
+					'dine_in', 'pay_first', 'served', 'paid', 50000, 0, 5000, 2500, 57500, 57500
+				) ON CONFLICT (id) DO NOTHING`, storeAID)
+			return execErr
+		})
+		if err != nil {
+			t.Fatalf("failed to insert legacy empty request_hash fixture: %v", err)
+		}
+
+		_, err = svc.CreateOrder(ctx, storeAID, service.OrderCreationInput{
 			IdempotencyKey: "idem-seed-order-0001",
 			TableNumber:    "Meja 04",
 			CustomerName:   "Alexander Budi",

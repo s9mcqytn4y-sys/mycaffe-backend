@@ -134,7 +134,40 @@ func TestDirectAppRoleLoginAndTenantRLS(t *testing.T) {
 		t.Fatalf("expected 0 stores without tenant context under mycaffe_app, got %d", unAuthCount)
 	}
 
-	// 3. Resolve webhook context via SECURITY DEFINER helper before tenant context is set
+	// 3. Seed a self-contained fixture order + payment for Store A (since db/seeds/development.sql has 0 seeded orders),
+	//    then resolve webhook context via SECURITY DEFINER helper before tenant context is set.
+	storeAID := uuid.MustParse("11111111-1111-4111-8111-111111111111")
+	fixtureOrderID := uuid.MustParse("30000001-0000-4000-8000-000000000099")
+	fixturePaymentID := uuid.MustParse("40000001-0000-4000-8000-000000000099")
+	err = database.WithTenantTx(ctx, db, storeAID, func(tx *sqlx.Tx) error {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO orders (
+				id, store_id, idempotency_key, request_hash, order_number, queue_number, table_number,
+				customer_name, customer_phone, order_type, billing_mode, status, payment_status,
+				subtotal_amount, discount_amount, tax_amount, service_charge_amount, total_amount, paid_amount
+			) VALUES (
+				$1, $2, 'idem-rls-test-0001', 'hash-rls-test-0001', 'ORD-RLS-TEST-0001', 'A99', 'M-01',
+				'Pelanggan Uji RLS', '081200000099', 'dine_in', 'pay_first', 'served', 'paid',
+				24000, 0, 2400, 0, 26400, 26400
+			) ON CONFLICT (id) DO NOTHING
+		`, fixtureOrderID, storeAID); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, `
+			INSERT INTO payments (
+				id, store_id, order_id, attempt_no, idempotency_key, request_hash,
+				method, provider, provider_order_id, amount, status
+			) VALUES (
+				$1, $2, $3, 1, 'idem-pay-rls-test-0001', '0000000000000000000000000000000000000000000000000000000000000001',
+				'qris', 'midtrans', 'ORD-20261028-0001', 26400, 'pending'
+			) ON CONFLICT (id) DO NOTHING
+		`, fixturePaymentID, storeAID, fixtureOrderID)
+		return err
+	})
+	if err != nil {
+		t.Fatalf("failed to insert fixture order/payment under WithTenantTx: %v", err)
+	}
+
 	var resolved struct {
 		StoreID uuid.UUID `db:"store_id"`
 		OrderID uuid.UUID `db:"order_id"`
@@ -143,7 +176,6 @@ func TestDirectAppRoleLoginAndTenantRLS(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve_payment_webhook_context failed under mycaffe_app: %v", err)
 	}
-	storeAID := uuid.MustParse("11111111-1111-4111-8111-111111111111")
 	if resolved.StoreID != storeAID {
 		t.Fatalf("expected resolved store_id %s, got %s", storeAID, resolved.StoreID)
 	}

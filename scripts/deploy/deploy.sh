@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Deploy pinned image digests with a pre-deploy backup and automatic rollback (P0-05).
 #
-#   deploy.sh <api-digest> [web-digest]   deploy; web keeps the running digest when omitted
+#   deploy.sh <api-digest> [web-digest]   deploy; web keeps the running digest when omitted, and stays off
+#                                         while no web digest was ever given (API-only, decision W3)
 #   deploy.sh rollback                    redeploy the previous recorded digests
 #
 # A digest is sha256:<64 hex>, printed in the summary of the "Release - Publish" workflow run.
@@ -43,7 +44,7 @@ else
   NEW_WEB="${2:-${CUR_WEB}}"
 fi
 [[ "${NEW_API}" =~ ${DIGEST_RE} ]] || die "Usage: deploy.sh <api sha256:digest> [web sha256:digest] | rollback (got api='${NEW_API}')."
-[[ "${NEW_WEB}" =~ ${DIGEST_RE} ]] || die "A web digest is required on the first deploy (got web='${NEW_WEB}')."
+[[ -z "${NEW_WEB}" || "${NEW_WEB}" =~ ${DIGEST_RE} ]] || die "Invalid web digest (got web='${NEW_WEB}')."
 
 wait_healthy() { # expected api digest
   local deadline=$(( SECONDS + HEALTH_TIMEOUT_S )) id image status
@@ -61,7 +62,8 @@ wait_healthy() { # expected api digest
 }
 
 apply() { # api digest, web digest
-  export API_IMAGE_DIGEST="$1" WEB_IMAGE_DIGEST="$2"
+  export API_IMAGE_DIGEST="$1" WEB_IMAGE_DIGEST="$2" COMPOSE_PROFILES=""
+  [[ -n "$2" ]] && export COMPOSE_PROFILES=web
   log "Pulling api@$1 web@$2 ..."
   compose pull --quiet || return 1
   log "Starting (migrate runs before api) ..."

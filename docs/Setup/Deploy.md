@@ -21,8 +21,8 @@ Cloudflare, so there is no Certbot and no certificate volume. The firewall and p
 On the VPS, as user `mycaffe`, from `/opt/mycaffe` (the released tag's `deploy/` and `scripts/`, see [BackupAndRestore.md](BackupAndRestore.md) §2):
 
 ```bash
-scripts/deploy/deploy.sh sha256:<api digest>                      # web keeps its running digest
-scripts/deploy/deploy.sh sha256:<api digest> sha256:<web digest>  # first deploy, or a new web image
+scripts/deploy/deploy.sh sha256:<api digest>                      # web keeps its running digest; API-only while none was given
+scripts/deploy/deploy.sh sha256:<api digest> sha256:<web digest>  # adds or updates the optional web frontend (profile `web`, W3)
 ```
 
 What it does, in order:

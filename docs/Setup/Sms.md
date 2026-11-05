@@ -1,31 +1,39 @@
-# SMS One-Time Codes (decisions V4, V5)
+# SMS & OTP Delivery Setup
 
-SMS is used only for **staff PIN reset** and **customer phone verification** (V4). WhatsApp receipts
-reuse the same `message_outbox` queue in v0.9 once a domain allows Meta business verification (V8).
+SMS delivers two kinds of 6-digit OTPs (owner decision **V4**, **V5**):
 
-## Drivers
+- **Customer phone verification at the cashier** (`POST /api/v1/pos/customers/verify` -> `POST /api/v1/pos/customers/verify/:id/confirm`), storing the verified customer on the order when provided.
+- **Staff self-service PIN reset by phone** (`POST /api/v1/auth/staff/pin/forgot-sms` -> `POST /api/v1/auth/staff/pin/reset-sms`), after the owner has set a verified phone on the staff member (`POST /api/v1/staff/:id/phone`).
 
-| `SMS_DRIVER` | Where | Behavior |
-|----------------|-------|----------|
-| `log` (default in development/test) | Local only | The message, including the code, is printed to the API log. Refused in staging and production, because codes are secrets |
-| `disabled` (default in staging/production) | Demo until a provider is chosen | SMS endpoints answer `503 SMS_UNAVAILABLE`; nothing is queued |
-| provider driver | Demo and production | Not built yet: added behind `sms.Sender` when the owner picks a local aggregator and puts its API key in `.env` |
+Messages are queued in `message_outbox` inside the caller's tenant transaction and delivered asynchronously by the background worker in [`internal/service/message_service.go`](file:///c:/Projects/myCaffe-backend/internal/service/message_service.go) (5-second poll, up to 5 attempts with exponential backoff).
 
-## Limits
+## Supported `SMS_DRIVER` Modes
 
-| Limit | Value |
-|-------|-------|
-| Code | 6 digits, valid for 5 minutes, at most 5 tries; only SHA-256(id + code) is stored |
-| Per phone and purpose | 1 code per minute, 5 per hour |
-| Public staff endpoints | Shared per-IP budget of 20 per 15 minutes, plus the strict Nginx `limit_req` zone |
-| Message body | Scrubbed after delivery or final failure; purged after 90 days with the other queues |
+| Driver | Allowed Environments | Cost | Description |
+| :--- | :--- | :--- | :--- |
+| `log` | `development`, `test` (**refused in `staging` & `production`**) | Free | Logs `[SMS LOG DRIVER] to=+628... body="..."` to structured stdout. Blocked in `staging`/`production` so OTP codes never leak into shared container logs. |
+| `email` | `development`, `test`, `staging` (Demo), `production` | **100% Free** | **SMS-to-Email Bridge** ([`sms.EmailSender`](file:///c:/Projects/myCaffe-backend/internal/pkg/sms/sms.go)). Wraps the active `mailer.Sender` (`EMAIL_DRIVER=smtp`) and delivers SMS OTP messages in real time to `SMS_EMAIL_TO` (or `EMAIL_FROM_ADDRESS`) with subject `[MyCaffe SMS Gateway] Pesan untuk +628...`. Ideal for live end-to-end OTP verification during client demos on `abbdullaziz.online` without paying telco SMS fees. |
+| `webhook` | `development`, `test`, `staging`, `production` (`https://` required in `production`) | Free / BYO Gateway | **HTTP Webhook Bridge** ([`sms.WebhookSender`](file:///c:/Projects/myCaffe-backend/internal/pkg/sms/sms.go)). Sends `POST` JSON `{"to":"+628...","body":"..."}` with optional `Authorization: Bearer <SMS_WEBHOOK_TOKEN>` to `SMS_WEBHOOK_URL` (compatible with Telegram Bot bridge, WhatsApp Cloud API worker, Fonnte, or Zenziva). |
+| `disabled` | All environments | Free | Turns off SMS delivery; SMS endpoints fail closed with `503 SMS_UNAVAILABLE` while email PIN reset (`POST /api/v1/auth/staff/pin/forgot`) continues to work. |
 
-## Flows
+## Environment Variables
 
-1. **Staff PIN reset:**
-   - The owner records the staff phone with `POST /api/v1/staff/:id/phone`.
-   - The staff member calls `POST /api/v1/auth/staff/pin/forgot-sms {store_slug, phone}`. It always answers 202.
-   - The staff member then calls `POST /api/v1/auth/staff/pin/reset-sms {store_slug, phone, code, pin}`. This revokes every session and sends the "PIN changed" e-mail.
-2. **Customer verification:**
-   - The cashier calls `POST /api/v1/pos/customers/verify {phone, name?}`, which returns a `challenge_id`.
-   - The customer reads the code out, and the cashier calls `POST /api/v1/pos/customers/verify/:id/confirm {code}`.
+```dotenv
+# Driver selection: log | email | webhook | disabled
+SMS_DRIVER=email
+
+# Destination inbox when SMS_DRIVER=email (defaults to EMAIL_FROM_ADDRESS if omitted)
+SMS_EMAIL_TO=owner@abbdullaziz.online
+
+# Endpoint and optional Bearer token when SMS_DRIVER=webhook
+SMS_WEBHOOK_URL=
+SMS_WEBHOOK_TOKEN=
+```
+
+## Phone Format & Abuse Limits
+
+- Indonesian inputs (`0812…`, `62812…`, `+62 812-…`) are normalized to E.164 (`+62812…`); Indonesian mobile numbers must start with `8` after `+62`. Other international E.164 numbers (`+1…`, `+65…`) are accepted as-is.
+- Per-phone cooldown: **60 seconds** between sends.
+- Per-phone daily cap: **5 OTPs per UTC day**.
+- OTP TTL: **5 minutes**, single-use, maximum **5 verification attempts** before the code is burned.
+- Codes are stored only as `SHA-256(code)` in `phone_verifications.code_hash` and `staff_pin_resets.token_hash`.

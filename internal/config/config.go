@@ -35,17 +35,22 @@ type Config struct {
 	StaffPINLockout         time.Duration
 
 	// Email (owner decision E5): "log" writes emails to the server log (dev/test only),
-	// "smtp" delivers through SMTP (Gmail app password for dev/demo, Hostinger for production).
+	// "smtp" delivers through SMTP (Gmail app password for dev/demo, Hostinger for production),
+	// "disabled" turns off email delivery outside production.
 	EmailDriver string
-	// SMSDriver is log (development/test only: OTPs are secrets) or disabled (V4, V5).
-	SMSDriver      string
-	SMTPHost       string
-	SMTPPort       int
-	SMTPUsername   string
-	SMTPPassword   string
-	SMTPTLSMode    string // "starttls" (587) or "implicit" (465)
-	EmailFromEmail string
-	EmailFromName  string
+	// SMSDriver is "log" (development/test only: OTPs are secrets), "email" (free SMS-to-Email SMTP bridge),
+	// "webhook" (HTTP POST gateway for Telegram/WhatsApp/Fonnte), or "disabled" (V4, V5).
+	SMSDriver       string
+	SMSEmailTo      string
+	SMSWebhookURL   string
+	SMSWebhookToken string
+	SMTPHost        string
+	SMTPPort        int
+	SMTPUsername    string
+	SMTPPassword    string
+	SMTPTLSMode     string // "starttls" (587) or "implicit" (465)
+	EmailFromEmail  string
+	EmailFromName   string
 	// AppPublicURL is the frontend origin used in links inside emails.
 	AppPublicURL string
 
@@ -173,6 +178,9 @@ func LoadConfig() (*Config, error) {
 		StaffPINLockout:         staffPINLockout,
 		EmailDriver:             emailDriver,
 		SMSDriver:               smsDriver,
+		SMSEmailTo:              strings.TrimSpace(getEnv("SMS_EMAIL_TO", getEnv("EMAIL_FROM_ADDRESS", getEnv("SMTP_USERNAME", "")))),
+		SMSWebhookURL:           strings.TrimSpace(getEnv("SMS_WEBHOOK_URL", "")),
+		SMSWebhookToken:         strings.TrimSpace(getEnv("SMS_WEBHOOK_TOKEN", "")),
 		SMTPHost:                getEnv("SMTP_HOST", ""),
 		SMTPPort:                smtpPort,
 		SMTPUsername:            getEnv("SMTP_USERNAME", ""),
@@ -194,7 +202,7 @@ func LoadConfig() (*Config, error) {
 		R2PrivateBucketName:     getEnv("R2_PRIVATE_BUCKET_NAME", ""),
 		R2PublicURL:             getEnv("R2_PUBLIC_URL", ""),
 		SentryDSN:               getEnv("SENTRY_DSN", ""),
-		SentryEnvironment:       getEnv("SENTRY_ENVIRONMENT", "development"),
+		SentryEnvironment:       getEnv("SENTRY_ENVIRONMENT", appEnv),
 	}
 
 	if err := ValidateConfig(cfg); err != nil {
@@ -354,8 +362,29 @@ func validateSMSConfig(cfg *Config) error {
 			return fmt.Errorf("[SECURITY FAIL-CLOSED] SMS_DRIVER=log would print OTP codes; not allowed in %s", cfg.AppEnv)
 		}
 		return nil
+	case "email":
+		if cfg.EmailDriver != "smtp" && cfg.EmailDriver != "log" {
+			return errors.New("SMS_DRIVER=email requires EMAIL_DRIVER=smtp (or EMAIL_DRIVER=log in development/test)")
+		}
+		recipient := strings.TrimSpace(cfg.SMSEmailTo)
+		if recipient == "" {
+			recipient = strings.TrimSpace(cfg.EmailFromEmail)
+		}
+		if recipient == "" || containsPlaceholderPattern(recipient) {
+			return errors.New("SMS_DRIVER=email requires a valid non-placeholder SMS_EMAIL_TO or EMAIL_FROM_ADDRESS")
+		}
+		return nil
+	case "webhook":
+		u, err := url.Parse(strings.TrimSpace(cfg.SMSWebhookURL))
+		if err != nil || u.Scheme == "" || u.Host == "" {
+			return errors.New("SMS_DRIVER=webhook requires a valid absolute SMS_WEBHOOK_URL")
+		}
+		if cfg.AppEnv == "production" && u.Scheme != "https" {
+			return errors.New("[SECURITY FAIL-CLOSED] production SMS_WEBHOOK_URL must use https")
+		}
+		return nil
 	}
-	return fmt.Errorf("invalid SMS_DRIVER %q: allowed values are log, disabled", cfg.SMSDriver)
+	return fmt.Errorf("invalid SMS_DRIVER %q: allowed values are log, email, webhook, disabled", cfg.SMSDriver)
 }
 
 func containsPlaceholderPattern(val string) bool {
@@ -418,9 +447,14 @@ func validateEmailConfig(cfg *Config) error {
 			return errors.New("[SECURITY FAIL-CLOSED] EMAIL_DRIVER=log is not allowed in production")
 		}
 		return nil
+	case "disabled":
+		if cfg.AppEnv == "production" {
+			return errors.New("[SECURITY FAIL-CLOSED] EMAIL_DRIVER=disabled is not allowed in production")
+		}
+		return nil
 	case "smtp":
 	default:
-		return fmt.Errorf("invalid EMAIL_DRIVER %q: allowed values are log, smtp", cfg.EmailDriver)
+		return fmt.Errorf("invalid EMAIL_DRIVER %q: allowed values are log, smtp, disabled", cfg.EmailDriver)
 	}
 	if cfg.SMTPHost == "" || cfg.SMTPUsername == "" || cfg.SMTPPassword == "" || cfg.EmailFromEmail == "" {
 		return errors.New("EMAIL_DRIVER=smtp requires SMTP_HOST, SMTP_USERNAME, SMTP_PASSWORD and EMAIL_FROM_ADDRESS (or set EMAIL_DRIVER=log outside production)")

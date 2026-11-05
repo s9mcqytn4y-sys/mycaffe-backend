@@ -93,8 +93,10 @@ or shift), `amount`, `params`, `reason`, `status` (`pending`, `approved`, `rejec
 - **`outlet_expense`** (PR 8.4, V13): a cashier expense from the outlet fund that takes the store day over
   `outlet_daily_expense_limit`. `reference_id` is the store; `params` binds `amount` and `category`.
 
+- **`discount`** (PR 8.6): a discount above `cashier_max_discount_bps` on an unpaid pay-first order.
+  `reference_id` is the order; `params.amount` binds the discount in rupiah.
+
 ## 8. Not decided here
 
 - Web Push notifications to a closed app (needs a domain and VAPID keys).
-- Approval for discounts above `cashier_max_discount_bps`: today that path has no owner PIN at all.
 - A `manager` role that could approve.

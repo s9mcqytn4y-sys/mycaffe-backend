@@ -21,7 +21,7 @@ prospective-client demo waits for v0.8. Benchmark: [CompetitorAnalysisMajoo.md](
 | 8.3 | Multi-payment (direct methods free, dynamic QRIS last), split by amount, cash rounding | V11, V12 | **Done** (migration 000027). Split by amount is covered by partial tenders (each payer pays an amount on the same split), so no separate split mode |
 | 8.4 | Outlet cash fund, expense categories, daily limit with `outlet_expense` approval, cashier settings (default float, blind count) | V13 | **Done** (migration 000028): fixed categories (ingredients, operational, other) instead of a category table; ADR-007 action `outlet_expense` |
 | 8.5 | Partial refunds per item (proportional tax/service/discount), outlet cash as a refund source, RF1-a/b/d/f Midtrans refunds with `refund_pending` | RF1, V13 | Split in two. **8.5a done** (migration 000029): partial refunds by lines, outlet cash source, hand-back of a tender on a partly paid bill, idempotent line refunds. **8.5b** Midtrans API refunds with `refund_pending` follows; a live sandbox proof needs the owner's sandbox keys |
-| 8.6 | Discount approval above `cashier_max_discount_bps` (ADR-007 action `discount`), compliment as an approved 100 % discount | V12 | — |
+| 8.6 | Discount approval above `cashier_max_discount_bps` (ADR-007 action `discount`), compliment as an approved 100 % discount | V12 | **Done** (migration 000031): `POST /pos/orders/:id/discount`, ADR-007 action `discount`, zero-total splits allowed for compliments |
 | 8.7 | Staff QR badges (revocable token) + PIN login | V14 | ADR-003 amendment |
 | 8.8 | P0-07 configuration (real client IP, Named Tunnel template, firewall runbook) and P0-09 provisioning/incident runbook | V8 | Live tunnel test waits for a domain |
 

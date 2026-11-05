@@ -16,7 +16,7 @@ concurrency:
 jobs:
   publish-ghcr:
     name: Build & Push ghcr.io/s9mcqytn4y-sys/mycaffe-api
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, mycaffe]
     timeout-minutes: 15
     permissions:
       contents: write # GitHub Release for v* tags

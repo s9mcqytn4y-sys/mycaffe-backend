@@ -16,8 +16,8 @@ concurrency:
 jobs:
   build-and-test:
     name: Go Lint, Vet, Security, Test, and Build
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+    runs-on: [self-hosted, linux, mycaffe]
+    timeout-minutes: 25
     steps:
       - name: Checkout code
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -71,8 +71,8 @@ jobs:
 
   docker-build:
     name: Docker, Compose, Nginx TLS Bootstrap & Backup/Restore Script Verification
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+    runs-on: [self-hosted, linux, mycaffe]
+    timeout-minutes: 30
     steps:
       - name: Checkout code
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -89,8 +89,8 @@ jobs:
           echo "e24b1c51293c1b15e4ba8d45bbc7891ba053f90278ec2698f3562c993e145fe7  trivy.tgz" | sha256sum --check
           sudo tar -xz -C /usr/local/bin -f trivy.tgz trivy
           rm -f trivy.tgz
-          trivy image --quiet --scanners vuln --ignore-unfixed --severity HIGH --exit-code 0 mycaffe-api:ci
-          trivy image --quiet --scanners vuln --ignore-unfixed --severity CRITICAL --exit-code 1 mycaffe-api:ci
+          trivy image --quiet --timeout 15m --scanners vuln --ignore-unfixed --severity HIGH --exit-code 0 mycaffe-api:ci
+          trivy image --quiet --timeout 15m --scanners vuln --ignore-unfixed --severity CRITICAL --exit-code 1 mycaffe-api:ci
 
       - name: Validate Docker Compose Configurations (Dev & Production)
         run: |
@@ -128,8 +128,8 @@ jobs:
 
   database-migration-test:
     name: PostgreSQL 18 Triple-Role, Migrator CLI, RLS, Direct mycaffe_app Login & Seed
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+    runs-on: [self-hosted, linux, mycaffe]
+    timeout-minutes: 30
     services:
       postgres:
         image: postgres:18-alpine
@@ -138,7 +138,7 @@ jobs:
           POSTGRES_PASSWORD: mycaffe_super_password
           POSTGRES_DB: mycaffe_test
         ports:
-          - 5432:5432
+          - 55432:5432
         options: >-
           --health-cmd pg_isready
           --health-interval 5s
@@ -163,7 +163,7 @@ jobs:
       - name: Bootstrap Non-Superuser Roles (mycaffe_migrator & mycaffe_app)
         env:
           PGHOST: localhost
-          PGPORT: "5432"
+          PGPORT: "55432"
           PGPASSWORD: mycaffe_super_password
           POSTGRES_USER: postgres
           POSTGRES_DB: mycaffe_test
@@ -177,7 +177,7 @@ jobs:
       - name: Apply Initial Schema Migration via Go Migrator CLI (as Non-Superuser mycaffe_migrator)
         env:
           APP_ENV: test
-          DATABASE_URL: postgres://mycaffe_migrator:mycaffe_migrator_password@localhost:5432/mycaffe_test?sslmode=disable
+          DATABASE_URL: postgres://mycaffe_migrator:mycaffe_migrator_password@localhost:55432/mycaffe_test?sslmode=disable
           DB_APP_USER: mycaffe_app
           DB_APP_PASSWORD: mycaffe_app_password
         run: |
@@ -187,12 +187,12 @@ jobs:
         env:
           PGPASSWORD: mycaffe_migrator_password
         run: |
-          psql -h localhost -p 5432 -U mycaffe_migrator -d mycaffe_test -v ON_ERROR_STOP=1 -f scripts/verify/verify_schema_constraints.sql
+          psql -h localhost -p 55432 -U mycaffe_migrator -d mycaffe_test -v ON_ERROR_STOP=1 -f scripts/verify/verify_schema_constraints.sql
 
       - name: Test Migration Rollback via Go Migrator CLI
         env:
           APP_ENV: test
-          DATABASE_URL: postgres://mycaffe_migrator:mycaffe_migrator_password@localhost:5432/mycaffe_test?sslmode=disable
+          DATABASE_URL: postgres://mycaffe_migrator:mycaffe_migrator_password@localhost:55432/mycaffe_test?sslmode=disable
         run: |
           go run ./cmd/migrate -action=down
           go run ./cmd/migrate -action=down
@@ -208,7 +208,7 @@ jobs:
       - name: Re-apply Migration & Verify Idempotent Up
         env:
           APP_ENV: test
-          DATABASE_URL: postgres://mycaffe_migrator:mycaffe_migrator_password@localhost:5432/mycaffe_test?sslmode=disable
+          DATABASE_URL: postgres://mycaffe_migrator:mycaffe_migrator_password@localhost:55432/mycaffe_test?sslmode=disable
           DB_APP_USER: mycaffe_app
           DB_APP_PASSWORD: mycaffe_app_password
         run: |
@@ -218,26 +218,26 @@ jobs:
       - name: Test Idempotent Seed Execution via Go Migrator CLI (Run Twice)
         env:
           APP_ENV: test
-          DATABASE_URL: postgres://mycaffe_migrator:mycaffe_migrator_password@localhost:5432/mycaffe_test?sslmode=disable
+          DATABASE_URL: postgres://mycaffe_migrator:mycaffe_migrator_password@localhost:55432/mycaffe_test?sslmode=disable
           PGPASSWORD: mycaffe_migrator_password
         run: |
           echo "Executing Seed (Run 1)..."
           go run ./cmd/migrate -action=seed
 
           echo "Capturing row counts after first seed..."
-          STORE_COUNT_BEFORE=$(psql -h localhost -p 5432 -U mycaffe_migrator -d mycaffe_test -t -A -c "SELECT COUNT(*) FROM stores;")
-          ORDER_COUNT_BEFORE=$(psql -h localhost -p 5432 -U mycaffe_migrator -d mycaffe_test -t -A -c "SELECT COUNT(*) FROM orders;")
-          MOD_GROUP_COUNT_BEFORE=$(psql -h localhost -p 5432 -U mycaffe_migrator -d mycaffe_test -t -A -c "SELECT COUNT(*) FROM modifier_groups;")
-          SPLIT_COUNT_BEFORE=$(psql -h localhost -p 5432 -U mycaffe_migrator -d mycaffe_test -t -A -c "SELECT COUNT(*) FROM payment_splits;")
+          STORE_COUNT_BEFORE=$(psql -h localhost -p 55432 -U mycaffe_migrator -d mycaffe_test -t -A -c "SELECT COUNT(*) FROM stores;")
+          ORDER_COUNT_BEFORE=$(psql -h localhost -p 55432 -U mycaffe_migrator -d mycaffe_test -t -A -c "SELECT COUNT(*) FROM orders;")
+          MOD_GROUP_COUNT_BEFORE=$(psql -h localhost -p 55432 -U mycaffe_migrator -d mycaffe_test -t -A -c "SELECT COUNT(*) FROM modifier_groups;")
+          SPLIT_COUNT_BEFORE=$(psql -h localhost -p 55432 -U mycaffe_migrator -d mycaffe_test -t -A -c "SELECT COUNT(*) FROM payment_splits;")
 
           echo "Executing Seed (Run 2 - Idempotency Verification)..."
           go run ./cmd/migrate -action=seed
 
           echo "Verifying row stability after second seed..."
-          STORE_COUNT_AFTER=$(psql -h localhost -p 5432 -U mycaffe_migrator -d mycaffe_test -t -A -c "SELECT COUNT(*) FROM stores;")
-          ORDER_COUNT_AFTER=$(psql -h localhost -p 5432 -U mycaffe_migrator -d mycaffe_test -t -A -c "SELECT COUNT(*) FROM orders;")
-          MOD_GROUP_COUNT_AFTER=$(psql -h localhost -p 5432 -U mycaffe_migrator -d mycaffe_test -t -A -c "SELECT COUNT(*) FROM modifier_groups;")
-          SPLIT_COUNT_AFTER=$(psql -h localhost -p 5432 -U mycaffe_migrator -d mycaffe_test -t -A -c "SELECT COUNT(*) FROM payment_splits;")
+          STORE_COUNT_AFTER=$(psql -h localhost -p 55432 -U mycaffe_migrator -d mycaffe_test -t -A -c "SELECT COUNT(*) FROM stores;")
+          ORDER_COUNT_AFTER=$(psql -h localhost -p 55432 -U mycaffe_migrator -d mycaffe_test -t -A -c "SELECT COUNT(*) FROM orders;")
+          MOD_GROUP_COUNT_AFTER=$(psql -h localhost -p 55432 -U mycaffe_migrator -d mycaffe_test -t -A -c "SELECT COUNT(*) FROM modifier_groups;")
+          SPLIT_COUNT_AFTER=$(psql -h localhost -p 55432 -U mycaffe_migrator -d mycaffe_test -t -A -c "SELECT COUNT(*) FROM payment_splits;")
           if [ "$STORE_COUNT_BEFORE" != "$STORE_COUNT_AFTER" ] || [ "$ORDER_COUNT_BEFORE" != "$ORDER_COUNT_AFTER" ] || [ "$MOD_GROUP_COUNT_BEFORE" != "$MOD_GROUP_COUNT_AFTER" ] || [ "$SPLIT_COUNT_BEFORE" != "$SPLIT_COUNT_AFTER" ]; then
             echo "Seed idempotency failed!"
             echo "Before: Stores=$STORE_COUNT_BEFORE, Orders=$ORDER_COUNT_BEFORE, ModGroups=$MOD_GROUP_COUNT_BEFORE, Splits=$SPLIT_COUNT_BEFORE"
@@ -248,8 +248,8 @@ jobs:
 
       - name: Verify Direct TCP Login, RLS & Transactional Order/Payment/Auth Services Connected as mycaffe_app
         env:
-          TEST_APP_DATABASE_URL: postgres://mycaffe_app:mycaffe_app_password@localhost:5432/mycaffe_test?sslmode=disable
-          TEST_MIGRATOR_DATABASE_URL: postgres://mycaffe_migrator:mycaffe_migrator_password@localhost:5432/mycaffe_test?sslmode=disable
+          TEST_APP_DATABASE_URL: postgres://mycaffe_app:mycaffe_app_password@localhost:55432/mycaffe_test?sslmode=disable
+          TEST_MIGRATOR_DATABASE_URL: postgres://mycaffe_migrator:mycaffe_migrator_password@localhost:55432/mycaffe_test?sslmode=disable
         run: |
           # Same command as ./scripts/dev.ps1 test-int: every package, so a new integration test cannot be left out.
           set -o pipefail
@@ -274,11 +274,15 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$METRICS_TEXTFILE_DIR"
-          docker run -d --name s3mock -p 127.0.0.1:9090:9090 adobe/s3mock:4.7.0
+          # Self-hosted runners are reused: unique container name, always removed.
+          docker rm -f s3mock-ci >/dev/null 2>&1 || true
+          trap "docker rm -f s3mock-ci >/dev/null 2>&1 || true" EXIT
+          docker run -d --name s3mock-ci -p 127.0.0.1:9090:9090 adobe/s3mock:4.7.0
           aws configure set default.s3.addressing_style path
           for i in $(seq 1 60); do curl -sf http://127.0.0.1:9090/ >/dev/null && break; sleep 1; done
           aws --endpoint-url "$R2_ENDPOINT" s3 mb "s3://$R2_BACKUP_BUCKET"
-          PG="$(docker ps -q --filter ancestor=postgres:18-alpine | head -n 1)"
+          # The job service container itself; other postgres:18-alpine containers on the host (the demo) are never touched.
+          PG="${{ job.services.postgres.id }}"
 
           # Two backups of the integration-test database: both land in hourly/, only the first is promoted.
           DB_CONTAINER="$PG" DB_NAME=mycaffe_test ./scripts/backup/backup_to_r2.sh

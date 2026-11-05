@@ -356,3 +356,33 @@ func (h *AuthHandler) SetStaffPhone(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"id": id, "phone": phone})
 }
+
+// IssueBadge handles POST /api/v1/staff/:id/badge (owner): returns the QR token once; the old card stops working.
+func (h *AuthHandler) IssueBadge(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		authError(c, http.StatusNotFound, "STAFF_NOT_FOUND", "Staf tidak ditemukan.")
+		return
+	}
+	badge, err := h.authService.IssueBadge(c.Request.Context(), currentStaff(c), id)
+	if err != nil {
+		lifecycleError(c, err)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusCreated, badge)
+}
+
+// RevokeBadge handles POST /api/v1/staff/:id/badge/revoke (owner).
+func (h *AuthHandler) RevokeBadge(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		authError(c, http.StatusNotFound, "STAFF_NOT_FOUND", "Staf tidak ditemukan.")
+		return
+	}
+	if err := h.authService.RevokeBadge(c.Request.Context(), currentStaff(c), id); err != nil {
+		lifecycleError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}

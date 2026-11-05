@@ -231,3 +231,11 @@ Down migration drops the new objects and columns, restores the previous audit CH
 ## 8. Rollback
 
 This ADR is documentation only. Each later increment is independently reversible: migration 000005 has a tested down migration; new routes are additive; the contained routes remain `503` in staging/production until 02.01-C passes, so reverting 02.01-B/C restores today's behaviour.
+
+## Amendment 2026-11-05: staff ID card badges (V14, PR 8.7)
+
+Login also accepts `badge` + `pin`: the badge is a QR token `<store_id>.<badge_id>.<secret>` printed
+on the staff ID card. It replaces typing the store code and e-mail only; the PIN check, lockout and
+session rules of D1–D6 are unchanged. Owners issue (`POST /api/v1/staff/:id/badge`, the old card is
+revoked) and revoke (`POST /api/v1/staff/:id/badge/revoke`) badges; only the SHA-256 of the secret is
+stored (`staff_badges`, migration 000032).

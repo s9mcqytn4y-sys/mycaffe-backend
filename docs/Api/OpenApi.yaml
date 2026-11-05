@@ -33,6 +33,8 @@ tags:
     description: Tables, derived table occupancy, table sessions and public QR resolution (iteration 5a)
   - name: Guest
     description: QR guest sessions, pay-first guest orders and the public order tracker (iteration 5b)
+  - name: Display
+    description: Queue TV displays with per-store display tokens (v0.9 PR 9.3, W7)
   - name: Realtime
     description: Outbox relay over WebSocket with single-use tickets, per-store sequence and replay (iteration 5c)
   - name: Customers
@@ -3129,6 +3131,133 @@ paths:
           description: Forbidden - lacks order.read.store
         "404":
           description: NOT_FOUND
+  /api/v1/store/display-tokens:
+    get:
+      tags: [Display]
+      operationId: listDisplayTokens
+      summary: Queue TV displays of the store, newest active first (store.settings.manage)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: Displays without their tokens
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [display_tokens]
+                properties:
+                  display_tokens:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/DisplayToken"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      tags: [Display]
+      operationId: createDisplayToken
+      summary: Register a queue TV display; the token is returned once (store.settings.manage, audited, W7)
+      description: At most 10 active displays per store. Put the token on the TV app; it reads with "Authorization Display <token>".
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+                  maxLength: 50
+      responses:
+        "201":
+          description: The display with its one-time token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DisplayToken"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: DISPLAY_TOKEN_LIMIT
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Blank or too long name
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationErrorResponse"
+  /api/v1/store/display-tokens/{id}/revoke:
+    post:
+      tags: [Display]
+      operationId: revokeDisplayToken
+      summary: Revoke a display at once; open WebSockets close on the next liveness check (audited, idempotent)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - $ref: "#/components/parameters/ResourceID"
+      responses:
+        "204":
+          description: Revoked (or already revoked)
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/v1/public/queue:
+    get:
+      security:
+        - DisplayToken: []
+      tags: [Display]
+      operationId: getQueueDisplay
+      summary: Today's queue for a TV display, queue numbers and status only (W7)
+      description: >-
+        Orders of the store's current day (store time zone) that are queued, preparing or ready, oldest first,
+        at most 200. Never names, phone numbers, items or amounts. Cache-Control no-store; nginx rate limit public_limit.
+      x-implementation-status: implemented
+      responses:
+        "200":
+          description: Queue
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QueueView"
+        "401":
+          description: DISPLAY_TOKEN_INVALID (missing, unknown, revoked, or store inactive)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/public/queue/ws-ticket:
+    post:
+      security:
+        - DisplayToken: []
+      tags: [Display]
+      operationId: issueDisplayWSTicket
+      summary: Single-use 30 s WebSocket ticket for channel queue (display token)
+      description: The channel carries queue.updated events with payload {queue_number, status} only.
+      x-implementation-status: implemented
+      responses:
+        "201":
+          description: Ticket for channel queue
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WSTicket"
+        "401":
+          description: DISPLAY_TOKEN_INVALID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /api/v1/public/receipts/{token}:
     get:
       security: []
@@ -4129,6 +4258,11 @@ paths:
 
 components:
   securitySchemes:
+    DisplayToken:
+      type: apiKey
+      in: header
+      name: Authorization
+      description: 'Queue TV display token sent as "Display <token>" (W7). Revocable by the owner; grants the public queue and channel queue only.'
     BearerStaffJWT:
       type: http
       scheme: bearer
@@ -4286,6 +4420,48 @@ components:
                 description: JSON snapshot of the selected modifiers
               notes:
                 type: string
+    DisplayToken:
+      type: object
+      required: [id, name, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        revoked_at:
+          type: string
+          format: date-time
+        last_seen_at:
+          type: string
+          format: date-time
+          description: Updated at most once a minute while the display reads the queue
+        token:
+          type: string
+          description: Only in the create response; "<store_id>.<token_id>.<secret>", only its hash is stored
+    QueueView:
+      type: object
+      required: [store_name, orders]
+      properties:
+        store_name:
+          type: string
+        orders:
+          type: array
+          items:
+            type: object
+            required: [queue_number, status, updated_at]
+            properties:
+              queue_number:
+                type: string
+              status:
+                type: string
+                enum: [queued, preparing, ready]
+              updated_at:
+                type: string
+                format: date-time
     WSTicket:
       type: object
       required: [ticket, expires_at, channels]

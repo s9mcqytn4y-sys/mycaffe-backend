@@ -306,6 +306,26 @@ func (h *POSHandler) VoidOrder(c *gin.Context) {
 	c.JSON(http.StatusOK, res)
 }
 
+// ApplyDiscount handles POST /api/v1/pos/orders/:id/discount (order.discount.apply).
+func (h *POSHandler) ApplyDiscount(c *gin.Context) {
+	orderID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		authError(c, http.StatusNotFound, "NOT_FOUND", "Pesanan tidak ditemukan.")
+		return
+	}
+	var in service.ApplyDiscountInput
+	if err := c.ShouldBindJSON(&in); err != nil {
+		authError(c, http.StatusBadRequest, "INVALID_REQUEST", "Data diskon tidak valid.")
+		return
+	}
+	res, err := h.operational.ApplyDiscount(c.Request.Context(), currentStaff(c), orderID, in)
+	if err != nil {
+		writeOperationalError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, res)
+}
+
 // RefundPayment handles POST /pos/orders/:id/payments/:payment_id/refund (permission payment.refund).
 func (h *POSHandler) RefundPayment(c *gin.Context) {
 	if h.operational == nil {
@@ -380,6 +400,8 @@ func writeOperationalError(c *gin.Context, err error) {
 		authError(c, http.StatusConflict, "GATEWAY_REFUND_PENDING", "Refund lewat penyedia pembayaran masih menunggu konfirmasi bank.")
 	case errors.Is(err, service.ErrGatewayRefundDenied):
 		authError(c, http.StatusConflict, "GATEWAY_REFUND_DENIED", "Bank menolak refund ini. Gunakan refund tunai, kas outlet, atau transfer.")
+	case errors.Is(err, service.ErrOrderNotDiscountable):
+		authError(c, http.StatusConflict, "ORDER_NOT_DISCOUNTABLE", "Diskon hanya untuk pesanan pay-first yang belum dibayar dan belum punya diskon.")
 	case errors.Is(err, service.ErrRefundExceedsPayment):
 		authError(c, http.StatusConflict, "REFUND_EXCEEDS_PAYMENT", "Nilai item yang direfund melebihi sisa pembayaran ini. Refund dari pembayaran lain.")
 	case errors.Is(err, service.ErrRefundLinesNotAllowed):

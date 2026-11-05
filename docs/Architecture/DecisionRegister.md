@@ -213,6 +213,24 @@ Status: decided. Lifts the 2026-11-03 feature freeze. Benchmark: the majoo "kasi
 | V14 | Staff ID card | **QR + PIN**: the badge QR is a revocable random identity token that replaces typing the e-mail; the 6-digit PIN and its limits stay mandatory |
 | V15 | Demo timing | The prospective-client demo **waits for v0.8** |
 
+## Environments and v0.9 cafe floor (recorded 2026-11-05, thirteenth interview)
+
+Status: decided. The owner bought `abbdullaziz.online` (supersedes V8 "no domain") and widened the agent's
+permissions to shell, `curl` and `.env*` files.
+
+| ID | Decision | Approved option |
+|----|----------|-----------------|
+| W1 | PR #65 (Cloudflare, Sentry, SMS bridges, `routes.go`) | **Rebased onto `staging` and cleaned** by the agent: v0.8 routes moved into `routes.go`, demo PINs removed from `.env.demo.example` and rotated in the local `.env.demo` |
+| W2 | Where the public demo runs | **WSL Ubuntu 24.04 as a VPS stand-in**: Docker Engine, ufw, GHCR images by digest through `deploy.sh`, cron, Named Tunnel `demo.abbdullaziz.online`. Docker Desktop stays for development and integration tests |
+| W3 | Frontend absent | **API-only demo**; the `web` service becomes an optional compose profile, enabled by `deploy.sh` when a web digest is given; Nginx answers a status page while it is absent |
+| W4 | OTP delivery in the demo | **`SMS_DRIVER=email`** to the owner's Gmail; production stays `disabled` until an SMS aggregator is chosen. The owner pastes a new Google App Password into `.env.demo` himself |
+| W5 | Merge tables | **One shared session**: the merged table's session links to the main session, its orders move there, both QR codes order into it; split unlinks; move transfers the whole session to an empty table. Audited and published on the POS channel |
+| W6 | Table timer | **Warnings only**: `table.timer_warning` (default 10 minutes before) and `table.timer_expired`; `ends_at` in the database scanned every 30 s; extensions audited; orders stay open after expiry |
+| W7 | Queue TV | **Per-store display token** (`store.id.secret`, hash only, revocable): read-only public endpoint and WebSocket channel `queue` with queue numbers and status only |
+| W8 | Kitchen, checker and label printing | **Server print-job queue**: `printers` (station, `escpos` or `tspl`, width, copies, footer, agent token) and `print_jobs` created on payment and round submit; a print agent claims, prints and acknowledges; retries and dead-letter like the outbox |
+| W9 | Digital receipts | **Email live; WhatsApp Cloud API driver built** and switched on when the owner adds the Meta token and phone number id; SMS sends the link only to verified phones (V4). Every send is audited and rate limited |
+| W10 | Order of work | **Environment first**: E1 PR #65, E2 WSL demo with `v0.8.0` by digest, E3 real-environment tests with `curl`; then v0.9 docs (PRD, brand, analytics) and PRs 9.1–9.4 |
+
 ## Awaiting owner approval
 
 None. The G-1/G-2 contract (PR #55) and ADR-007 (G-5) were approved on 2026-11-04.

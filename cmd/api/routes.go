@@ -187,6 +187,8 @@ func registerStaffAuthRoutes(v1 *gin.RouterGroup, h *handlerSet) {
 	owner.POST("/:id/pin-reset", h.auth.SendPINReset)
 	owner.POST("/:id/temporary-pin", h.auth.IssueTemporaryPIN)
 	owner.POST("/:id/phone", h.auth.SetStaffPhone)
+	owner.POST("/:id/badge", h.auth.IssueBadge)
+	owner.POST("/:id/badge/revoke", h.auth.RevokeBadge)
 }
 
 func registerStoreAndPOSRoutes(v1 *gin.RouterGroup, h *handlerSet) {
@@ -230,6 +232,7 @@ func registerStoreAndPOSRoutes(v1 *gin.RouterGroup, h *handlerSet) {
 	approvals.GET("", h.approval.ListPending)
 	approvals.POST("/:id/approve", h.approval.Approve)
 	approvals.POST("/:id/reject", h.approval.Reject)
+	pos.POST("/orders/:id/discount", h.auth.RequirePermission(rbac.OrderDiscountApply), h.pos.ApplyDiscount)
 	pos.POST("/orders/:id/void", h.auth.RequirePermission(rbac.OrderVoid), h.pos.VoidOrder)
 	pos.POST("/orders/:id/payments/:payment_id/refund", h.auth.RequirePermission(rbac.PaymentRefund), h.pos.RefundPayment)
 	pos.POST("/products/:id/stock-override", h.auth.RequirePermission(rbac.StockOverride), h.pos.OverrideStock)

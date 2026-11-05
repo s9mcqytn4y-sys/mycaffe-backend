@@ -4,7 +4,8 @@
 
 - **Production Server**: Single-VPS Hostinger KVM 2 (2 vCPU, 8 GB RAM, 100 GB NVMe SSD, Ubuntu 24.04 LTS).
 - **Deployment Model**: Modular Monolith orchestrated with Docker Compose (`deploy/docker/docker-compose.prod.yml`):
-  - `nginx`: Reverse proxy (ports 80/443), empty-volume TLS bootstrap (`deploy/nginx/entrypoint-tls-bootstrap.sh`), Let's Encrypt Certbot webroot renewal, rate limiting (30 rps general, 10 rps webhook), WebSocket upgrades (`/ws`), and gzip compression.
+  - `tunnel`: Named Cloudflare Tunnel, the only ingress (IN1, P0-07); TLS at the Cloudflare edge, no published ports.
+  - `nginx`: Internal reverse proxy on port 80 (no published ports), visitor IP from `CF-Connecting-IP`, rate limiting (30 rps general, 10 rps webhook), WebSocket upgrades (`/ws`), and gzip compression.
   - `migrate`: One-shot Go migration service (`/app/mycaffe-migrate -action=up`) running as non-superuser `mycaffe_migrator`.
   - `api`: Go backend service (`cmd/api`), exposed internally on port 8080, running as least-privilege `mycaffe_app` (`NOSUPERUSER NOBYPASSRLS`).
   - `web`: Standalone Next.js PWA, exposed internally on port 3000.

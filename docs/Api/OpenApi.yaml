@@ -2474,6 +2474,75 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/pos/orders/{id}/discount:
+    post:
+      tags: [Orders]
+      operationId: applyOrderDiscount
+      summary: Apply one order-level discount to an unpaid pay-first order (PR 8.6, order.discount.apply)
+      x-implementation-status: implemented
+      description: |
+        The discount comes off the subtotal before service and tax, which are recomputed. Above
+        store_settings.cashier_max_discount_bps a cashier needs owner_pin or approval_id of an approved
+        "discount" request with params.amount equal to the discount in rupiah. discount_bps 10000 is a
+        compliment: the total becomes 0 and the order is settled without a payment. Refused (409
+        ORDER_NOT_DISCOUNTABLE) when the order has a payment, a pending QRIS, a discount, or is a tab.
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                discount_amount: {type: integer, format: int64, minimum: 1, description: Rupiah; exclusive with discount_bps}
+                discount_bps: {type: integer, minimum: 1, maximum: 10000, description: Of the subtotal; exclusive with discount_amount}
+                reason: {type: string, maxLength: 500}
+                owner_pin: {type: string}
+                approval_id: {type: string, format: uuid}
+      responses:
+        "200":
+          description: Discount applied
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  order:
+                    $ref: "#/components/schemas/Order"
+                  compliment: {type: boolean}
+        "401":
+          description: INVALID_OWNER_PIN
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: NOT_FOUND
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: ORDER_NOT_DISCOUNTABLE / APPROVAL_INVALID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: VALIDATION_FAILED (discount_amount, discount_bps, reason) or OWNER_PIN_REQUIRED above the cashier limit
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationErrorResponse"
   /api/v1/pos/orders/{id}/void:
     post:
       tags: [POS Operational]
@@ -3742,6 +3811,74 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/staff/{id}/badge:
+    post:
+      tags: [Staff]
+      operationId: issueStaffBadge
+      summary: Issue a staff ID card QR token (owner, V14); the previous card stops working; audited
+      x-implementation-status: implemented
+      description: The token is returned once for printing as a QR code; only the SHA-256 of its secret is stored.
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "201":
+          description: New badge
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user_id: {type: string, format: uuid}
+                  token: {type: string}
+        "403":
+          description: FORBIDDEN
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: STAFF_NOT_FOUND
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/staff/{id}/badge/revoke:
+    post:
+      tags: [Staff]
+      operationId: revokeStaffBadge
+      summary: Revoke the staff member's active ID card (owner; audited)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Revoked
+        "403":
+          description: FORBIDDEN
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: STAFF_NOT_FOUND (no active badge)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /api/v1/staff/{id}/temporary-pin:
     post:
       tags: [Staff]
@@ -4477,7 +4614,7 @@ components:
       type: object
       required: [action, reference_id, reason]
       properties:
-        action: {type: string, enum: [void, refund, stock_override, shift_variance, outlet_expense]}
+        action: {type: string, enum: [void, refund, stock_override, shift_variance, outlet_expense, discount]}
         reference_id: {type: string, format: uuid, description: "Order (void), payment (refund), product (stock_override) or shift (shift_variance)"}
         params:
           type: object
@@ -4492,7 +4629,7 @@ components:
       required: [id, action, reference_id, reference_label, amount, params, reason, status, requested_by_name, expires_at, created_at]
       properties:
         id: {type: string, format: uuid}
-        action: {type: string, enum: [void, refund, stock_override, shift_variance, outlet_expense]}
+        action: {type: string, enum: [void, refund, stock_override, shift_variance, outlet_expense, discount]}
         reference_id: {type: string, format: uuid}
         reference_label: {type: string, description: "Order number, product name or drawer name"}
         amount: {type: integer, format: int64, description: "Server-computed; signed for shift_variance"}
@@ -4873,8 +5010,12 @@ components:
     StaffLoginRequest:
       type: object
       additionalProperties: false
-      required: [store_slug, email, pin]
+      required: [pin]
+      description: Either store_slug + email or badge (scanned staff ID card, V14), always with the PIN.
       properties:
+        badge:
+          type: string
+          description: QR token from the staff ID card; replaces store_slug and email, never the PIN.
         store_slug:
           type: string
           minLength: 1

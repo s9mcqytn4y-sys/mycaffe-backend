@@ -9,13 +9,20 @@ Production runs images pinned by digest (`ghcr.io/...@sha256:...`), never by a m
 3. For a `v*` tag the GitHub Release lists the same digest, with the SBOM and SLSA provenance attached.
 4. The web image digest comes from the frontend repository's release run the same way.
 
+## 1a. Ingress (IN1, P0-07)
+
+Production publishes **no ports**. A Named Cloudflare Tunnel (`tunnel` service, token in
+`CLOUDFLARE_TUNNEL_TOKEN`) carries traffic to Nginx on the internal edge network. TLS ends at
+Cloudflare, so there is no Certbot and no certificate volume. The firewall and provisioning steps are in
+[OperationsRunbook.md](OperationsRunbook.md).
+
 ## 2. Deploy
 
 On the VPS, as user `mycaffe`, from `/opt/mycaffe` (the released tag's `deploy/` and `scripts/`, see [BackupAndRestore.md](BackupAndRestore.md) §2):
 
 ```bash
-scripts/deploy/deploy.sh sha256:<api digest>                      # web keeps its running digest
-scripts/deploy/deploy.sh sha256:<api digest> sha256:<web digest>  # first deploy, or a new web image
+scripts/deploy/deploy.sh sha256:<api digest>                      # web keeps its running digest; API-only while none was given
+scripts/deploy/deploy.sh sha256:<api digest> sha256:<web digest>  # adds or updates the optional web frontend (profile `web`, W3)
 ```
 
 What it does, in order:

@@ -1,8 +1,8 @@
 # CLAUDE.md — MyCaffe Core POS Backend (`mycaffe-backend`)
 
 ## Project Overview
-`mycaffe-backend` is the Go 1.26 modular monolith backend for **MyCaffe**, a configurable, multi-tenant QR table ordering, Point of Sale (POS), Kitchen Display System (KDS), TV queue display, and owner backoffice platform for cafes and restaurants.
-- **Tech Stack**: Go 1.26, Gin Gonic (`github.com/gin-gonic/gin`), `sqlx` + `pgx/v5`, PostgreSQL 18 (`ENABLE ROW LEVEL SECURITY`), Midtrans Core API (direct HTTP, no Snap), Cloudflare R2 (dual-bucket S3 API), Sentry Go SDK, Prometheus metrics.
+`mycaffe-backend` is the Go 1.27 modular monolith backend for **MyCaffe**, a configurable, multi-tenant QR table ordering, Point of Sale (POS), Kitchen Display System (KDS), TV queue display, and owner backoffice platform for cafes and restaurants.
+- **Tech Stack**: Go 1.27, Gin Gonic (`github.com/gin-gonic/gin`), `sqlx` + `pgx/v5`, PostgreSQL 18 (`ENABLE ROW LEVEL SECURITY`), Midtrans Core API (direct HTTP, no Snap), Cloudflare R2 (dual-bucket S3 API), Sentry Go SDK, Prometheus metrics.
 - **Frontend**: Separate Next.js App Router + TypeScript + Tailwind CSS/PWA repository. Never create frontend code in this repository.
 - **Domain**: `abbdullaziz.online` (`https://demo.abbdullaziz.online` for Demo/Staging via Cloudflare Named Tunnel `mycaffe-demo`, `https://cdn.abbdullaziz.online` for R2 public media).
 
@@ -56,6 +56,6 @@ docker compose --env-file .env.demo -f deploy/docker/docker-compose.demo.yml up 
 - `internal/repository/postgres/` — `sqlx` PostgreSQL repositories executed inside `database.WithTenantTx`.
 - `internal/realtime/` — Tenant-isolated WebSocket hub (`hub.go`, `client.go`).
 - `internal/pkg/` — Focused infrastructure adapters (`database`, `jwt`, `mailer`, `metrics`, `midtrans`, `money`, `pin`, `rbac`, `receipt`, `sms`, `storage`).
-- `db/migrations/` — 29 sequential PostgreSQL 18 migrations (`000001`–`000029`).
+- `db/migrations/` — 32 sequential PostgreSQL 18 migrations (`000001`–`000032`); never edit a merged one.
 - `docs/` — Product (`docs/Product/`), Architecture & ADRs (`docs/Architecture/`), Setup (`docs/Setup/`), and Engineering (`docs/Engineering/`) documentation.
 

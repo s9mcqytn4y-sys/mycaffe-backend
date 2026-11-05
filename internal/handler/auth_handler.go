@@ -39,8 +39,10 @@ func NewAuthHandler(authService *service.AuthService) *AuthHandler {
 
 type StaffLoginRequest struct {
 	StoreSlug string `json:"store_slug"`
-	Email     string `json:"email" binding:"required"`
-	PIN       string `json:"pin" binding:"required"`
+	Email     string `json:"email"`
+	// Badge is the scanned staff ID card QR (V14), used instead of store_slug + email.
+	Badge string `json:"badge"`
+	PIN   string `json:"pin" binding:"required"`
 }
 
 var pinFormat = regexp.MustCompile(`^[0-9]{6}$`)
@@ -91,8 +93,8 @@ func (h *AuthHandler) Login(c *gin.Context) {
 
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxAuthBodyBytes)
 	var req StaffLoginRequest
-	if err := c.ShouldBindJSON(&req); err != nil || !pinFormat.MatchString(req.PIN) {
-		authError(c, http.StatusBadRequest, "INVALID_REQUEST", "Kode toko, email, dan PIN 6 digit wajib diisi.")
+	if err := c.ShouldBindJSON(&req); err != nil || !pinFormat.MatchString(req.PIN) || (req.Email == "" && req.Badge == "") {
+		authError(c, http.StatusBadRequest, "INVALID_REQUEST", "Kode toko dan email (atau kartu ID), serta PIN 6 digit wajib diisi.")
 		return
 	}
 	if req.StoreSlug == "" {
@@ -102,6 +104,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	tokens, err := h.authService.Login(c.Request.Context(), service.LoginInput{
 		StoreSlug: req.StoreSlug,
 		Email:     req.Email,
+		Badge:     req.Badge,
 		PIN:       req.PIN,
 		UserAgent: c.Request.UserAgent(),
 		ClientIP:  ip,

@@ -69,7 +69,7 @@ We adopt a **Single-VPS Modular Monolith Architecture** managed via **Docker Com
   - Pulls container images pinned by digest (`ghcr.io/s9mcqytn4y-sys/mycaffe-api@${API_IMAGE_DIGEST}` built by `.github/workflows/release-ghcr.yml` and `ghcr.io/s9mcqytn4y-sys/mycaffe-web@${WEB_IMAGE_DIGEST}`). Source code is never compiled on the production VPS.
   - Runs the one-shot `migrate` service (`/app/mycaffe-migrate -action=up`) under `COMPOSE_DATABASE_MIGRATION_URL` (`mycaffe_migrator` non-superuser owner role at `@postgres:5432`) with `pg_advisory_lock` before starting `api`.
   - Runs the `api` service under `COMPOSE_DATABASE_URL` (`mycaffe_app` non-superuser role with `NOBYPASSRLS` at `@postgres:5432`).
-  - Boots Nginx via `deploy/nginx/entrypoint-tls-bootstrap.sh` so a fresh VPS with an empty `certbot-etc` volume automatically creates a temporary bootstrap certificate, serves `/.well-known/acme-challenge/` on port 80 for `scripts/deploy/init-letsencrypt.sh`, and reloads when Let's Encrypt certificates are issued or renewed.
+  - *(Superseded 2026-11-05 by IN1 / P0-07: a Named Cloudflare Tunnel replaces ports 80/443, Certbot and the TLS bootstrap; see [Deploy.md](../Setup/Deploy.md) §1a.)* Previously booted Nginx via `deploy/nginx/entrypoint-tls-bootstrap.sh` so a fresh VPS with an empty `certbot-etc` volume automatically creates a temporary bootstrap certificate, serves `/.well-known/acme-challenge/` on port 80 for `scripts/deploy/init-letsencrypt.sh`, and reloads when Let's Encrypt certificates are issued or renewed.
   - Enforces HTTPS on `:443` (`ssl_protocols TLSv1.2 TLSv1.3; http2 on;`) and routes `/api/v1/payments/midtrans/webhook` directly to `api:8080` without HTTP 301/302 redirects.
 
 ### 2. Resource Allocation Budget (8 GB RAM Total)

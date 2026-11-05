@@ -28,8 +28,8 @@ per-device path (ADR-005, V9).
 | majoo capability | MyCaffe today | Target |
 |------------------|---------------|--------|
 | Four POS layouts, multi-device | Layout is a frontend concern; API serves POS, KDS, guest and owner | Frontend |
-| Barcode/SKU scan | Variants have SKUs; no lookup by SKU or barcode | v0.9 (`GET /pos/catalog?sku=`) |
-| Receipt to the customer | Digital receipt link (B1) | v0.9 e-mail; WhatsApp waits for a domain (V8); SMS via V5 |
+| Barcode/SKU scan | Variants have SKUs; no lookup by SKU or barcode | v0.10 with devices (`GET /pos/catalog?sku=`) |
+| Receipt to the customer | Digital receipt link (B1) | v0.9 e-mail and WhatsApp Cloud API driver (W9); SMS link to verified phones (V4) |
 | Offline sales, automatic sync | Not built | v0.10 per device (ADR-005) |
 | Local server master/client | Not built; contradicts I2 | v0.10b on demand (V9) |
 | Services workflow + "ready" e-mail | Not built | v0.12 |
@@ -45,14 +45,14 @@ per-device path (ADR-005, V9).
 | Void/refund with manager PIN or e-mailed token | Owner PIN, remote approval from the phone (ADR-007) | Done; discount approval in v0.8 |
 | Partial refund per product; drawer or outlet cash | Full refunds per payment (RF1-c); by-item split refunds | v0.8 partial lines + outlet cash source; RF1-a/b/d/f |
 | X/Z reports | Implemented (4b, B2) | Done |
-| Table layout, status, move/merge/split, timer | Tables, sessions, board, QR | v0.9 areas, move/merge/split, timer |
+| Table layout, status, move/merge/split, timer | Tables, sessions, board, QR | v0.9 areas (`tables.section`), move/merge/split, warning timer (W5, W6) |
 | Split by amount or by product | Equal-N and by-item splits (4c) | By-amount split in v0.8 with multi-payment |
 | Kitchen/checker/receipt printers, copies, footnote, label sticker | ESC/POS 58/80 mm receipts | v0.9 print jobs per station, copies, footer, TSPL labels |
 | KDS per item | KDS tickets per station (5d) | Done |
 | Order display TV with media | Not built | v0.9 queue display endpoint + WS `queue` |
 | Self order with e-wallet | QR pay-first with Midtrans QRIS (5b) | Done; promotions in v0.11 |
 | Dynamic QRIS, e-wallets, EDC | Midtrans Core API QRIS, gopay, shopeepay; EDC recorded manually | Done |
-| Customer display | Not built | v0.9, reuses the `pos` channel |
+| Customer display | Not built | v0.10 with devices, reuses the `pos` channel |
 | Menu books (breakfast/lunch menus) | Categories | v0.11 time-based menu books |
 | Shift schedules, attendance (majoo Teams) | Out of scope (V10) | — |
 
@@ -85,8 +85,8 @@ New tables per release. Every table is RLS-scoped by `store_id` and uses composi
 | v0.8 | `otp_challenges`, `customers` (phone, verified_at) | SMS OTP for PIN reset and customer verification (V4) |
 | v0.8 | `message_outbox` (channel `sms`, later `whatsapp`) | One delivery queue for SMS/WA, like `email_outbox` |
 | v0.8 | `outbox_events.dead_at`, `attempts` and purge jobs | P0-08 |
-| v0.9 | `table_areas`, `table_session_links` (merge), `table_timers` | Floor plan, merge/split, timers |
-| v0.9 | `printers`, `print_jobs` (station, copies, footer, format `escpos` or `tspl`) | Print routing, checker and label sticker |
+| v0.9 | `table_session_links` (merge), `table_timers`, `display_tokens`; areas reuse `tables.section` | Merge/split, timers, queue TV |
+| v0.9 | `printers`, `print_jobs` (station, copies, footer, format `escpos` or `tspl`), `receipt_deliveries` | Print routing, checker, label sticker, digital receipts |
 | v0.10 | `devices`, `device_pin_verifiers`, `offline_batches`, `offline_orders` | ADR-005 offline sync |
 | v0.11 | `sales_channels`, `channel_prices`, `promotions`, `customer_ledgers` (points, deposit), `coupons`, `invoices`, `invoice_reminders`, `menu_books` | Channels, loyalty, invoices |
 | v0.11 | `stock_ledger` (ADR-006) | Inventory |

@@ -355,6 +355,14 @@ BEGIN
     IF has_table_privilege('mycaffe_app', 'public.kds_tickets', 'DELETE') THEN
         RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may DELETE kds_tickets!';
     END IF;
+    -- 10F-17. Printers and print jobs (migration 000036): RLS on, never deleted by the app role.
+    IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.printers'::regclass)
+       OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.print_jobs'::regclass) THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: printers/print_jobs do not have row-level security enabled!';
+    END IF;
+    IF has_table_privilege('mycaffe_app', 'public.printers', 'DELETE') OR has_table_privilege('mycaffe_app', 'public.print_jobs', 'DELETE') THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may DELETE printers/print_jobs!';
+    END IF;
     -- 10F-16. Queue display tokens (migration 000035): RLS on, never deleted by the app role.
     IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.display_tokens'::regclass) THEN
         RAISE EXCEPTION 'SECURITY FAILURE: display_tokens does not have row-level security enabled!';

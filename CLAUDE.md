@@ -56,6 +56,6 @@ docker compose --env-file .env.demo -f deploy/docker/docker-compose.demo.yml up 
 - `internal/repository/postgres/` — `sqlx` PostgreSQL repositories executed inside `database.WithTenantTx`.
 - `internal/realtime/` — Tenant-isolated WebSocket hub (`hub.go`, `client.go`).
 - `internal/pkg/` — Focused infrastructure adapters (`database`, `jwt`, `mailer`, `metrics`, `midtrans`, `money`, `pin`, `rbac`, `receipt`, `sms`, `storage`).
-- `db/migrations/` — 35 sequential PostgreSQL 18 migrations (`000001`–`000035`); never edit a merged one.
+- `db/migrations/` — 36 sequential PostgreSQL 18 migrations (`000001`–`000036`); never edit a merged one.
 - `docs/` — Product (`docs/Product/`), Architecture & ADRs (`docs/Architecture/`), Setup (`docs/Setup/`), and Engineering (`docs/Engineering/`) documentation.
 

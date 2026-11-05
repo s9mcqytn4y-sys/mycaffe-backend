@@ -43,7 +43,7 @@ Sumber: panduan pengguna dan halaman produk majoo, dicek 2026-11-05. Detail pari
 | 9.1 | Pindah, gabung, pisah meja; filter area | W5 | `000033_table_session_links` (**selesai**) |
 | 9.2 | Timer meja (peringatan saja) | W6 | `000034_table_timers` (**selesai**) |
 | 9.3 | Layar antrean TV dengan token layar per toko | W7 | `000035_display_tokens` (**selesai**) |
-| 9.4 | Antrean cetak: printer per stasiun, checker, label TSPL, agen cetak | W8 | `000036_printers_print_jobs` |
+| 9.4 | Antrean cetak: printer per stasiun, checker, label TSPL, agen cetak | W8 | `000036_printers_print_jobs` (**selesai**) |
 | 9.5 | Struk digital: email, driver WhatsApp Cloud API, tautan SMS | W9 | `000037_receipt_deliveries` |
 
 Di luar lingkup v0.9: pencarian SKU/barcode dan customer display (pindah ke v0.10 bersama perangkat),
@@ -123,15 +123,18 @@ pernah melihat antrean toko B (tes RLS); batas laju per token.
 **Cerita:** Sebagai barista di kafe tanpa layar KDS, saya menerima tiket cetak di printer bar; kasir
 mencetak stiker label untuk setiap cup.
 
-- Tabel `printers`: `name`, `station` (`bar`, `kitchen`, `checker`, `receipt`, `label`), `format`
+- Tabel `printers`: `name`, `station` (`bar`, `kitchen`, `checker`, `label`; struk kasir tetap lewat RawBT dan
+  `GET /pos/orders/:id/receipt?format=escpos`), `format`
   (`escpos`, `tspl`), `paper_width_mm` (58/80 untuk ESC/POS; lebar label untuk TSPL), `copies` (1–5),
   `footer`, `agent_token_hash`, `is_active`.
 - Tabel `print_jobs`: `printer_id`, `order_id`, `kind` (`ticket`, `checker`, `receipt`, `label`),
   `payload` (byte siap cetak, dirender server), `status` (`pending`, `claimed`, `printed`, `failed`,
   `dead`), `attempts`, `claimed_at`, `printed_at`, `last_error`. Retry dan dead-letter mengikuti
   outbox (000025).
-- Pemicu: pembayaran lunas (pay-first) atau ronde dikirim (open tab) membuat satu job per printer
-  aktif di stasiun item tersebut; checker menerima seluruh pesanan; label satu per cup.
+- Pemicu: job dibuat bersama tiket KDS baru (pembayaran lunas atau ronde dikirim), sehingga webhook ganda
+  tidak mencetak dua kali. Satu job per printer aktif yang punya baris: stasiun bar/dapur barisnya sendiri,
+  checker seluruh pesanan atau ronde, label satu per cup minuman bar. Salinan (`copies`) sudah ada di payload.
+  Pengaturan printer yang tidak bisa dirender dilewati dengan log, tidak pernah menggagalkan pembayaran.
 - Agen cetak (aplikasi kecil di LAN kafe, di luar repo ini; RawBT tetap didukung lewat struk):
   `POST /print-agent/jobs/claim` → job berikut, `POST /print-agent/jobs/:id/ack` `{status, error}`.
   Autentikasi `Authorization: Printer <token>`, satu token per printer.

@@ -260,6 +260,7 @@ func main() {
 			approvals.GET("", approvalHandler.ListPending)
 			approvals.POST("/:id/approve", approvalHandler.Approve)
 			approvals.POST("/:id/reject", approvalHandler.Reject)
+			pos.POST("/orders/:id/discount", authHandler.RequirePermission(rbac.OrderDiscountApply), posHandler.ApplyDiscount)
 			pos.POST("/orders/:id/void", authHandler.RequirePermission(rbac.OrderVoid), posHandler.VoidOrder)
 			pos.POST("/orders/:id/payments/:payment_id/refund", authHandler.RequirePermission(rbac.PaymentRefund), posHandler.RefundPayment)
 			pos.POST("/products/:id/stock-override", authHandler.RequirePermission(rbac.StockOverride), posHandler.OverrideStock)

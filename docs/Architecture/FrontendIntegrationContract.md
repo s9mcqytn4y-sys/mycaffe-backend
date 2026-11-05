@@ -56,6 +56,12 @@ boleh dirender**, dan **celah yang harus ditutup backend**.
 - QRIS dinamis selalu melunasi sisa tagihan. Selama QRIS menunggu, pembayaran sebagian ditolak dengan `409 SPLIT_PAYMENT_PENDING`.
 - Bila `cash_rounding_step` aktif, tunai penutup harus mencakup nominal yang dibulatkan. Tampilkan `rounding_amount` sebagai "Pembulatan", dan hitung kembalian dari respons, bukan di klien.
 
+### Diskon dan compliment (v0.8, PR 8.6)
+
+- `POST /pos/orders/:id/discount {discount_amount | discount_bps, reason}` sebelum pembayaran apa pun. Total baru ada di respons; jangan hitung di klien.
+- `422 OWNER_PIN_REQUIRED` di atas batas kasir: minta approval `discount` dengan `params.amount`, lalu ulangi dengan `approval_id`.
+- `compliment: true` berarti pesanan sudah lunas dengan total 0 dan langsung masuk dapur.
+
 ### Kas outlet (v0.8, V13)
 
 - `GET /pos/outlet-cash` menampilkan saldo, pengeluaran hari ini, sisa tanpa approval, dan 50 mutasi terakhir.

@@ -115,6 +115,9 @@ func RenderESCPOS(r *Receipt, widthMM int, qrURL string) ([]byte, error) {
 				label += " - " + pay.SplitLabel
 			}
 			p.pair(label, rupiah(pay.Amount))
+			if pay.Rounding != 0 {
+				p.pair("  Pembulatan", rupiah(pay.Rounding))
+			}
 			if pay.CashTendered > 0 {
 				p.pair("  Diterima", rupiah(pay.CashTendered))
 				p.pair("  Kembali", rupiah(pay.Change))

@@ -38,6 +38,10 @@ func (qrisGateway) ChargeCoreAPI(_ context.Context, in midtrans.ChargeRequest) (
 	}, nil
 }
 
+func (qrisGateway) DirectRefund(context.Context, string, string, int64, string) (*coreapi.RefundResponse, error) {
+	return nil, errors.New("not used")
+}
+
 func (qrisGateway) CheckTransaction(context.Context, string) (*coreapi.TransactionStatusResponse, error) {
 	return nil, errors.New("not found")
 }
@@ -144,7 +148,7 @@ func TestGuestQROrderingIteration5bIntegration(t *testing.T) {
 		_, err := tx.ExecContext(ctx, `INSERT INTO tables (store_id, table_number, qr_token) VALUES ($1, $2, $3)`, expressID, "GX-"+expressQR[:6], expressQR)
 		return err
 	})
-	loginRes := call("POST", "/login", req{}, map[string]string{"store_slug": "central-cafe", "email": "owner.central@mycaffe.local", "pin": "482913"})
+	loginRes := call("POST", "/login", req{}, map[string]string{"store_slug": "central-cafe", "email": "abdulaziz543333@gmail.com", "pin": "482913"})
 	var owner struct {
 		AccessToken string `json:"access_token"`
 	}

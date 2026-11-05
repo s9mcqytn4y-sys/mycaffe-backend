@@ -74,7 +74,7 @@ func (h *ReportHandler) Summary(c *gin.Context) {
 		{"pajak", itoa(sum.Tax)}, {"service", itoa(sum.ServiceCharge)}, {"total", itoa(sum.Total)},
 		{"refund", itoa(sum.Refunded)}, {"bersih", itoa(sum.Net)}, {"jumlah_void", itoa(sum.VoidCount)},
 		{"nilai_void", itoa(sum.VoidAmount)}, {"kas_penjualan", itoa(sum.CashSales)}, {"kas_refund", itoa(sum.CashRefunds)},
-		{"kas_bersih", itoa(sum.CashNet)}}
+		{"kas_bersih", itoa(sum.CashNet)}, {"kas_pembulatan", itoa(sum.CashRounding)}, {"pengeluaran_kas_outlet", itoa(sum.OutletExpenses)}}
 	for _, m := range sum.RefundsBy {
 		records = append(records, []string{"refund_" + m.Method, itoa(m.Amount)})
 	}

@@ -49,6 +49,32 @@ boleh dirender**, dan **celah yang harus ditutup backend**.
 - **Koreksi:** `POST /pos/orders/:id/void`, `POST /pos/orders/:id/payments/:payment_id/refund`, `POST /pos/products/:id/stock-override`.
 - **Struk:** `GET /pos/orders/:id/receipt?kind=&format=json|escpos&width=58|80`, `POST /pos/orders/:id/receipt-link`.
 
+### Multi-payment dan pembulatan (v0.8, V11/V12)
+
+- `POST /pos/orders/:id/payments` menerima `amount` opsional untuk tunai, EDC, dan QRIS statis. Tanpa `amount`, pembayaran melunasi sisa tagihan. Sisa tagihan adalah `split.total_amount - split.paid_amount` dari respons.
+- Selama `payment_status = partially_paid`, tampilkan sisa tagihan dan tombol bayar lagi. Pesanan baru masuk dapur setelah lunas.
+- QRIS dinamis selalu melunasi sisa tagihan. Selama QRIS menunggu, pembayaran sebagian ditolak dengan `409 SPLIT_PAYMENT_PENDING`.
+- Bila `cash_rounding_step` aktif, tunai penutup harus mencakup nominal yang dibulatkan. Tampilkan `rounding_amount` sebagai "Pembulatan", dan hitung kembalian dari respons, bukan di klien.
+
+### Diskon dan compliment (v0.8, PR 8.6)
+
+- `POST /pos/orders/:id/discount {discount_amount | discount_bps, reason}` sebelum pembayaran apa pun. Total baru ada di respons; jangan hitung di klien.
+- `422 OWNER_PIN_REQUIRED` di atas batas kasir: minta approval `discount` dengan `params.amount`, lalu ulangi dengan `approval_id`.
+- `compliment: true` berarti pesanan sudah lunas dengan total 0 dan langsung masuk dapur.
+
+### Kas outlet (v0.8, V13)
+
+- `GET /pos/outlet-cash` menampilkan saldo, pengeluaran hari ini, sisa tanpa approval, dan 50 mutasi terakhir.
+- `POST /pos/outlet-cash/movements` mencatat `top_up` (owner), `expense` (kategori wajib), `to_drawer`, dan `from_drawer`.
+- `409 OUTLET_EXPENSE_APPROVAL_REQUIRED` berarti kirim approval `outlet_expense` dengan `params {amount, category}`, lalu ulangi dengan `approval_id`.
+- Buka shift tanpa `opening_float` memakai modal awal default toko. X-report kasir menyembunyikan kas yang diharapkan kecuali `cashier_sees_expected_cash` aktif.
+
+### OTP SMS (v0.8, [Sms.md](../Setup/Sms.md))
+
+- **Reset PIN staf:** `POST /auth/staff/pin/forgot-sms` (selalu 202), lalu `POST /auth/staff/pin/reset-sms`. Owner mengatur nomor staf dengan `POST /staff/:id/phone`.
+- **Verifikasi pelanggan di POS:** `POST /pos/customers/verify` → `POST /pos/customers/verify/:id/confirm`.
+- `503 SMS_UNAVAILABLE` berarti SMS belum aktif; sembunyikan tombolnya.
+
 ### KDS
 
 `GET /kds/tickets`, `POST /kds/tickets/:id/transition` (`expected_status` untuk optimistic

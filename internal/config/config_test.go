@@ -286,3 +286,17 @@ func TestValidateConfigStagingRequiresStrongJWTSecret(t *testing.T) {
 		t.Errorf("staging rejected a strong secret: %v", err)
 	}
 }
+
+// V4/V5: the log driver prints OTP codes, so only development and test may use it.
+func TestValidateConfigSMSDriver(t *testing.T) {
+	strong := strings.Repeat("strong", 6)
+	if err := config.ValidateConfig(&config.Config{AppEnv: "staging", JWTSecret: strong, EmailDriver: "log", SMSDriver: "log"}); err == nil {
+		t.Error("staging must refuse SMS_DRIVER=log")
+	}
+	if err := config.ValidateConfig(&config.Config{AppEnv: "staging", JWTSecret: strong, EmailDriver: "log", SMSDriver: "disabled"}); err != nil {
+		t.Errorf("staging with SMS disabled: %v", err)
+	}
+	if err := config.ValidateConfig(&config.Config{AppEnv: "development", EmailDriver: "log", SMSDriver: "carrier-pigeon"}); err == nil {
+		t.Error("unknown SMS driver must be refused")
+	}
+}

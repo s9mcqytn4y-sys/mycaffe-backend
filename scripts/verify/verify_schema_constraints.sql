@@ -355,6 +355,46 @@ BEGIN
     IF has_table_privilege('mycaffe_app', 'public.kds_tickets', 'DELETE') THEN
         RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may DELETE kds_tickets!';
     END IF;
+    -- 10F-14. Staff badges (migration 000032): RLS on, never deleted by the app role.
+    IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.staff_badges'::regclass) THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: staff_badges does not have row-level security enabled!';
+    END IF;
+    IF has_table_privilege('mycaffe_app', 'public.staff_badges', 'DELETE') THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may DELETE staff_badges!';
+    END IF;
+    -- 10F-13. Gateway refund requests (migration 000030): RLS on, never deleted by the app role.
+    IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.gateway_refunds'::regclass) THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: gateway_refunds does not have row-level security enabled!';
+    END IF;
+    IF has_table_privilege('mycaffe_app', 'public.gateway_refunds', 'DELETE') THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may DELETE gateway_refunds!';
+    END IF;
+    -- 10F-12. Refund lines (migration 000029): RLS on, insert-only for the app role.
+    IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.payment_refund_lines'::regclass) THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: payment_refund_lines does not have row-level security enabled!';
+    END IF;
+    IF has_table_privilege('mycaffe_app', 'public.payment_refund_lines', 'UPDATE')
+       OR has_table_privilege('mycaffe_app', 'public.payment_refund_lines', 'DELETE') THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may UPDATE or DELETE payment_refund_lines!';
+    END IF;
+    -- 10F-11. Outlet cash ledger (migration 000028): RLS on, insert-only for the app role.
+    IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.outlet_cash_movements'::regclass) THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: outlet_cash_movements does not have row-level security enabled!';
+    END IF;
+    IF has_table_privilege('mycaffe_app', 'public.outlet_cash_movements', 'UPDATE')
+       OR has_table_privilege('mycaffe_app', 'public.outlet_cash_movements', 'DELETE') THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may UPDATE or DELETE outlet_cash_movements!';
+    END IF;
+    -- 10F-10. Messaging (migration 000026): RLS on, never deleted by the app role.
+    IF NOT (SELECT bool_and(relrowsecurity) FROM pg_class WHERE oid IN
+            ('public.customers'::regclass, 'public.otp_challenges'::regclass, 'public.message_outbox'::regclass)) THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: customers/otp_challenges/message_outbox must have row-level security enabled!';
+    END IF;
+    IF has_table_privilege('mycaffe_app', 'public.customers', 'DELETE')
+       OR has_table_privilege('mycaffe_app', 'public.otp_challenges', 'DELETE')
+       OR has_table_privilege('mycaffe_app', 'public.message_outbox', 'DELETE') THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may DELETE messaging rows!';
+    END IF;
     -- 10F-9. Approval requests (migration 000024, ADR-007): RLS on, never deleted by the app role.
     IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.approval_requests'::regclass) THEN
         RAISE EXCEPTION 'SECURITY FAILURE: approval_requests does not have row-level security enabled!';

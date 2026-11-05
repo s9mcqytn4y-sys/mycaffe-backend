@@ -21,6 +21,7 @@ import (
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/metrics"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/midtrans"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/rbac"
+	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/sms"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/storage"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/realtime"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/repository/postgres"
@@ -137,10 +138,14 @@ func main() {
 	var receiptHandler *handler.ReceiptHandler
 	var reportHandler *handler.ReportHandler
 	var orderReadHandler *handler.OrderReadHandler
+	var customerHandler *handler.CustomerHandler
+	var outletCashHandler *handler.OutletCashHandler
 	var approvalHandler *handler.ApprovalHandler
 	var mediaHandler *handler.MediaHandler
 	if db != nil {
 		emailService := newEmailService(cfg, db, workerCtx)
+		messageService := newMessageService(cfg, db, workerCtx)
+		customerHandler = handler.NewCustomerHandler(service.NewCustomerService(db, messageService))
 		authPolicy := service.AuthPolicy{
 			AccessTokenTTL:     cfg.StaffAccessTokenTTL,
 			RefreshTokenTTL:    cfg.StaffRefreshTokenTTL,
@@ -149,7 +154,7 @@ func main() {
 			PINMaxFailures:     cfg.StaffPINMaxFailures,
 			PINLockout:         cfg.StaffPINLockout,
 		}
-		authService := service.NewAuthService(db, postgres.NewAuthRepository(), cfg.JWTSecret, authPolicy, service.WithAuthEmail(emailService, cfg.AppPublicURL, ""))
+		authService := service.NewAuthService(db, postgres.NewAuthRepository(), cfg.JWTSecret, authPolicy, service.WithAuthEmail(emailService, cfg.AppPublicURL, ""), service.WithAuthSMS(messageService))
 		authHandler = handler.NewAuthHandler(authService)
 		authHandler.DefaultStoreSlug = cfg.DefaultStoreSlug
 
@@ -162,6 +167,7 @@ func main() {
 		posHandler = handler.NewPOSHandler(orderService, paymentService, service.NewSettingsService(db))
 		operationalService := service.NewOperationalService(db, orderRepo, paymentRepo, postgres.NewShiftRepository(), postgres.NewAuthRepository(), postgres.NewSettingsRepository())
 		operationalService.SetPINPolicy(authPolicy, emailService)
+		operationalService.SetGateway(midtransClient) // RF1-a Direct Refund
 		posHandler.SetOperational(operationalService)
 		approvalHandler = handler.NewApprovalHandler(service.NewApprovalService(db, operationalService))
 		catalogHandler = handler.NewCatalogHandler(service.NewCatalogService(db))
@@ -175,6 +181,7 @@ func main() {
 		receiptHandler = handler.NewReceiptHandler(service.NewReceiptService(db, cfg.AppPublicURL))
 		reportHandler = handler.NewReportHandler(service.NewReportService(db))
 		orderReadHandler = handler.NewOrderReadHandler(service.NewOrderReadService(db))
+		outletCashHandler = handler.NewOutletCashHandler(service.NewOutletCashService(db))
 		mediaStore, err := storage.NewR2(storage.R2Config{AccountID: cfg.R2AccountID, AccessKeyID: cfg.R2AccessKeyID,
 			SecretAccessKey: cfg.R2SecretAccessKey, Bucket: cfg.R2BucketName, PublicURL: cfg.R2PublicURL})
 		if err != nil {
@@ -201,6 +208,8 @@ func main() {
 			staffAuth.POST("/logout", authHandler.Logout)
 			staffAuth.GET("/me", authHandler.Me)
 			staffAuth.POST("/pin/forgot", authHandler.ForgotPIN)
+			staffAuth.POST("/pin/forgot-sms", authHandler.ForgotPINSMS)
+			staffAuth.POST("/pin/reset-sms", authHandler.ResetPINSMS)
 			staffAuth.POST("/pin/setup", authHandler.SetupPIN)
 			staffAuth.POST("/pin/change", authHandler.RequireStaff(), authHandler.ChangePIN)
 
@@ -209,6 +218,9 @@ func main() {
 			owner.POST("", authHandler.InviteStaff)
 			owner.POST("/:id/pin-reset", authHandler.SendPINReset)
 			owner.POST("/:id/temporary-pin", authHandler.IssueTemporaryPIN)
+			owner.POST("/:id/phone", authHandler.SetStaffPhone)
+			owner.POST("/:id/badge", authHandler.IssueBadge)
+			owner.POST("/:id/badge/revoke", authHandler.RevokeBadge)
 
 			store := v1.Group("/store")
 			store.GET("/settings", authHandler.RequireStaff(), posHandler.GetSettings)
@@ -228,6 +240,8 @@ func main() {
 
 			pos.POST("/shifts", authHandler.RequirePermission(rbac.ShiftOpen), shiftHandler.OpenShift)
 			pos.GET("/shifts/current", authHandler.RequireStaff(), shiftHandler.GetCurrentShift)
+			pos.GET("/outlet-cash", authHandler.RequirePermission(rbac.CashMovementCreate), outletCashHandler.Summary)
+			pos.POST("/outlet-cash/movements", authHandler.RequirePermission(rbac.CashMovementCreate), outletCashHandler.Record)
 			pos.POST("/shifts/movements", authHandler.RequirePermission(rbac.CashMovementCreate), shiftHandler.CreateCashMovement)
 			pos.POST("/shifts/:id/close", authHandler.RequirePermission(rbac.ShiftClose), shiftHandler.CloseShift)
 			pos.POST("/shifts/:id/force-close", authHandler.RequirePermission(rbac.ShiftForceClose), shiftHandler.ForceCloseShift)
@@ -248,11 +262,14 @@ func main() {
 			approvals.GET("", approvalHandler.ListPending)
 			approvals.POST("/:id/approve", approvalHandler.Approve)
 			approvals.POST("/:id/reject", approvalHandler.Reject)
+			pos.POST("/orders/:id/discount", authHandler.RequirePermission(rbac.OrderDiscountApply), posHandler.ApplyDiscount)
 			pos.POST("/orders/:id/void", authHandler.RequirePermission(rbac.OrderVoid), posHandler.VoidOrder)
 			pos.POST("/orders/:id/payments/:payment_id/refund", authHandler.RequirePermission(rbac.PaymentRefund), posHandler.RefundPayment)
 			pos.POST("/products/:id/stock-override", authHandler.RequirePermission(rbac.StockOverride), posHandler.OverrideStock)
 
 			// Receipts (B1, decision R1): snapshot-only JSON or ESC/POS, 90-day digital link.
+			pos.POST("/customers/verify", authHandler.RequirePermission(rbac.OrderPOSCreate), customerHandler.StartVerification)
+			pos.POST("/customers/verify/:id/confirm", authHandler.RequirePermission(rbac.OrderPOSCreate), customerHandler.ConfirmVerification)
 			pos.GET("/orders", authHandler.RequirePermission(rbac.OrderReadStore), orderReadHandler.List)
 			pos.GET("/orders/:id", authHandler.RequirePermission(rbac.OrderReadStore), orderReadHandler.Get)
 			pos.GET("/orders/:id/receipt", authHandler.RequirePermission(rbac.OrderReadStore), receiptHandler.GetReceipt)
@@ -414,4 +431,16 @@ func newEmailService(cfg *config.Config, db *sqlx.DB, ctx context.Context) *serv
 	go emailService.StartWorker(ctx, 10*time.Second)
 	log.Printf("[EMAIL] driver=%s worker started", cfg.EmailDriver)
 	return emailService
+}
+
+// newMessageService picks the SMS driver (decision V5) and starts its worker. Disabled means no sender:
+// SMS flows answer 503 SMS_UNAVAILABLE until a provider driver is configured.
+func newMessageService(cfg *config.Config, db *sqlx.DB, ctx context.Context) *service.MessageService {
+	var sender sms.Sender
+	if cfg.SMSDriver == "log" {
+		sender = sms.LogSender{}
+	}
+	messages := service.NewMessageService(db, sender)
+	go messages.StartWorker(ctx, 5*time.Second)
+	return messages
 }

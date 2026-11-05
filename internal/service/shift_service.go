@@ -160,9 +160,10 @@ func (s *ShiftService) UpdateDrawer(ctx context.Context, actor *AuthenticatedSta
 // ---------- Shift Lifecycle ----------
 
 type OpenShiftInput struct {
-	DrawerID     *uuid.UUID `json:"drawer_id,omitempty"`
-	OpeningFloat int64      `json:"opening_float"`
-	Notes        *string    `json:"notes,omitempty"`
+	DrawerID *uuid.UUID `json:"drawer_id,omitempty"`
+	// OpeningFloat nil uses store_settings.default_opening_float (V13).
+	OpeningFloat *int64  `json:"opening_float"`
+	Notes        *string `json:"notes,omitempty"`
 }
 
 type OpenShiftResult struct {
@@ -174,7 +175,7 @@ func (s *ShiftService) OpenShift(ctx context.Context, actor *AuthenticatedStaff,
 	if !actor.Can(rbac.ShiftOpen) {
 		return nil, ErrForbidden
 	}
-	if in.OpeningFloat < 0 {
+	if in.OpeningFloat != nil && *in.OpeningFloat < 0 {
 		return nil, &ValidationError{Fields: map[string]string{"opening_float": "modal awal kas tidak boleh negatif"}}
 	}
 
@@ -210,6 +211,15 @@ func (s *ShiftService) OpenShift(ctx context.Context, actor *AuthenticatedStaff,
 			drawerID = defaultDrawer.ID
 		}
 
+		settings, err := s.settings.GetStoreSettings(ctx, tx, actor.Staff.Store.ID)
+		if err != nil {
+			return err
+		}
+		opening := settings.DefaultOpeningFloat
+		if in.OpeningFloat != nil {
+			opening = *in.OpeningFloat
+		}
+
 		// Validasi apakah laci sudah memiliki open shift aktif
 		activeShift, err := s.repo.GetOpenShiftByDrawer(ctx, tx, actor.Staff.Store.ID, drawerID)
 		if err == nil && activeShift != nil {
@@ -224,7 +234,7 @@ func (s *ShiftService) OpenShift(ctx context.Context, actor *AuthenticatedStaff,
 			StoreID:      actor.Staff.Store.ID,
 			DrawerID:     drawerID,
 			OpenedBy:     actor.Staff.UserID,
-			OpeningFloat: in.OpeningFloat,
+			OpeningFloat: opening,
 			OpenedAt:     now,
 			Status:       domain.ShiftStatusOpen,
 			Notes:        in.Notes,
@@ -239,13 +249,13 @@ func (s *ShiftService) OpenShift(ctx context.Context, actor *AuthenticatedStaff,
 		}
 
 		// Jika modal awal > 0, catat mutasi opening_float
-		if in.OpeningFloat > 0 {
+		if opening > 0 {
 			openingMovement := &domain.CashMovement{
 				ID:           uuid.New(),
 				StoreID:      actor.Staff.Store.ID,
 				ShiftID:      shift.ID,
 				MovementType: domain.CashMovementOpeningFloat,
-				Amount:       in.OpeningFloat,
+				Amount:       opening,
 				ActorID:      actor.Staff.UserID,
 				CreatedAt:    now,
 			}
@@ -258,14 +268,14 @@ func (s *ShiftService) OpenShift(ctx context.Context, actor *AuthenticatedStaff,
 		auditPayload, _ := json.Marshal(map[string]any{
 			"shift_id":      shift.ID,
 			"drawer_id":     drawerID,
-			"opening_float": in.OpeningFloat,
+			"opening_float": opening,
 		})
 		if err := postgres.InsertAuditLog(ctx, tx, &domain.AuditLog{
 			StoreID:     actor.Staff.Store.ID,
 			ActorID:     &actorID,
 			ActorName:   actor.Staff.FullName,
 			Action:      "SHIFT_OPEN",
-			Reason:      fmt.Sprintf("Sesi shift dibuka dengan modal awal Rp%d", in.OpeningFloat),
+			Reason:      fmt.Sprintf("Sesi shift dibuka dengan modal awal Rp%d", opening),
 			ReferenceID: shift.ID.String(),
 			Metadata:    string(auditPayload),
 			CreatedAt:   now,
@@ -788,7 +798,11 @@ func (s *ShiftService) GetXReport(ctx context.Context, actor *AuthenticatedStaff
 
 		// Blind count security: jika kasir mengakses X report saat shift masih 'open', redact expected_cash
 		isOwner := actor.Staff.Role == domain.RoleOwner
-		if shift.Status == domain.ShiftStatusOpen && !isOwner {
+		settings, err := s.settings.GetStoreSettings(ctx, tx, actor.Staff.Store.ID)
+		if err != nil {
+			return err
+		}
+		if shift.Status == domain.ShiftStatusOpen && !isOwner && !settings.CashierSeesExpectedCash {
 			report.ExpectedCash = nil
 			report.ExpectedRedacted = true
 		} else {

@@ -17,7 +17,7 @@ import (
 )
 
 func main() {
-	action := flag.String("action", "up", "Action: up, down, seed, demo-pins, bootstrap-store, or reset-owner-pin")
+	action := flag.String("action", "up", "Action: up, down, seed, demo-pins, purge, bootstrap-store, or reset-owner-pin")
 	migrationsDir := flag.String("dir", "db/migrations", "Path to SQL migrations directory")
 	seedFile := flag.String("seed-file", "db/seeds/development.sql", "Path to development seed SQL file")
 	storeSlug := flag.String("store-slug", "", "bootstrap-store/reset-owner-pin: store slug (login code); demo-pins: comma-separated slugs")
@@ -76,6 +76,12 @@ func main() {
 			log.Fatalf("[MIGRATE SEED FAILED] %v", err)
 		}
 		log.Printf("[MIGRATE SEED] Seed file %s applied successfully.", *seedFile)
+	case "purge":
+		counts, err := service.PurgeTechnicalRows(ctx, db, time.Now().UTC())
+		if err != nil {
+			log.Fatalf("[PURGE FAILED] %v (partial: %v)", err, counts)
+		}
+		log.Printf("[PURGE] Deleted rows per table: %v", counts)
 	case "demo-pins":
 		// Demo stack only (L-1): PINs come from the git-ignored .env.demo, never from the repo.
 		if cfg.AppEnv != "staging" {
@@ -102,7 +108,7 @@ func main() {
 		}
 		log.Printf("[RESET OWNER PIN] PIN reset for owner %q in store %q; all sessions revoked.", *ownerEmail, *storeSlug)
 	default:
-		log.Fatalf("[MIGRATE FATAL] Unsupported action %q (allowed: up, down, seed, demo-pins, bootstrap-store, reset-owner-pin)", *action)
+		log.Fatalf("[MIGRATE FATAL] Unsupported action %q (allowed: up, down, seed, demo-pins, purge, bootstrap-store, reset-owner-pin)", *action)
 	}
 }
 

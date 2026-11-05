@@ -107,7 +107,7 @@ func TestVoidRefundHotfix4d1Integration(t *testing.T) {
 	}
 
 	storeID := uuid.MustParse("11111111-1111-4111-8111-111111111111")
-	ownerToken := login("central-cafe", "owner.central@mycaffe.local")
+	ownerToken := login("central-cafe", "abdulaziz543333@gmail.com")
 	cashierToken := login("central-cafe", "cashier.central@mycaffe.local")
 
 	// Dedicated tracked product + tracked modifier option so stock deltas are exact.

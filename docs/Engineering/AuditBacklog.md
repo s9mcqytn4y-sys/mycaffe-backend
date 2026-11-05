@@ -3,9 +3,8 @@
 Tickets from the v0.5.0 production-readiness audit (2026-11-02). The decision register, roadmap and PR
 titles refer to these IDs. Status reviewed 2026-11-04 against `staging` after v0.6.0.
 
-**Owner direction (2026-11-03):** large new features are **frozen until go-live**: ADR-005 offline cash
-sync, inventory (C5), promotions/loyalty and delivery channels. Rows marked *Frozen* are not started
-without explicit owner approval. The go-live work is tracked as PR A and PR B in [Roadmap.md](../Architecture/Roadmap.md).
+**Owner direction (2026-11-04, V1):** the 2026-11-03 freeze is **lifted**; rows marked *Frozen* are
+scheduled in the release train of [Roadmap.md](../Architecture/Roadmap.md) (v0.8–v0.12). The go-live work is tracked as PR A and PR B in [Roadmap.md](../Architecture/Roadmap.md).
 
 Status: *Done* (merged to `staging`, tested in CI), *Planned*, *Frozen*, *To verify* (partly in code,
 gap not yet confirmed).
@@ -20,9 +19,9 @@ gap not yet confirmed).
 | P0-04 | Alerting and external uptime | Done (Grafana Cloud account pending, owner) | PR #41, [Monitoring.md](../Setup/Monitoring.md) |
 | P0-05 | Deploy by digest, idempotent deploy/rollback script | Done (first VPS run pending) | PR #42, [Deploy.md](../Setup/Deploy.md) |
 | P0-06 | Supply chain: provenance, SBOM, image scan | Done (tag/Release path runs on the next `v*` tag) | PR #43 |
-| P0-07 | Real client IP and VPS firewall (IN1 Named Tunnel) | Planned | Deployment change, needs owner approval |
-| P0-08 | Outbox dead-letter and purge of technical tables | Planned | `attempts`, `last_error`, `dead_at`; purge `outbox_events`, `ws_tickets`, `guest_sessions`, `payment_notification_logs` |
-| P0-09 | Provisioning and incident runbook per client | Planned | Go-live gate |
+| P0-07 | Real client IP and VPS firewall (IN1 Named Tunnel) | Done (config) | v0.8 PR 8.8: prod `tunnel` service, no published ports, Certbot removed, `CF-Connecting-IP` real IP, ufw in [OperationsRunbook.md](../Setup/OperationsRunbook.md) §2. First live run with the first client VPS |
+| P0-08 | Outbox dead-letter and purge of technical tables | Done | v0.8 PR 8.1, migration 000025: dead-letter after 30 relay failures (`dead_at`), failing stores no longer block others, `migrate -action=purge` daily cron ([Deploy.md](../Setup/Deploy.md) §5) |
+| P0-09 | Provisioning and incident runbook per client | Done | [OperationsRunbook.md](../Setup/OperationsRunbook.md) |
 | P0-10 | ADR-005 offline cash sync | **Frozen** | Owner freeze 2026-11-03 |
 | P0-11 | Receipts (ESC/POS + digital) | Done (printer QR untested on real hardware) | PR B1, migration 000020 |
 | P0-12 | Refresh risk register and release notes | Done | Risk register refreshed 2026-11-04; release notes on GitHub Releases |

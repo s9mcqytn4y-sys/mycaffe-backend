@@ -35,6 +35,8 @@ tags:
     description: QR guest sessions, pay-first guest orders and the public order tracker (iteration 5b)
   - name: Realtime
     description: Outbox relay over WebSocket with single-use tickets, per-store sequence and replay (iteration 5c)
+  - name: Customers
+    description: Customer phone verification by SMS code (V4); verified phones unlock receipts, points and invoices later
   - name: Approvals
     description: Remote owner approval from the phone for void, refund, stock override and shift variance (ADR-007)
   - name: Receipts
@@ -667,6 +669,105 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /api/v1/pos/customers/verify:
+    post:
+      tags: [Customers]
+      operationId: startCustomerVerification
+      summary: Upsert a customer by phone and text a verification code (V4, order.pos.create)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phone]
+              properties:
+                phone:
+                  type: string
+                name:
+                  type: string
+      responses:
+        "202":
+          description: Code sent
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  challenge_id: {type: string, format: uuid}
+                  customer_id: {type: string, format: uuid}
+                  phone: {type: string}
+                  expires_at: {type: string, format: date-time}
+        "422":
+          description: VALIDATION_FAILED (phone, name)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: OTP_RATE_LIMITED (one code per minute, 5 per hour per phone)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: SMS_UNAVAILABLE (SMS_DRIVER=disabled)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/pos/customers/verify/{id}/confirm:
+    post:
+      tags: [Customers]
+      operationId: confirmCustomerVerification
+      summary: Confirm the code read out by the customer; marks the phone verified (audited)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code:
+                  type: string
+      responses:
+        "200":
+          description: Verified customer
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: {type: string, format: uuid}
+                  phone: {type: string}
+                  name: {type: string}
+                  phone_verified_at: {type: string, format: date-time}
+        "400":
+          description: OTP_INVALID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: NOT_FOUND
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /api/v1/pos/orders:
     get:
       tags: [Orders]
@@ -1591,7 +1692,6 @@ paths:
           application/json:
             schema:
               type: object
-              required: [opening_float]
               properties:
                 drawer_id:
                   type: string
@@ -1600,6 +1700,7 @@ paths:
                   type: integer
                   format: int64
                   example: 200000
+                  description: Omitted uses store_settings.default_opening_float (V13).
                 notes:
                   type: string
       responses:
@@ -1643,6 +1744,78 @@ paths:
         "409":
           description: No active open shift
 
+  /api/v1/pos/outlet-cash:
+    get:
+      tags: [POS Shifts]
+      operationId: getOutletCash
+      summary: Outlet cash fund balance, today's expenses against the limit and the 50 latest movements (V13)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: Summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OutletCashSummary"
+        "403":
+          description: FORBIDDEN (cash.movement.create)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/pos/outlet-cash/movements:
+    post:
+      tags: [POS Shifts]
+      operationId: recordOutletCashMovement
+      summary: Record a top-up (owner), expense, or transfer between the fund and a drawer (append-only, audited)
+      x-implementation-status: implemented
+      description: |
+        to_drawer and from_drawer also write cash_in / paid_out in the drawer's open shift so its expected
+        cash stays right. A cashier expense that takes today's total over outlet_daily_expense_limit needs
+        approval_id of an approved outlet_expense request for exactly this amount and category.
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [movement_type, amount, note]
+              properties:
+                movement_type: {type: string, enum: [top_up, expense, to_drawer, from_drawer]}
+                amount: {type: integer, format: int64, minimum: 1, maximum: 100000000}
+                category: {type: string, enum: [ingredients, operational, other], description: Required for expense}
+                note: {type: string, maxLength: 500}
+                drawer_id: {type: string, format: uuid, description: For transfers; default drawer when omitted}
+                approval_id: {type: string, format: uuid}
+      responses:
+        "201":
+          description: Movement recorded; summary after the change
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OutletCashSummary"
+        "403":
+          description: FORBIDDEN (top_up is owner-only)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: OUTLET_INSUFFICIENT_FUNDS / OUTLET_EXPENSE_APPROVAL_REQUIRED / APPROVAL_INVALID / NO_OPEN_SHIFT / INSUFFICIENT_DRAWER_CASH
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: VALIDATION_FAILED (movement_type, amount, category, note)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationErrorResponse"
   /api/v1/pos/shifts/movements:
     post:
       tags: [POS Shifts]
@@ -2301,6 +2474,75 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/pos/orders/{id}/discount:
+    post:
+      tags: [Orders]
+      operationId: applyOrderDiscount
+      summary: Apply one order-level discount to an unpaid pay-first order (PR 8.6, order.discount.apply)
+      x-implementation-status: implemented
+      description: |
+        The discount comes off the subtotal before service and tax, which are recomputed. Above
+        store_settings.cashier_max_discount_bps a cashier needs owner_pin or approval_id of an approved
+        "discount" request with params.amount equal to the discount in rupiah. discount_bps 10000 is a
+        compliment: the total becomes 0 and the order is settled without a payment. Refused (409
+        ORDER_NOT_DISCOUNTABLE) when the order has a payment, a pending QRIS, a discount, or is a tab.
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                discount_amount: {type: integer, format: int64, minimum: 1, description: Rupiah; exclusive with discount_bps}
+                discount_bps: {type: integer, minimum: 1, maximum: 10000, description: Of the subtotal; exclusive with discount_amount}
+                reason: {type: string, maxLength: 500}
+                owner_pin: {type: string}
+                approval_id: {type: string, format: uuid}
+      responses:
+        "200":
+          description: Discount applied
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  order:
+                    $ref: "#/components/schemas/Order"
+                  compliment: {type: boolean}
+        "401":
+          description: INVALID_OWNER_PIN
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: NOT_FOUND
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: ORDER_NOT_DISCOUNTABLE / APPROVAL_INVALID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: VALIDATION_FAILED (discount_amount, discount_bps, reason) or OWNER_PIN_REQUIRED above the cashier limit
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationErrorResponse"
   /api/v1/pos/orders/{id}/void:
     post:
       tags: [POS Operational]
@@ -2428,8 +2670,27 @@ paths:
                   description: true returns the goods to stock; false records them as waste. No default.
                 refund_method:
                   type: string
-                  enum: [cash, bank_transfer]
+                  enum: [cash, outlet_cash, bank_transfer, gateway]
                   default: cash
+                  description: outlet_cash pays from the outlet cash fund (V13); 409 OUTLET_INSUFFICIENT_FUNDS when it is too low.
+                lines:
+                  type: array
+                  description: >-
+                    Partial refund by order lines (PR 8.5a). Amount = total_amount x lines subtotal / order
+                    subtotal, so tax, service and discount follow the lines; the refund returning the last lines
+                    takes what is left. Needs idempotency_key; not allowed on a by-item split payment or a bill
+                    that is only partly paid (409 REFUND_LINES_NOT_ALLOWED); more than the payment has left answers
+                    409 REFUND_EXCEEDS_PAYMENT.
+                  items:
+                    type: object
+                    required: [order_item_id, quantity]
+                    properties:
+                      order_item_id: {type: string, format: uuid}
+                      quantity: {type: integer, minimum: 1}
+                idempotency_key:
+                  type: string
+                  maxLength: 100
+                  description: Required with lines; a retry with the same key returns is_idempotent_replay without refunding again.
                 bank_name:
                   type: string
                   maxLength: 100
@@ -2454,9 +2715,14 @@ paths:
                     $ref: "#/components/schemas/InitiatePaymentResponse/properties/payment"
                   order:
                     $ref: "#/components/schemas/Order"
+                  refund_amount:
+                    type: integer
+                    format: int64
                   open_drawer:
                     type: boolean
                   stock_restored:
+                    type: boolean
+                  is_idempotent_replay:
                     type: boolean
                   message:
                     type: string
@@ -3167,6 +3433,92 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /api/v1/auth/staff/pin/forgot-sms:
+    post:
+      tags: [Auth]
+      operationId: forgotStaffPINSMS
+      summary: Text a 6-digit reset code to the staff phone (V4); always 202 so phones cannot be enumerated
+      x-implementation-status: implemented
+      security: []
+      description: One code per phone per minute and 5 per hour (excess requests are silently dropped); per-IP budget shared with login failures; strict Nginx limit.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phone]
+              properties:
+                store_slug:
+                  type: string
+                phone:
+                  type: string
+      responses:
+        "202":
+          description: Accepted
+        "400":
+          description: INVALID_REQUEST
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: RATE_LIMITED (per IP)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: SMS_UNAVAILABLE (SMS_DRIVER=disabled)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/auth/staff/pin/reset-sms:
+    post:
+      tags: [Auth]
+      operationId: resetStaffPINSMS
+      summary: Set a new PIN with the SMS code; revokes every session and e-mails a PIN-changed notice
+      x-implementation-status: implemented
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phone, code, pin]
+              properties:
+                store_slug:
+                  type: string
+                phone:
+                  type: string
+                code:
+                  type: string
+                pin:
+                  type: string
+      responses:
+        "200":
+          description: PIN set
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  store_slug: {type: string}
+                  email: {type: string}
+        "400":
+          description: OTP_INVALID (wrong, used or expired code; 5 tries per code) / PIN_REJECTED / INVALID_REQUEST
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: RATE_LIMITED (per IP)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /api/v1/auth/staff/pin/forgot:
     post:
       tags: [Auth]
@@ -3400,6 +3752,133 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /api/v1/staff/{id}/phone:
+    post:
+      tags: [Staff]
+      operationId: setStaffPhone
+      summary: Record the staff phone that receives PIN reset codes (owner; audited STAFF_PHONE_SET)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phone]
+              properties:
+                phone:
+                  type: string
+      responses:
+        "200":
+          description: Normalised E.164 phone
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: {type: string, format: uuid}
+                  phone: {type: string, example: "+6281234567890"}
+        "403":
+          description: FORBIDDEN
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: STAFF_NOT_FOUND
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: CONFLICT (phone used by another staff member)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: VALIDATION_FAILED (phone)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/staff/{id}/badge:
+    post:
+      tags: [Staff]
+      operationId: issueStaffBadge
+      summary: Issue a staff ID card QR token (owner, V14); the previous card stops working; audited
+      x-implementation-status: implemented
+      description: The token is returned once for printing as a QR code; only the SHA-256 of its secret is stored.
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "201":
+          description: New badge
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user_id: {type: string, format: uuid}
+                  token: {type: string}
+        "403":
+          description: FORBIDDEN
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: STAFF_NOT_FOUND
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/staff/{id}/badge/revoke:
+    post:
+      tags: [Staff]
+      operationId: revokeStaffBadge
+      summary: Revoke the staff member's active ID card (owner; audited)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Revoked
+        "403":
+          description: FORBIDDEN
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: STAFF_NOT_FOUND (no active badge)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /api/v1/staff/{id}/temporary-pin:
     post:
       tags: [Staff]
@@ -4106,24 +4585,51 @@ components:
           items:
             type: string
             enum: [pay, void, refund, print_receipt, add_round, close_tab, reopen_tab]
+    OutletCashSummary:
+      type: object
+      properties:
+        balance: {type: integer, format: int64}
+        expenses_today: {type: integer, format: int64}
+        daily_expense_limit: {type: integer, format: int64}
+        remaining_without_approval: {type: integer, format: int64}
+        open_drawer: {type: boolean}
+        movement:
+          $ref: "#/components/schemas/OutletCashMovement"
+        recent_movements:
+          type: array
+          items:
+            $ref: "#/components/schemas/OutletCashMovement"
+    OutletCashMovement:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        movement_type: {type: string, enum: [top_up, expense, refund, to_drawer, from_drawer]}
+        amount: {type: integer, format: int64}
+        category: {type: string}
+        note: {type: string}
+        shift_id: {type: string, format: uuid}
+        actor_name: {type: string}
+        created_at: {type: string, format: date-time}
     CreateApprovalRequest:
       type: object
       required: [action, reference_id, reason]
       properties:
-        action: {type: string, enum: [void, refund, stock_override, shift_variance]}
+        action: {type: string, enum: [void, refund, stock_override, shift_variance, outlet_expense, discount]}
         reference_id: {type: string, format: uuid, description: "Order (void), payment (refund), product (stock_override) or shift (shift_variance)"}
         params:
           type: object
           properties:
             new_quantity: {type: integer, minimum: 0, description: Required for stock_override}
             counted_cash: {type: integer, format: int64, minimum: 0, description: Required for shift_variance}
+            amount: {type: integer, format: int64, minimum: 1, description: "Required for outlet_expense; reference_id is ignored (the store fund)"}
+            category: {type: string, enum: [ingredients, operational, other], description: Required for outlet_expense}
         reason: {type: string}
     Approval:
       type: object
       required: [id, action, reference_id, reference_label, amount, params, reason, status, requested_by_name, expires_at, created_at]
       properties:
         id: {type: string, format: uuid}
-        action: {type: string, enum: [void, refund, stock_override, shift_variance]}
+        action: {type: string, enum: [void, refund, stock_override, shift_variance, outlet_expense, discount]}
         reference_id: {type: string, format: uuid}
         reference_label: {type: string, description: "Order number, product name or drawer name"}
         amount: {type: integer, format: int64, description: "Server-computed; signed for shift_variance"}
@@ -4412,6 +4918,7 @@ components:
               amount: {type: integer, format: int64}
               cash_tendered_amount: {type: integer, format: int64}
               change_amount: {type: integer, format: int64}
+              rounding_amount: {type: integer, format: int64, description: "Cash rounding of this tender (V11); printed as Pembulatan"}
               status: {type: string}
         refund:
           type: object
@@ -4479,6 +4986,8 @@ components:
         cash_sales: {type: integer, format: int64}
         cash_refunds: {type: integer, format: int64}
         cash_net: {type: integer, format: int64}
+        cash_rounding: {type: integer, format: int64, description: "Net cash rounding inside cash_sales (V11); not part of total_amount"}
+        outlet_expenses: {type: integer, format: int64, description: "Outlet cash fund expenses in the range (V13), outside the drawers"}
     ErrorResponse:
       type: object
       required: [error]
@@ -4501,8 +5010,12 @@ components:
     StaffLoginRequest:
       type: object
       additionalProperties: false
-      required: [store_slug, email, pin]
+      required: [pin]
+      description: Either store_slug + email or badge (scanned staff ID card, V14), always with the PIN.
       properties:
+        badge:
+          type: string
+          description: QR token from the staff ID card; replaces store_slug and email, never the PIN.
         store_slug:
           type: string
           minLength: 1
@@ -5046,10 +5559,23 @@ components:
           type: string
           enum: [bca, bni, bri, mandiri, permata]
           description: Required only when `method` is `bank_transfer`
+        amount:
+          type: integer
+          format: int64
+          minimum: 1
+          description: >-
+            Optional partial tender for direct methods (cash, static_qris, edc), decision V12. Omitted pays
+            the whole remaining balance of the split. Several direct tenders may close one bill; a partial
+            tender is refused (409 SPLIT_PAYMENT_PENDING) while a gateway attempt is pending. Gateway
+            methods (qris, gopay, shopeepay, bank_transfer) always charge exactly the remaining balance;
+            any other amount answers 409 GATEWAY_AMOUNT_MUST_BE_REMAINING. Out of range answers 422.
         cash_tendered_amount:
           type: integer
           format: int64
-          description: Required when `method` is `cash`; must be `>= split.total_amount` (integer Rupiah)
+          description: >-
+            Required when `method` is `cash`; must cover the tendered amount. When this cash tender closes
+            the bill and store_settings.cash_rounding_step is set, it must cover the amount rounded to the
+            nearest step (V11); the payment keeps the exact amount and records rounding_amount.
         reconciliation_ref:
           type: string
           maxLength: 100
@@ -5107,6 +5633,25 @@ components:
           minimum: 0
           maximum: 30
           description: Business days after paid_at the owner (or a cashier with owner PIN) may refund; at least the cashier window. Default 7.
+        cash_rounding_step:
+          type: integer
+          enum: [0, 100, 500]
+          description: Round the closing cash tender to the nearest step (V11); 0 disables. Never applied to non-cash methods and never taxed.
+        outlet_daily_expense_limit:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 100000000
+          description: Cashier outlet-cash expenses per store day above this need an outlet_expense approval (V13). Default 0 (every cashier expense).
+        default_opening_float:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 100000000
+          description: Opening float used when a shift opens without opening_float (V13). Default 0.
+        cashier_sees_expected_cash:
+          type: boolean
+          description: When false (default) a cashier's X-report hides expected cash while the shift is open (blind count).
 
     InitiatePaymentResponse:
       type: object
@@ -5137,6 +5682,10 @@ components:
             cash_tendered_amount:
               type: integer
               format: int64
+            rounding_amount:
+              type: integer
+              format: int64
+              description: Cash received minus amount on a rounded closing cash tender (V11)
             change_given_amount:
               type: integer
               format: int64

@@ -80,7 +80,7 @@ Designs: [CatalogInventoryDesign.md](CatalogInventoryDesign.md), requirements:
 | ---- | ---------- | ----------------- |
 | M1 | Docker cleanup | MyCaffe + safe garbage only (stopped containers, unused anonymous volumes, unused images, build cache); other projects' volumes and the MyCaffe demo/dev volumes kept |
 | M2 | Supabase | Removed from the repo, local `.env`, local MCP config, global CLI and `~/.supabase`; the Claude account connector is disconnected by the owner |
-| M3 | Single-tenant MVP | Multi-tenant schema kept for future branches; optional `DEFAULT_STORE_SLUG` so staff log in with email + PIN only; demo seed keeps two stores for isolation tests; demo owner email `owner.central@mycaffe.local` (was the owner's Gmail; changed 2026-11-04 by leak fix L-3, PR #54, approved with the v0.7 plan) |
+| M3 | Single-tenant MVP | Multi-tenant schema kept for future branches; optional `DEFAULT_STORE_SLUG` so staff log in with email + PIN only; demo seed keeps two stores for isolation tests; demo owner email is the owner's Gmail again in the seed (V6, PR 8.2; it was `owner.central@mycaffe.local` between PR #54 and PR 8.2) |
 | M4 | Iteration 3 priority | Catalog C1–C3 with the standard CRUD contract; media upload after the R2 bucket exists |
 
 ## Iteration 4: modifiers, cart, tabs, shifts, void/refund (recorded 2026-10-31, sixth interview)
@@ -154,7 +154,7 @@ Midtrans facts checked against docs.midtrans.com on 2026-11-02: QRIS is charged 
 | ID | Decision | Approved option |
 |----|----------|-----------------|
 | RF1-a | Dynamic QRIS | Midtrans Direct Refund first, within the provider window, with a deterministic `refund_key` per refund; denied (202) or out of window → fallback RF1-c |
-| RF1-b | Partial QRIS refund | API for full refunds only; partial refunds use RF1-c until partial support is proven in sandbox (then enabled per acquirer by configuration) |
+| RF1-b | Partial QRIS refund (partial refunds by order line exist since PR 8.5a for every manual source) | API for full refunds only; partial refunds use RF1-c until partial support is proven in sandbox (then enabled per acquirer by configuration) |
 | RF1-c | Fallback (also static QRIS, EDC, partial) | Either cash from the open drawer as a `refund` cash movement keeping the original method and reference, or a manual bank transfer by the **owner only**, recorded with bank name, last 4 account digits and transfer reference (no full account number stored); the transfer does not touch the drawer |
 | RF1-d | EDC | Void/reversal on the EDC terminal allowed when the approval code / trace number is recorded; status stays pending reconciliation until matched to the bank settlement report |
 | RF1-e | Refund time window (closes gap P5) | Cashier: same business day only. Owner: up to 7 days. Older: no refund in the system. Values in `store_settings` |
@@ -189,6 +189,29 @@ gaps: [FrontendIntegrationContract.md](FrontendIntegrationContract.md) §5.
 
 Backend v0.7 scope from DM5/DM7: G-1 order list/detail, G-2 open tab list, G-5 remote approval, and
 demo leak fixes L-1..L-3.
+
+## Release train v0.8–v0.12 (recorded 2026-11-04, twelfth interview)
+
+Status: decided. Lifts the 2026-11-03 feature freeze. Benchmark: the majoo "kasir online" feature list
+(competitor review in [CompetitorAnalysisMajoo.md](../Product/CompetitorAnalysisMajoo.md)).
+
+| ID | Decision | Approved option |
+|----|----------|-----------------|
+| V1 | Feature freeze | **Lifted entirely**: offline, inventory, promotions/loyalty, delivery channels and services are in scope |
+| V2 | Release order | **v0.8** money & operations → **v0.9** cafe floor → **v0.10** per-device offline → **v0.11** channels & customers → **v0.12** services workflow. Go-live is possible after v0.8/v0.9 |
+| V3 | Approval scope | The owner pre-approves all design gates (new dependencies incl. CGO, additive migrations, new API contracts, auth/permission changes recorded in an ADR) **and merges into `staging` once CI is green**. Still asked: `staging` → `main` promotion, `v*` tags, destructive migrations, live `.env` edits, production deploys, real-money calls. Replaces the per-PR approval rule after PR #23 |
+| V4 | SMS OTP use | **Staff PIN reset and customer phone verification** (before WhatsApp/SMS receipts, points, deposit or invoices); not on every staff login. Driver `log` in development/test, a real provider in demo/production |
+| V5 | Messaging providers | **Official channels, two providers**: WhatsApp Business Cloud API (Meta) and a local Indonesian SMS aggregator, behind one sender interface like `mailer`. No unofficial WhatsApp Web gateways |
+| V6 | Demo e-mail | Seeded demo owner e-mail is again the owner's Gmail **in the repository seed** (reverses the e-mail part of leak fix L-3; amends M3). The SMTP sender account and its app password stay in the local `.env.demo` |
+| V7 | Redis | **Deferred** until the API runs as more than one instance or PostgreSQL queue latency is measured as a problem; PostgreSQL keeps OTPs, queues and rate limits. Trigger and design recorded in [Adr008DataPlatformAndScaling.md](Adr008DataPlatformAndScaling.md) |
+| V8 | Domain | **Still none.** P0-07 is prepared as configuration only; Web Push and real WhatsApp sending wait for a domain (Meta business verification, stable origin) |
+| V9 | Offline model (v0.10) | **Per device** as accepted in ADR-005, plus a LAN kitchen printer fallback; a LAN master "local server" is v0.10b only if a real cafe needs it. I2 stays |
+| V10 | "Owner scope out" | Only **HR/teams** features (staff schedules, attendance, leave, staff-facing reservations) are out; owner endpoints that cashier features need stay in. Frontend is a separate repository |
+| V11 | Bill rounding | **Cash only, to the nearest** store-configured step (100 or 500), off by default; stored as `rounding_amount`, printed as its own receipt line, not taxed, reported per day and shift |
+| V12 | Multi-payment (implemented in PR 8.3: a pay-first tender of the **whole** remaining balance still supersedes a pending QRIS so a customer can switch to cash; duplicate settlement detection covers a late QR payment. Partial tenders and open tabs stay locked while a QRIS is pending) | Direct methods (cash, EDC, static QRIS, transfer) combine freely; **dynamic QRIS at most once, for exactly the remaining balance, as the last payment**, and it locks other tenders while pending. Change only from cash. Compliment = owner-approved 100 % discount, not a method. Deposit/points/coupons in v0.11 |
+| V13 | Outlet cash | **Separate fund** from the cashier drawer: append-only `outlet_cash_movements` (owner top-up, categorised expense with optional receipt photo, refund, transfer to/from a drawer), daily expense limit with ADR-007 approval (`outlet_expense`), third refund source for RF1-c. Cashier settings: default opening float, daily limit, blind or visible count at close |
+| V14 | Staff ID card | **QR + PIN**: the badge QR is a revocable random identity token that replaces typing the e-mail; the 6-digit PIN and its limits stay mandatory |
+| V15 | Demo timing | The prospective-client demo **waits for v0.8** |
 
 ## Awaiting owner approval
 

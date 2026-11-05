@@ -8,8 +8,24 @@ only when its route, authorization, tests, and docs exist. MVP scope: **one cafe
 multi-tenant schema kept for future branches (owner decision M3). Audit tickets and their status:
 [AuditBacklog.md](../Engineering/AuditBacklog.md).
 
-**Owner direction (2026-11-03): large new features are frozen until go-live**: ADR-005 offline cash
-sync, inventory (C5), promotions/loyalty, delivery channels. Only the go-live plan below is in scope.
+**Owner direction (2026-11-04, V1–V15): the freeze is lifted.** Release train v0.8 money & operations →
+v0.9 cafe floor → v0.10 per-device offline → v0.11 channels & customers → v0.12 services; the
+prospective-client demo waits for v0.8. Benchmark: [CompetitorAnalysisMajoo.md](../Product/CompetitorAnalysisMajoo.md).
+
+## v0.8 plan (one PR per row, merged into `staging` on green CI per V3)
+
+| PR | Scope | Decisions | Notes |
+|----|-------|-----------|-------|
+| 8.1 | Outbox dead-letter, attempts, backoff, purge of technical tables (P0-08) | — | **Done** (PR #59, migration 000025) |
+| 8.2 | Messaging: `message_outbox` + sender interface (`log`, SMS aggregator), `otp_challenges`, `customers` with verified phone, staff PIN reset by SMS; demo owner e-mail back to the owner's Gmail | V4, V5, V6 | **Done** (migration 000026): drivers `log`/`disabled`; the provider driver waits for the owner to pick a vendor; WhatsApp waits for a domain (V8) |
+| 8.3 | Multi-payment (direct methods free, dynamic QRIS last), split by amount, cash rounding | V11, V12 | **Done** (migration 000027). Split by amount is covered by partial tenders (each payer pays an amount on the same split), so no separate split mode |
+| 8.4 | Outlet cash fund, expense categories, daily limit with `outlet_expense` approval, cashier settings (default float, blind count) | V13 | **Done** (migration 000028): fixed categories (ingredients, operational, other) instead of a category table; ADR-007 action `outlet_expense` |
+| 8.5 | Partial refunds per item (proportional tax/service/discount), outlet cash as a refund source, RF1-a/b/d/f Midtrans refunds with `refund_pending` | RF1, V13 | Split in two. **8.5a done** (migration 000029): partial refunds by lines, outlet cash source, hand-back of a tender on a partly paid bill, idempotent line refunds. **8.5b** Midtrans API refunds with `refund_pending` follows; a live sandbox proof needs the owner's sandbox keys |
+| 8.6 | Discount approval above `cashier_max_discount_bps` (ADR-007 action `discount`), compliment as an approved 100 % discount | V12 | **Done** (migration 000031): `POST /pos/orders/:id/discount`, ADR-007 action `discount`, zero-total splits allowed for compliments |
+| 8.7 | Staff QR badges (revocable token) + PIN login | V14 | **Done** (migration 000032): `POST /staff/:id/badge`, `/badge/revoke`, login with `badge` + `pin` |
+| 8.8 | P0-07 configuration (real client IP, Named Tunnel template, firewall runbook) and P0-09 provisioning/incident runbook | V8 | **Done**: prod Named Tunnel ingress (no published ports, Certbot removed), [OperationsRunbook.md](../Setup/OperationsRunbook.md) |
+
+Blocked by dependency: Web Push (no domain), WhatsApp sending (Meta business verification).
 
 **Schema (37 tables, 24 migrations):** approval_requests (v0.7); receipt_tokens, media_uploads, payment_refunds (v0.6.0); stores, users, auth_sessions, account_tokens, email_outbox,
 store_settings, audit_logs; categories, products, product_variants, modifier_groups, modifier_options,
@@ -72,9 +88,9 @@ promotions & bundles (K7), loyalty (K6), static QRIS fallback (K8), delivery cha
 | JSON logs with request id, internal Prometheus metrics (P0-03) | Implemented |
 | Grafana Cloud metrics and tested alert rules (P0-04) | Implemented; Grafana Cloud account pending (owner) |
 | Nginx TLS bootstrap, HSTS, request id, rate limits; internal-only DB network | Implemented |
-| Real client IP + Named Cloudflare Tunnel + VPS firewall (P0-07, IN1) | Planned (deployment change, needs approval) |
-| Outbox dead-letter and purge (P0-08) | Planned |
-| Provisioning and incident runbook (P0-09) | Planned |
+| Real client IP + Named Cloudflare Tunnel + VPS firewall (P0-07, IN1) | Implemented (config, PR 8.8); first live run on the first client VPS |
+| Outbox dead-letter and purge (P0-08) | Implemented (v0.8 PR 8.1); cron runs once a VPS exists |
+| Provisioning and incident runbook (P0-09) | Implemented ([OperationsRunbook.md](../Setup/OperationsRunbook.md)) |
 | Hostinger SMTP + SPF/DKIM/DMARC runbook | Documented ([Email.md](../Setup/Email.md)); blocked (no domain) |
 | Operator bootstrap (`bootstrap-store`) + `DEFAULT_STORE_SLUG` | Implemented |
 | Promote `staging` → `main` with a merge commit + semver tag | Owner approves each promotion |

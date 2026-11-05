@@ -146,6 +146,28 @@ func (c *Client) CheckTransaction(ctx context.Context, providerOrderID string) (
 	return resp, nil
 }
 
+// DirectRefund calls the Direct Refund API (RF1-a). refundKey makes retries idempotent for 7 days.
+// A 2xx answer is returned as is: 200 means the bank approved the request, 202 means it was denied.
+func (c *Client) DirectRefund(ctx context.Context, providerOrderID, refundKey string, amount int64, reason string) (*coreapi.RefundResponse, error) {
+	if c == nil || strings.TrimSpace(c.serverKey) == "" {
+		return nil, errors.New("midtrans client is not configured")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if len(reason) > 255 {
+		reason = reason[:255]
+	}
+	resp, midtransErr := c.newCoreAPIClient().DirectRefundTransaction(providerOrderID, &coreapi.RefundReq{RefundKey: refundKey, Amount: amount, Reason: reason})
+	if midtransErr != nil {
+		if resp != nil && resp.StatusCode != "" {
+			return resp, nil // a business answer (406, 412, 414) in a non-2xx envelope
+		}
+		return nil, fmt.Errorf("midtrans direct refund failed (status %d): %s", midtransErr.StatusCode, midtransErr.Message)
+	}
+	return resp, nil
+}
+
 // ChargeQRIS is a compatibility wrapper. New payment flows must pass payments.id as
 // OrderID and IdempotencyKey through ChargeCoreAPI, not an order display number.
 func (c *Client) ChargeQRIS(order *domain.Order) (*coreapi.ChargeResponse, error) {

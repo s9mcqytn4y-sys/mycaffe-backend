@@ -66,6 +66,9 @@ type AuthService struct {
 	settingsRepo *postgres.SettingsRepository
 	publicURL    string
 	replyTo      string
+
+	// SMS one-time codes for PIN reset (WithAuthSMS); nil or disabled answers ErrSMSUnavailable.
+	messages *MessageService
 }
 
 type AuthServiceOption func(*AuthService)
@@ -101,6 +104,8 @@ func NewAuthService(db *sqlx.DB, repo *postgres.AuthRepository, jwtSecret string
 type LoginInput struct {
 	StoreSlug string
 	Email     string
+	// Badge is a scanned staff ID card QR (V14); it replaces StoreSlug and Email, never the PIN.
+	Badge     string
 	PIN       string
 	UserAgent string
 	ClientIP  string
@@ -153,24 +158,34 @@ func (s *AuthService) Login(ctx context.Context, in LoginInput) (*SessionTokens,
 		return nil, ErrAuthBusy
 	}
 
-	if slug == "" || len(slug) > 100 || !isPlausibleEmail(email) || len(in.PIN) != auth.PINLength {
-		auth.BurnPINVerification(in.PIN)
-		return nil, ErrInvalidCredentials
-	}
-
-	storeID, active, err := s.repo.ResolveStoreForLogin(ctx, s.db, slug)
-	if errors.Is(err, postgres.ErrStoreNotFound) || (err == nil && !active) {
-		auth.BurnPINVerification(in.PIN)
-		return nil, ErrInvalidCredentials
-	}
-	if err != nil {
-		return nil, err
+	var storeID uuid.UUID
+	if in.Badge != "" {
+		badgeStore, badgeEmail, ok := s.resolveBadge(ctx, in.Badge)
+		if !ok || len(in.PIN) != auth.PINLength {
+			auth.BurnPINVerification(in.PIN)
+			return nil, ErrInvalidCredentials
+		}
+		storeID, email = badgeStore, badgeEmail
+	} else {
+		if slug == "" || len(slug) > 100 || !isPlausibleEmail(email) || len(in.PIN) != auth.PINLength {
+			auth.BurnPINVerification(in.PIN)
+			return nil, ErrInvalidCredentials
+		}
+		resolved, active, err := s.repo.ResolveStoreForLogin(ctx, s.db, slug)
+		if errors.Is(err, postgres.ErrStoreNotFound) || (err == nil && !active) {
+			auth.BurnPINVerification(in.PIN)
+			return nil, ErrInvalidCredentials
+		}
+		if err != nil {
+			return nil, err
+		}
+		storeID = resolved
 	}
 
 	now := s.nowFunc().UTC()
 	var tokens *SessionTokens
 	loginErr := ErrInvalidCredentials
-	err = database.WithTenantTx(ctx, s.db, storeID, func(tx *sqlx.Tx) error {
+	err := database.WithTenantTx(ctx, s.db, storeID, func(tx *sqlx.Tx) error {
 		user, err := s.repo.GetUserByEmailForUpdate(ctx, tx, storeID, email)
 		if errors.Is(err, postgres.ErrUserNotFound) {
 			auth.BurnPINVerification(in.PIN)

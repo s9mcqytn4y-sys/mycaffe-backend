@@ -100,7 +100,7 @@ func TestKDSIteration5dIntegration(t *testing.T) {
 		}
 	}
 
-	owner, cashier := login("owner.central@mycaffe.local"), login("cashier.central@mycaffe.local")
+	owner, cashier := login("abdulaziz543333@gmail.com"), login("cashier.central@mycaffe.local")
 	barista, kitchen := login("barista.central@mycaffe.local"), login("kitchen.central@mycaffe.local")
 
 	// One product per station, all stock-tracked.

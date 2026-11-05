@@ -159,3 +159,35 @@ func ApplyDemoPINs(ctx context.Context, db *sqlx.DB, storeSlugs []string, ownerP
 	}
 	return res.RowsAffected()
 }
+
+// purgeRules deletes technical rows past their retention (P0-08). Money, audit and webhook evidence
+// (payments, payment_notification_logs, audit_logs, ledgers, approvals) is never purged.
+var purgeRules = []struct{ table, query string }{
+	{"outbox_events", `DELETE FROM outbox_events WHERE processed_at < $1::timestamptz - interval '7 days'`},
+	{"ws_tickets", `DELETE FROM ws_tickets WHERE expires_at < $1::timestamptz - interval '1 day'`},
+	{"guest_sessions", `DELETE FROM guest_sessions g WHERE g.expires_at < $1::timestamptz - interval '30 days'
+		AND NOT EXISTS (SELECT 1 FROM orders o WHERE o.store_id = g.store_id AND o.guest_session_id = g.id)
+		AND NOT EXISTS (SELECT 1 FROM ws_tickets w WHERE w.store_id = g.store_id AND w.guest_session_id = g.id)`},
+	{"receipt_tokens", `DELETE FROM receipt_tokens WHERE expires_at < $1::timestamptz - interval '30 days'`},
+	{"account_tokens", `DELETE FROM account_tokens WHERE expires_at < $1::timestamptz - interval '30 days'`},
+	{"auth_sessions", `DELETE FROM auth_sessions WHERE expires_at < $1::timestamptz - interval '30 days'`},
+	{"email_outbox", `DELETE FROM email_outbox WHERE status IN ('sent', 'failed') AND created_at < $1::timestamptz - interval '90 days'`},
+	{"media_uploads", `DELETE FROM media_uploads WHERE status = 'pending' AND expires_at < $1::timestamptz - interval '1 day'`},
+	{"otp_challenges", `DELETE FROM otp_challenges WHERE expires_at < $1::timestamptz - interval '1 day'`},
+	{"message_outbox", `DELETE FROM message_outbox WHERE status IN ('sent', 'failed') AND created_at < $1::timestamptz - interval '90 days'`},
+}
+
+// PurgeTechnicalRows runs every purge rule with the migrator connection (cron: migrate -action=purge)
+// and returns the deleted row count per table.
+// shortcut: one DELETE per table, fine at single-cafe volume; batch with LIMIT when a table passes ~1M rows.
+func PurgeTechnicalRows(ctx context.Context, db *sqlx.DB, now time.Time) (map[string]int64, error) {
+	out := make(map[string]int64, len(purgeRules))
+	for _, r := range purgeRules {
+		res, err := db.ExecContext(ctx, r.query, now)
+		if err != nil {
+			return out, fmt.Errorf("purge %s: %w", r.table, err)
+		}
+		out[r.table], _ = res.RowsAffected()
+	}
+	return out, nil
+}

@@ -96,7 +96,7 @@ func TestPOSCashTenderIntegration(t *testing.T) {
 		return out.AccessToken
 	}
 
-	ownerToken := login("owner.central@mycaffe.local")
+	ownerToken := login("abdulaziz543333@gmail.com")
 	cashierToken := login("cashier.central@mycaffe.local")
 
 	// 1. Create a dedicated drawer for this integration test

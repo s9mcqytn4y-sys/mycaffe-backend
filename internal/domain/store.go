@@ -211,6 +211,14 @@ type StoreSettings struct {
 	// RefundWindow*Days limit refunds to payments paid at most this many business days ago (RF1-e; 0 = same day).
 	RefundWindowCashierDays int `json:"refund_window_cashier_days" db:"refund_window_cashier_days"`
 	RefundWindowOwnerDays   int `json:"refund_window_owner_days" db:"refund_window_owner_days"`
+	// CashRoundingStep rounds a closing cash tender to 0 (off), 100 or 500 rupiah (decision V11).
+	CashRoundingStep int `json:"cash_rounding_step" db:"cash_rounding_step"`
+	// Outlet cash and cashier settings (decision V13).
+	OutletDailyExpenseLimit int64 `json:"outlet_daily_expense_limit" db:"outlet_daily_expense_limit"`
+	DefaultOpeningFloat     int64 `json:"default_opening_float" db:"default_opening_float"`
+	CashierSeesExpectedCash bool  `json:"cashier_sees_expected_cash" db:"cashier_sees_expected_cash"`
+	// GatewayPartialRefunds allows partial Midtrans refunds once proven in the sandbox (RF1-b).
+	GatewayPartialRefunds bool `json:"gateway_partial_refunds" db:"gateway_partial_refunds"`
 }
 
 // DefaultStoreSettings mirrors the column defaults of migration 000007.

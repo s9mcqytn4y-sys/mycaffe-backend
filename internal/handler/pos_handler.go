@@ -179,6 +179,7 @@ type POSInitiatePaymentRequest struct {
 	Method             domain.PaymentMethod `json:"method" binding:"required"`
 	Bank               string               `json:"bank,omitempty"`
 	CashTenderedAmount int64                `json:"cash_tendered_amount,omitempty"`
+	Amount             *int64               `json:"amount,omitempty"`
 	ReconciliationRef  string               `json:"reconciliation_ref,omitempty" binding:"max=100"`
 	CallbackURL        string               `json:"callback_url,omitempty" binding:"max=500"`
 	DrawerID           *uuid.UUID           `json:"drawer_id,omitempty"`
@@ -210,7 +211,7 @@ func (h *POSHandler) InitiatePayment(c *gin.Context) {
 	actorID := actor.Staff.UserID
 	res, err := h.payments.InitiatePayment(c.Request.Context(), actor.Staff.Store.ID, service.InitiatePaymentInput{
 		OrderID: orderID, SplitID: req.SplitID, IdempotencyKey: req.IdempotencyKey, Method: req.Method, Bank: req.Bank,
-		CashTenderedAmount: req.CashTenderedAmount, ReconciliationRef: req.ReconciliationRef, CallbackURL: req.CallbackURL,
+		CashTenderedAmount: req.CashTenderedAmount, Amount: req.Amount, ReconciliationRef: req.ReconciliationRef, CallbackURL: req.CallbackURL,
 		ActorUserID: &actorID,
 		DrawerID:    req.DrawerID,
 	})
@@ -228,6 +229,10 @@ func paymentError(c *gin.Context, err error) {
 		errors.Is(err, service.ErrReconciliationRefRequired), errors.Is(err, service.ErrSplitIDRequired),
 		errors.Is(err, service.ErrSplitIDNotAllowed):
 		authError(c, http.StatusBadRequest, "INVALID_PAYMENT", err.Error())
+	case errors.Is(err, service.ErrInvalidTenderAmount):
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"code": "VALIDATION_FAILED", "error": "Periksa kembali isian yang ditandai.", "fields": map[string]string{"amount": "harus lebih dari 0 dan tidak melebihi sisa tagihan"}})
+	case errors.Is(err, service.ErrGatewayMustPayRemaining):
+		authError(c, http.StatusConflict, "GATEWAY_AMOUNT_MUST_BE_REMAINING", "QRIS dan pembayaran gateway harus melunasi seluruh sisa tagihan.")
 	case errors.Is(err, service.ErrUnauthorizedCashierTender):
 		authError(c, http.StatusForbidden, "FORBIDDEN", err.Error())
 	case errors.Is(err, postgres.ErrOrderNotFound), errors.Is(err, postgres.ErrStoreNotFound):
@@ -301,6 +306,26 @@ func (h *POSHandler) VoidOrder(c *gin.Context) {
 	c.JSON(http.StatusOK, res)
 }
 
+// ApplyDiscount handles POST /api/v1/pos/orders/:id/discount (order.discount.apply).
+func (h *POSHandler) ApplyDiscount(c *gin.Context) {
+	orderID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		authError(c, http.StatusNotFound, "NOT_FOUND", "Pesanan tidak ditemukan.")
+		return
+	}
+	var in service.ApplyDiscountInput
+	if err := c.ShouldBindJSON(&in); err != nil {
+		authError(c, http.StatusBadRequest, "INVALID_REQUEST", "Data diskon tidak valid.")
+		return
+	}
+	res, err := h.operational.ApplyDiscount(c.Request.Context(), currentStaff(c), orderID, in)
+	if err != nil {
+		writeOperationalError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, res)
+}
+
 // RefundPayment handles POST /pos/orders/:id/payments/:payment_id/refund (permission payment.refund).
 func (h *POSHandler) RefundPayment(c *gin.Context) {
 	if h.operational == nil {
@@ -325,6 +350,10 @@ func (h *POSHandler) RefundPayment(c *gin.Context) {
 	res, err := h.operational.RefundPayment(c.Request.Context(), currentStaff(c), orderID, paymentID, in)
 	if err != nil {
 		writeOperationalError(c, err)
+		return
+	}
+	if res.RefundStatus != "" {
+		c.JSON(http.StatusAccepted, res) // gateway refund waiting for bank confirmation (RF1-f)
 		return
 	}
 	c.JSON(http.StatusOK, res)
@@ -363,6 +392,22 @@ func writeOperationalError(c *gin.Context, err error) {
 			"error":  "Periksa kembali isian yang ditandai.",
 			"fields": validation.Fields,
 		})
+	case errors.Is(err, service.ErrGatewayRefundUnsupported):
+		authError(c, http.StatusConflict, "GATEWAY_REFUND_UNSUPPORTED", "Pembayaran ini tidak bisa direfund lewat penyedia pembayaran. Gunakan refund tunai, kas outlet, atau transfer.")
+	case errors.Is(err, service.ErrGatewayPartialDisabled):
+		authError(c, http.StatusConflict, "GATEWAY_PARTIAL_REFUND_DISABLED", "Refund sebagian lewat penyedia pembayaran belum diaktifkan. Gunakan refund manual.")
+	case errors.Is(err, service.ErrGatewayRefundPending):
+		authError(c, http.StatusConflict, "GATEWAY_REFUND_PENDING", "Refund lewat penyedia pembayaran masih menunggu konfirmasi bank.")
+	case errors.Is(err, service.ErrGatewayRefundDenied):
+		authError(c, http.StatusConflict, "GATEWAY_REFUND_DENIED", "Bank menolak refund ini. Gunakan refund tunai, kas outlet, atau transfer.")
+	case errors.Is(err, service.ErrOrderNotDiscountable):
+		authError(c, http.StatusConflict, "ORDER_NOT_DISCOUNTABLE", "Diskon hanya untuk pesanan pay-first yang belum dibayar dan belum punya diskon.")
+	case errors.Is(err, service.ErrRefundExceedsPayment):
+		authError(c, http.StatusConflict, "REFUND_EXCEEDS_PAYMENT", "Nilai item yang direfund melebihi sisa pembayaran ini. Refund dari pembayaran lain.")
+	case errors.Is(err, service.ErrRefundLinesNotAllowed):
+		authError(c, http.StatusConflict, "REFUND_LINES_NOT_ALLOWED", "Refund per item hanya untuk tagihan yang sudah lunas dan bukan split per item.")
+	case errors.Is(err, service.ErrOutletInsufficientFunds):
+		authError(c, http.StatusConflict, "OUTLET_INSUFFICIENT_FUNDS", "Saldo kas outlet tidak mencukupi.")
 	case errors.Is(err, service.ErrApprovalInvalid):
 		authError(c, http.StatusConflict, "APPROVAL_INVALID", "Persetujuan owner tidak cocok, sudah dipakai, atau kedaluwarsa. Minta persetujuan baru.")
 	case errors.Is(err, service.ErrOwnerPINRequired):

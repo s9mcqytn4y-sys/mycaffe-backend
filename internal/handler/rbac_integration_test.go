@@ -92,7 +92,7 @@ func TestRBACRoutesIntegration(t *testing.T) {
 		return out.Permissions
 	}
 
-	owner := login("owner.central@mycaffe.local")
+	owner := login("abdulaziz543333@gmail.com")
 	cashier := login("cashier.central@mycaffe.local")
 	barista := login("barista.central@mycaffe.local")
 	storeA := "11111111-1111-4111-8111-111111111111"

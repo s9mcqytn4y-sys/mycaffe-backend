@@ -169,8 +169,19 @@ func (s *PaymentService) initiateDirectCashierPayment(
 			return ErrOrderNotPayable
 		}
 
-		// Concurrency protection (P12): for open tabs, prevent cash tender if there is an active pending payment attempt on this split
-		if order.BillingMode == domain.BillingModeOpenTab {
+		remaining := split.TotalAmount - split.PaidAmount
+		amount := remaining
+		if input.Amount != nil {
+			amount = *input.Amount
+		}
+		if amount <= 0 || amount > remaining {
+			return fmt.Errorf("%w: amount=%d remaining=%d", ErrInvalidTenderAmount, amount, remaining)
+		}
+		partial := amount < remaining
+
+		// Concurrency protection (P12, V12): open tabs and partial tenders never run beside a pending
+		// gateway attempt; a pay-first tender of the whole balance still supersedes it (customer switches to cash).
+		if order.BillingMode == domain.BillingModeOpenTab || partial || split.PaidAmount > 0 {
 			activePending, err := s.paymentRepo.GetActivePaymentForSplitForUpdate(ctx, tx, trustedStoreID, split.ID)
 			if err != nil && !errors.Is(err, postgres.ErrPaymentNotFound) {
 				return err
@@ -188,13 +199,22 @@ func (s *PaymentService) initiateDirectCashierPayment(
 			return err
 		}
 
-		var cashTendered, changeGiven int64
+		var cashTendered, changeGiven, rounding int64
 		if input.Method == domain.PaymentMethodCash {
-			if input.CashTenderedAmount < split.TotalAmount {
-				return fmt.Errorf("%w: tendered=%d required=%d", ErrInsufficientCashTendered, input.CashTenderedAmount, split.TotalAmount)
+			cashDue := amount
+			if !partial { // V11: only the closing cash tender is rounded, to the nearest store step
+				settings, err := postgres.NewSettingsRepository().GetStoreSettings(ctx, tx, trustedStoreID)
+				if err != nil {
+					return err
+				}
+				cashDue = roundToNearest(amount, int64(settings.CashRoundingStep))
+				rounding = cashDue - amount
+			}
+			if input.CashTenderedAmount < cashDue {
+				return fmt.Errorf("%w: tendered=%d required=%d", ErrInsufficientCashTendered, input.CashTenderedAmount, cashDue)
 			}
 			cashTendered = input.CashTenderedAmount
-			changeGiven = input.CashTenderedAmount - split.TotalAmount
+			changeGiven = input.CashTenderedAmount - cashDue
 		}
 
 		now := s.nowFunc().UTC()
@@ -213,8 +233,9 @@ func (s *PaymentService) initiateDirectCashierPayment(
 			RequestHash:        requestHash,
 			Provider:           "manual",
 			ProviderOrderID:    paymentID.String(),
-			Amount:             split.TotalAmount,
+			Amount:             amount,
 			RefundedAmount:     0,
+			RoundingAmount:     rounding,
 			Method:             input.Method,
 			Status:             domain.PaymentStatusPaid,
 			RawProviderStatus:  "cashier_settled",
@@ -249,7 +270,7 @@ func (s *PaymentService) initiateDirectCashierPayment(
 				StoreID:      trustedStoreID,
 				ShiftID:      activeShift.ID,
 				MovementType: domain.CashMovementSale,
-				Amount:       split.TotalAmount,
+				Amount:       amount + rounding, // what physically entered the drawer
 				ActorID:      actor.ID,
 				Reason:       &saleReason,
 				OrderID:      &order.ID,
@@ -261,17 +282,23 @@ func (s *PaymentService) initiateDirectCashierPayment(
 			}
 		}
 
+		split.PaidAmount += amount
+		split.Status = domain.SplitBillStatusPaid
+		if partial {
+			split.Status = domain.SplitBillStatusPartiallyPaid
+		}
 		if _, err := tx.ExecContext(ctx, `
-			UPDATE payment_splits
-			SET status = 'paid', paid_amount = total_amount
+			UPDATE payment_splits SET status = $3, paid_amount = $4
 			WHERE store_id = $1 AND id = $2
-		`, trustedStoreID, split.ID); err != nil {
+		`, trustedStoreID, split.ID, split.Status, split.PaidAmount); err != nil {
 			return fmt.Errorf("failed to settle split for cashier payment: %w", err)
 		}
-		split.Status = domain.SplitBillStatusPaid
-		split.PaidAmount = split.TotalAmount
 
-		if err := s.commitPaidOrderTx(ctx, tx, order); err != nil {
+		if partial {
+			if err := s.recordPartialPaymentTx(ctx, tx, order); err != nil {
+				return err
+			}
+		} else if err := s.commitPaidOrderTx(ctx, tx, order); err != nil {
 			return err
 		}
 
@@ -282,6 +309,8 @@ func (s *PaymentService) initiateDirectCashierPayment(
 			"split_id":             split.ID.String(),
 			"method":               payment.Method,
 			"amount":               payment.Amount,
+			"rounding_amount":      payment.RoundingAmount,
+			"remaining_after":      split.TotalAmount - split.PaidAmount,
 			"cash_tendered_amount": payment.CashTenderedAmount,
 			"change_given_amount":  payment.ChangeGivenAmount,
 			"reconciliation_ref":   payment.ReconciliationRef,
@@ -403,6 +432,9 @@ func (s *PaymentService) initiateMidtransGatewayPayment(
 		if order.PaymentStatus == domain.OrderPaymentStatusPaid || split.Status == domain.SplitBillStatusPaid {
 			return ErrSplitAlreadyPaid
 		}
+		if input.Amount != nil && *input.Amount != split.TotalAmount-split.PaidAmount {
+			return ErrGatewayMustPayRemaining
+		}
 		now := s.nowFunc().UTC()
 		if order.Status == domain.OrderStatusCancelled || (order.ExpiresAt != nil && !now.Before(*order.ExpiresAt)) {
 			return ErrOrderNotPayable
@@ -460,7 +492,7 @@ func (s *PaymentService) initiateMidtransGatewayPayment(
 			RequestHash:     requestHash,
 			Provider:        "midtrans",
 			ProviderOrderID: paymentID.String(),
-			Amount:          split.TotalAmount,
+			Amount:          split.TotalAmount - split.PaidAmount, // V12: the remaining balance after direct tenders
 			RefundedAmount:  0,
 			Method:          input.Method,
 			Bank:            input.Bank,

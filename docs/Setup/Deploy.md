@@ -9,6 +9,13 @@ Production runs images pinned by digest (`ghcr.io/...@sha256:...`), never by a m
 3. For a `v*` tag the GitHub Release lists the same digest, with the SBOM and SLSA provenance attached.
 4. The web image digest comes from the frontend repository's release run the same way.
 
+## 1a. Ingress (IN1, P0-07)
+
+Production publishes **no ports**. A Named Cloudflare Tunnel (`tunnel` service, token in
+`CLOUDFLARE_TUNNEL_TOKEN`) carries traffic to Nginx on the internal edge network. TLS ends at
+Cloudflare, so there is no Certbot and no certificate volume. The firewall and provisioning steps are in
+[OperationsRunbook.md](OperationsRunbook.md).
+
 ## 2. Deploy
 
 On the VPS, as user `mycaffe`, from `/opt/mycaffe` (the released tag's `deploy/` and `scripts/`, see [BackupAndRestore.md](BackupAndRestore.md) §2):
@@ -47,13 +54,35 @@ scripts/deploy/compose.sh logs --tail 200 api
 scripts/deploy/compose.sh up -d alloy
 ```
 
-## 5. If the rollback also fails (exit code 2)
+## 5. Daily purge of technical rows (P0-08)
+
+`migrate -action=purge` runs as `mycaffe_migrator` and deletes only technical rows past retention.
+It logs the deleted count per table.
+
+| Table | Deleted when |
+|-------|--------------|
+| `outbox_events` | Processed (or dead-lettered) more than 7 days ago |
+| `ws_tickets` | Expired more than 1 day ago |
+| `guest_sessions` | Expired more than 30 days ago and referenced by no order or ticket |
+| `receipt_tokens`, `account_tokens`, `auth_sessions` | Expired more than 30 days ago |
+| `email_outbox` | Sent or failed, created more than 90 days ago |
+| `media_uploads` | Still pending 1 day after expiry |
+| `otp_challenges` | Expired more than 1 day ago |
+| `message_outbox` | Sent or failed, created more than 90 days ago |
+
+The job never purges money, audit or webhook evidence: payments, ledgers, `payment_notification_logs`,
+`audit_logs` and `approval_requests` are kept.
+
+The cron line is in `deploy/backup/mycaffe-backup.cron`, daily at 20:00 UTC (03:00 WIB). It reads the
+deployed digest from `/var/lib/mycaffe/deploy/current.env`.
+
+## 6. If the rollback also fails (exit code 2)
 
 1. `cat /var/lib/mycaffe/deploy/history.log` and `scripts/deploy/compose.sh logs --tail 300 migrate api`.
 2. A migration that broke the old image is a migration bug: restore the pre-deploy backup ([BackupAndRestore.md](BackupAndRestore.md) §3), then deploy the last good digest.
 3. Never edit files or rebuild images on the VPS (ADR-002 §4).
 
-## 6. Limits
+## 7. Limits
 
 - Only `api` health decides success. A broken `web` image is not rolled back automatically (it has no healthcheck yet); fix forward or run `deploy.sh rollback`.
 - `postgres`, `nginx`, `certbot` and `alloy` images are not managed by `deploy.sh`.

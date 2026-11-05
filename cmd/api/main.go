@@ -132,10 +132,11 @@ func main() {
 }
 
 func newRouter(cfg *config.Config, h *handlerSet) *gin.Engine {
-	if cfg.AppEnv == "production" {
-		gin.SetMode(gin.ReleaseMode)
-	} else {
+	// Debug mode only on developer machines; the staging demo is public and must not log routes.
+	if cfg.AppEnv == "development" || cfg.AppEnv == "test" {
 		gin.SetMode(gin.DebugMode)
+	} else {
+		gin.SetMode(gin.ReleaseMode)
 	}
 
 	router := gin.New()

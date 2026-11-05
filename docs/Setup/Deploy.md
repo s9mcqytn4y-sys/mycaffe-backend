@@ -99,3 +99,11 @@ Differences, all on the host and none in the images:
 - `/opt/mycaffe/deploy/docker/.env` links to `/etc/mycaffe/prod.env` (mode 600): fresh database passwords and JWT key,
   provider keys copied from the owner's `.env.demo`.
 - Ingress is the `mycaffe-demo` Named Tunnel: public hostname `demo.abbdullaziz.online` → `http://nginx:80`.
+
+## 9. Self-hosted CI runner (decision W11)
+
+CI and releases run on the WSL demo host: runner `wsl-mycaffe` (labels `self-hosted, linux, mycaffe`), installed
+in `/opt/actions-runner` as the systemd service `actions.runner.s9mcqytn4y-sys-mycaffe-backend.wsl-mycaffe`,
+user `runner` (docker group, passwordless sudo because the workflows install tools). Jobs run only while the PC and
+WSL are up; one job at a time. Re-register after a reinstall with a fresh token from
+`gh api -X POST repos/s9mcqytn4y-sys/mycaffe-backend/actions/runners/registration-token`.

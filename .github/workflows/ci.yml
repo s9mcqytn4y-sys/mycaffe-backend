@@ -16,7 +16,7 @@ concurrency:
 jobs:
   build-and-test:
     name: Go Lint, Vet, Security, Test, and Build
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, mycaffe]
     timeout-minutes: 10
     steps:
       - name: Checkout code
@@ -71,7 +71,7 @@ jobs:
 
   docker-build:
     name: Docker, Compose, Nginx TLS Bootstrap & Backup/Restore Script Verification
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, mycaffe]
     timeout-minutes: 15
     steps:
       - name: Checkout code
@@ -128,7 +128,7 @@ jobs:
 
   database-migration-test:
     name: PostgreSQL 18 Triple-Role, Migrator CLI, RLS, Direct mycaffe_app Login & Seed
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, mycaffe]
     timeout-minutes: 15
     services:
       postgres:

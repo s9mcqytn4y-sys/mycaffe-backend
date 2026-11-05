@@ -23,7 +23,7 @@ prospective-client demo waits for v0.8. Benchmark: [CompetitorAnalysisMajoo.md](
 | 8.5 | Partial refunds per item (proportional tax/service/discount), outlet cash as a refund source, RF1-a/b/d/f Midtrans refunds with `refund_pending` | RF1, V13 | Split in two. **8.5a done** (migration 000029): partial refunds by lines, outlet cash source, hand-back of a tender on a partly paid bill, idempotent line refunds. **8.5b** Midtrans API refunds with `refund_pending` follows; a live sandbox proof needs the owner's sandbox keys |
 | 8.6 | Discount approval above `cashier_max_discount_bps` (ADR-007 action `discount`), compliment as an approved 100 % discount | V12 | **Done** (migration 000031): `POST /pos/orders/:id/discount`, ADR-007 action `discount`, zero-total splits allowed for compliments |
 | 8.7 | Staff QR badges (revocable token) + PIN login | V14 | **Done** (migration 000032): `POST /staff/:id/badge`, `/badge/revoke`, login with `badge` + `pin` |
-| 8.8 | P0-07 configuration (real client IP, Named Tunnel template, firewall runbook) and P0-09 provisioning/incident runbook | V8 | Live tunnel test waits for a domain |
+| 8.8 | P0-07 configuration (real client IP, Named Tunnel template, firewall runbook) and P0-09 provisioning/incident runbook | V8 | **Done**: prod Named Tunnel ingress (no published ports, Certbot removed), [OperationsRunbook.md](../Setup/OperationsRunbook.md) |
 
 Blocked by dependency: Web Push (no domain), WhatsApp sending (Meta business verification).
 
@@ -88,9 +88,9 @@ promotions & bundles (K7), loyalty (K6), static QRIS fallback (K8), delivery cha
 | JSON logs with request id, internal Prometheus metrics (P0-03) | Implemented |
 | Grafana Cloud metrics and tested alert rules (P0-04) | Implemented; Grafana Cloud account pending (owner) |
 | Nginx TLS bootstrap, HSTS, request id, rate limits; internal-only DB network | Implemented |
-| Real client IP + Named Cloudflare Tunnel + VPS firewall (P0-07, IN1) | Planned (deployment change, needs approval) |
+| Real client IP + Named Cloudflare Tunnel + VPS firewall (P0-07, IN1) | Implemented (config, PR 8.8); first live run on the first client VPS |
 | Outbox dead-letter and purge (P0-08) | Implemented (v0.8 PR 8.1); cron runs once a VPS exists |
-| Provisioning and incident runbook (P0-09) | Planned |
+| Provisioning and incident runbook (P0-09) | Implemented ([OperationsRunbook.md](../Setup/OperationsRunbook.md)) |
 | Hostinger SMTP + SPF/DKIM/DMARC runbook | Documented ([Email.md](../Setup/Email.md)); blocked (no domain) |
 | Operator bootstrap (`bootstrap-store`) + `DEFAULT_STORE_SLUG` | Implemented |
 | Promote `staging` → `main` with a merge commit + semver tag | Owner approves each promotion |

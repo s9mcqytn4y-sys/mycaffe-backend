@@ -30,6 +30,8 @@ func writeTableError(c *gin.Context, err error) {
 		authError(c, http.StatusConflict, "TABLE_INACTIVE", "Meja sedang tidak aktif.")
 	case errors.Is(err, service.ErrTableSessionNotOpen):
 		authError(c, http.StatusConflict, "TABLE_SESSION_NOT_OPEN", "Sesi meja sudah ditutup. Muat ulang papan meja.")
+	case errors.Is(err, service.ErrTableTimerOff):
+		authError(c, http.StatusConflict, "TABLE_TIMER_OFF", "Meja ini tidak memakai batas waktu.")
 	case errors.Is(err, service.ErrTableNotMerged):
 		authError(c, http.StatusConflict, "TABLE_NOT_MERGED", "Meja ini tidak tergabung dengan sesi tersebut.")
 	default:
@@ -204,6 +206,28 @@ func (h *TableHandler) SplitTable(c *gin.Context) {
 		return
 	}
 	session, err := h.tables.SplitTable(c.Request.Context(), currentStaff(c), id, req.TableID)
+	if err != nil {
+		writeTableError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, session)
+}
+
+type extendTimerRequest struct {
+	Minutes int `json:"minutes" binding:"required"`
+}
+
+// ExtendTimer handles POST /api/v1/pos/table-sessions/:id/extend (tab.manage, W6).
+func (h *TableHandler) ExtendTimer(c *gin.Context) {
+	id, ok := pathID(c, "id")
+	if !ok {
+		return
+	}
+	var req extendTimerRequest
+	if !bindJSON(c, &req) {
+		return
+	}
+	session, err := h.tables.ExtendTimer(c.Request.Context(), currentStaff(c), id, req.Minutes)
 	if err != nil {
 		writeTableError(c, err)
 		return

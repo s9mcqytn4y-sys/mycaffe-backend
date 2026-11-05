@@ -30,6 +30,8 @@ type StoreSettingsPatch struct {
 	DefaultOpeningFloat      *int64  `json:"default_opening_float"`
 	CashierSeesExpectedCash  *bool   `json:"cashier_sees_expected_cash"`
 	GatewayPartialRefunds    *bool   `json:"gateway_partial_refunds"`
+	TableTimeLimitMinutes    *int    `json:"table_time_limit_minutes"`
+	TableTimerWarningMinutes *int    `json:"table_timer_warning_minutes"`
 }
 
 // SettingsService lets owners change operating policies without a developer (owner decision K3).
@@ -111,6 +113,12 @@ func (s *SettingsService) Update(ctx context.Context, actor *AuthenticatedStaff,
 		if patch.GatewayPartialRefunds != nil {
 			after.GatewayPartialRefunds = *patch.GatewayPartialRefunds
 		}
+		if patch.TableTimeLimitMinutes != nil {
+			after.TableTimeLimitMinutes = *patch.TableTimeLimitMinutes
+		}
+		if patch.TableTimerWarningMinutes != nil {
+			after.TableTimerWarningMinutes = *patch.TableTimerWarningMinutes
+		}
 		if err := validateStoreSettings(after); err != nil {
 			return err
 		}
@@ -145,6 +153,12 @@ func validateStoreSettings(s domain.StoreSettings) error {
 		return errors.Join(ErrInvalidSettings, errors.New("batas pengeluaran kas outlet dan modal awal default harus 0 - Rp100.000.000"))
 	case s.CashRoundingStep != 0 && s.CashRoundingStep != 100 && s.CashRoundingStep != 500:
 		return errors.Join(ErrInvalidSettings, errors.New("pembulatan tunai harus 0 (nonaktif), 100, atau 500"))
+	case s.TableTimeLimitMinutes != 0 && (s.TableTimeLimitMinutes < 15 || s.TableTimeLimitMinutes > 480):
+		return errors.Join(ErrInvalidSettings, errors.New("batas waktu meja harus 0 (nonaktif) atau 15-480 menit"))
+	case s.TableTimerWarningMinutes < 1 || s.TableTimerWarningMinutes > 60:
+		return errors.Join(ErrInvalidSettings, errors.New("peringatan timer meja harus 1-60 menit"))
+	case s.TableTimeLimitMinutes != 0 && s.TableTimerWarningMinutes >= s.TableTimeLimitMinutes:
+		return errors.Join(ErrInvalidSettings, errors.New("peringatan timer meja harus lebih pendek dari batas waktu meja"))
 	case s.RefundWindowOwnerDays < s.RefundWindowCashierDays:
 		return errors.Join(ErrInvalidSettings, errors.New("batas waktu refund owner tidak boleh lebih pendek dari kasir"))
 	case s.StaticQRISFallbackMode != domain.StaticQRISFallbackOff && s.StaticQRISFallbackMode != domain.StaticQRISFallbackAuto && s.StaticQRISFallbackMode != domain.StaticQRISFallbackForced:

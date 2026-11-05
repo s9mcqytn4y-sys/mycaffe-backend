@@ -41,7 +41,7 @@ Sumber: panduan pengguna dan halaman produk majoo, dicek 2026-11-05. Detail pari
 | PR | Lingkup | Keputusan | Migrasi |
 |----|---------|-----------|---------|
 | 9.1 | Pindah, gabung, pisah meja; filter area | W5 | `000033_table_session_links` (**selesai**) |
-| 9.2 | Timer meja (peringatan saja) | W6 | `000034_table_timers` |
+| 9.2 | Timer meja (peringatan saja) | W6 | `000034_table_timers` (**selesai**) |
 | 9.3 | Layar antrean TV dengan token layar per toko | W7 | `000035_display_tokens` |
 | 9.4 | Antrean cetak: printer per stasiun, checker, label TSPL, agen cetak | W8 | `000036_printers_print_jobs` |
 | 9.5 | Struk digital: email, driver WhatsApp Cloud API, tautan SMS | W9 | `000037_receipt_deliveries` |
@@ -84,11 +84,14 @@ Event outbox ke kanal `pos`: `table.moved`, `table.merged`, `table.split`. Setia
 habis, tanpa ada pesanan yang ditolak.
 
 - `store_settings`: `table_time_limit_minutes` (0 = mati, default 0), `table_timer_warning_minutes` (default 10).
-- Tabel `table_timers`: `table_session_id`, `ends_at`, `warned_at`, `expired_at`, `extended_minutes`.
-  Dibuat saat sesi dibuka jika batas aktif.
+- Kolom di `table_sessions` (relasi 1:1, tanpa tabel terpisah): `ends_at`, `warned_at`, `expired_at`,
+  `extended_minutes`. `ends_at` diisi saat sesi dibuka jika batas aktif; mengubah batas hanya berlaku untuk
+  sesi baru. Batas 0 (mati) atau 15–480 menit; peringatan 1–60 menit dan lebih pendek dari batas.
 - Worker memindai setiap 30 detik (pola worker outbox yang sudah ada) dan menerbitkan
   `table.timer_warning` serta `table.timer_expired` ke kanal `pos`, masing-masing tepat sekali.
-- `POST /pos/table-sessions/:id/extend` `{minutes}` (1–240): menggeser `ends_at`, mereset peringatan, audit.
+- `POST /pos/table-sessions/:id/extend` `{minutes}` (1–240): `ends_at` jadi max(`ends_at`, sekarang) + menit,
+  peringatan dan kedaluwarsa aktif lagi, audit. Sesi tanpa timer → `409 TABLE_TIMER_OFF`.
+- Worker memakai fungsi discovery `SECURITY DEFINER` `list_stores_with_due_table_timers` (hanya `store_id`).
 - Papan meja mengembalikan `timer_state` (`none`, `ok`, `warning`, `expired`) dan `ends_at`.
 - Pesanan tetap diterima setelah kedaluwarsa (W6).
 

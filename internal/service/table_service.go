@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/domain"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/database"
+	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/metrics"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/rbac"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/repository/postgres"
 )
@@ -74,16 +76,24 @@ func (s *TableService) ListTables(ctx context.Context, actor *AuthenticatedStaff
 		return nil, ErrInvalidSession
 	}
 	var board []domain.TableBoardEntry
+	var settings domain.StoreSettings
 	err := s.tx(ctx, actor, func(tx *sqlx.Tx) error {
-		if err := s.closeSettled(ctx, tx, actor.Staff.Store.ID); err != nil {
+		var err error
+		if settings, err = s.settings.GetStoreSettings(ctx, tx, actor.Staff.Store.ID); err != nil {
 			return err
 		}
-		var err error
+		if err := s.repo.CloseSettledSessions(ctx, tx, actor.Staff.Store.ID, settings.TableIdleCloseMinutes, s.nowFunc().UTC()); err != nil {
+			return err
+		}
 		board, err = s.repo.ListBoard(ctx, tx, actor.Staff.Store.ID)
 		return err
 	})
 	if err != nil {
 		return nil, err
+	}
+	now := s.nowFunc().UTC()
+	for i := range board {
+		board[i].TimerState = board[i].Session.TimerState(now, settings.TableTimerWarningMinutes)
 	}
 	if section = strings.TrimSpace(section); section != "" {
 		filtered := board[:0]
@@ -539,4 +549,100 @@ func (s *TableService) recordFloorChange(ctx context.Context, tx *sqlx.Tx, actor
 		ID: uuid.New(), StoreID: actor.Staff.Store.ID, EventType: event, AggregateType: "table_session",
 		AggregateID: sessionID.String(), Payload: string(payload), CreatedAt: s.nowFunc().UTC(),
 	})
+}
+
+// Table timer (v0.9 PR 9.2, decision W6): warnings only, orders are never refused.
+
+var ErrTableTimerOff = errors.New("table session has no timer")
+
+// ExtendTimer gives the table more time: ends_at moves to max(ends_at, now) + minutes.
+func (s *TableService) ExtendTimer(ctx context.Context, actor *AuthenticatedStaff, sessionID uuid.UUID, minutes int) (*domain.TableSession, error) {
+	if !actor.Can(rbac.TabManage) {
+		return nil, ErrForbidden
+	}
+	if minutes < 1 || minutes > 240 {
+		return nil, &ValidationError{Fields: map[string]string{"minutes": "harus 1-240 menit"}}
+	}
+	var session *domain.TableSession
+	err := s.tx(ctx, actor, func(tx *sqlx.Tx) error {
+		var err error
+		if session, err = s.openSession(ctx, tx, actor.Staff.Store.ID, sessionID); err != nil {
+			return err
+		}
+		if session.EndsAt == nil {
+			return ErrTableTimerOff
+		}
+		before := *session.EndsAt
+		if err := s.repo.ExtendTimer(ctx, tx, session, minutes, s.nowFunc().UTC()); err != nil {
+			return err
+		}
+		meta := map[string]any{"session_id": session.ID, "table_id": session.TableID, "minutes": minutes,
+			"ends_at_before": before, "ends_at": session.EndsAt}
+		return s.recordFloorChange(ctx, tx, actor, "TABLE_TIMER_EXTEND", "table.timer_extended",
+			fmt.Sprintf("Waktu meja ditambah %d menit", minutes), session.ID, meta)
+	})
+	return session, mapTableError(err)
+}
+
+// ProcessTimers publishes table.timer_expired and table.timer_warning once per session for every
+// store with a due timer. Safe to run on several instances at once.
+func (s *TableService) ProcessTimers(ctx context.Context) error {
+	storeIDs, err := s.repo.ListStoresWithDueTableTimers(ctx, s.db)
+	if err != nil {
+		return err
+	}
+	for _, storeID := range storeIDs {
+		err := database.WithTenantTx(ctx, s.db, storeID, func(tx *sqlx.Tx) error {
+			settings, err := s.settings.GetStoreSettings(ctx, tx, storeID)
+			if err != nil {
+				return err
+			}
+			now := s.nowFunc().UTC()
+			expired, warned, err := s.repo.MarkTimers(ctx, tx, storeID, settings.TableTimerWarningMinutes, now)
+			if err != nil {
+				return err
+			}
+			publish := func(event string, rows []postgres.TimerEvent) error {
+				for _, row := range rows {
+					payload, _ := json.Marshal(map[string]any{"session_id": row.SessionID, "table_id": row.TableID,
+						"table_number": row.TableNumber, "ends_at": row.EndsAt})
+					if err := s.orders.InsertOutboxEvent(ctx, tx, &domain.OutboxEvent{
+						ID: uuid.New(), StoreID: storeID, EventType: event, AggregateType: "table_session",
+						AggregateID: row.SessionID.String(), Payload: string(payload), CreatedAt: now,
+					}); err != nil {
+						return err
+					}
+				}
+				return nil
+			}
+			if err := publish("table.timer_expired", expired); err != nil {
+				return err
+			}
+			return publish("table.timer_warning", warned)
+		})
+		if err != nil {
+			log.Printf("[TABLE TIMER] store_id=%s error: %v", storeID, err)
+		}
+	}
+	return nil
+}
+
+// StartTimerWorker runs ProcessTimers until ctx is cancelled.
+func (s *TableService) StartTimerWorker(ctx context.Context, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := s.ProcessTimers(ctx); err != nil {
+				if !errors.Is(err, context.Canceled) {
+					log.Printf("[TABLE TIMER] cycle error: %v", err)
+				}
+			} else {
+				metrics.WorkerSucceeded("table_timer")
+			}
+		}
+	}
 }

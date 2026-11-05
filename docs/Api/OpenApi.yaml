@@ -1375,6 +1375,55 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ValidationErrorResponse"
+  /api/v1/pos/table-sessions/{id}/extend:
+    post:
+      tags: [Tables]
+      operationId: extendTableTimer
+      summary: "Give a table more time (tab.manage, audited, W6)"
+      description: >-
+        ends_at moves to max(ends_at, now) + minutes; warning and expiry re-arm. Emits table.timer_extended.
+        The worker publishes table.timer_warning and table.timer_expired on the pos channel, once each; the
+        timer never refuses orders.
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - $ref: "#/components/parameters/ResourceID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [minutes]
+              properties:
+                minutes:
+                  type: integer
+                  minimum: 1
+                  maximum: 240
+      responses:
+        "200":
+          description: The session with the new ends_at
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TableSession"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: TABLE_TIMER_OFF (session opened without a store time limit), TABLE_SESSION_NOT_OPEN
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: minutes outside 1-240
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationErrorResponse"
   /api/v1/public/qr/{token}:
     get:
       security: []
@@ -4427,6 +4476,19 @@ components:
         close_reason:
           type: string
           enum: [cashier, auto, merged]
+        ends_at:
+          type: string
+          format: date-time
+          description: Table time limit end (W6); absent when the session opened without a store limit
+        warned_at:
+          type: string
+          format: date-time
+        expired_at:
+          type: string
+          format: date-time
+        extended_minutes:
+          type: integer
+          minimum: 0
     TableBoardEntry:
       allOf:
         - $ref: "#/components/schemas/Table"
@@ -4448,6 +4510,10 @@ components:
               type: string
               format: uuid
               description: Set when this table is merged into the session of that table (W5); session and unpaid totals are the shared ones
+            timer_state:
+              type: string
+              enum: [none, ok, warning, expired]
+              description: Derived at read time from session.ends_at and table_timer_warning_minutes (W6)
     PublicTable:
       type: object
       required: [store_name, store_slug, table_number, label, ordering_open]
@@ -5805,6 +5871,14 @@ components:
         cashier_sees_expected_cash:
           type: boolean
           description: When false (default) a cashier's X-report hides expected cash while the shift is open (blind count).
+        table_time_limit_minutes:
+          type: integer
+          description: Table time limit for sessions opened from now on (W6); 0 (default) off, otherwise 15-480. Warnings only.
+        table_timer_warning_minutes:
+          type: integer
+          minimum: 1
+          maximum: 60
+          description: Warn this many minutes before a table's time ends; shorter than the limit. Default 10.
 
     InitiatePaymentResponse:
       type: object

@@ -355,6 +355,13 @@ BEGIN
     IF has_table_privilege('mycaffe_app', 'public.kds_tickets', 'DELETE') THEN
         RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may DELETE kds_tickets!';
     END IF;
+    -- 10F-15. Table merge links (migration 000033): RLS on, never deleted by the app role.
+    IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.table_session_links'::regclass) THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: table_session_links does not have row-level security enabled!';
+    END IF;
+    IF has_table_privilege('mycaffe_app', 'public.table_session_links', 'DELETE') THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may DELETE table_session_links!';
+    END IF;
     -- 10F-14. Staff badges (migration 000032): RLS on, never deleted by the app role.
     IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.staff_badges'::regclass) THEN
         RAISE EXCEPTION 'SECURITY FAILURE: staff_badges does not have row-level security enabled!';

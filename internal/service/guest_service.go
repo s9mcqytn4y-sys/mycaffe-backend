@@ -135,7 +135,7 @@ func (s *GuestService) StartSession(ctx context.Context, qrToken string) (string
 			}
 		}
 		expires := now.Add(guestSessionTTL)
-		if err := s.repo.InsertGuestSession(ctx, tx, sessionID, storeID, session.ID, hash, now, expires); err != nil {
+		if err := s.repo.InsertGuestSession(ctx, tx, sessionID, storeID, session.ID, tableID, hash, now, expires); err != nil {
 			return err
 		}
 		view = &GuestSessionView{TableNumber: t.TableNumber, ExpiresAt: expires}

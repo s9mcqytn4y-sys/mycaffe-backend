@@ -267,6 +267,9 @@ func registerTableAndGuestRoutes(v1 *gin.RouterGroup, h *handlerSet) {
 	pos.POST("/tables/:id/rotate-qr", h.auth.RequirePermission(rbac.TableQRManage), h.table.RotateQR)
 	pos.POST("/tables/:id/sessions", h.auth.RequirePermission(rbac.TabManage), h.table.OpenSession)
 	pos.POST("/table-sessions/:id/close", h.auth.RequirePermission(rbac.TabManage), h.table.CloseSession)
+	pos.POST("/table-sessions/:id/move", h.auth.RequirePermission(rbac.TabManage), h.table.MoveSession)
+	pos.POST("/table-sessions/:id/merge", h.auth.RequirePermission(rbac.TabManage), h.table.MergeSession)
+	pos.POST("/table-sessions/:id/split", h.auth.RequirePermission(rbac.TabManage), h.table.SplitTable)
 	v1.GET("/public/qr/:token", h.table.ResolveQR)
 
 	// QR guest ordering (iteration 5b): pay-first per device (T2), own orders only (Q6).

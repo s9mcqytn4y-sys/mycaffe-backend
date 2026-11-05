@@ -1,0 +1,17 @@
+# Override for the demo host (decision W2: WSL Ubuntu run like a VPS). Layered on top of
+# docker-compose.prod.yml by deploy.sh and compose.sh when DEPLOY_COMPOSE_OVERRIDE points here.
+# Same images, network and tunnel as production; only the environment flags differ:
+# staging config, Midtrans sandbox, no Grafana agent until a Grafana Cloud stack exists.
+services:
+  migrate:
+    environment:
+      APP_ENV: "staging"
+
+  api:
+    environment:
+      APP_ENV: "staging"
+      MIDTRANS_IS_PRODUCTION: "false"
+      SENTRY_ENVIRONMENT: "staging"
+
+  alloy:
+    profiles: ["monitoring"]

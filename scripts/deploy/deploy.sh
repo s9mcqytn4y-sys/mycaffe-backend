@@ -13,6 +13,8 @@ set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 COMPOSE_FILE="${DEPLOY_COMPOSE_FILE:-${REPO_DIR}/deploy/docker/docker-compose.prod.yml}"
+# Optional second compose file, e.g. deploy/docker/docker-compose.demo-vps.yml on the demo host.
+DEPLOY_COMPOSE_OVERRIDE="${DEPLOY_COMPOSE_OVERRIDE:-}"
 STATE_DIR="${DEPLOY_STATE_DIR:-/var/lib/mycaffe/deploy}"
 HEALTH_TIMEOUT_S="${DEPLOY_HEALTH_TIMEOUT_S:-180}"
 BACKUP_ENV_FILE="${BACKUP_ENV_FILE:-/etc/mycaffe/backup.env}"
@@ -20,7 +22,7 @@ DIGEST_RE='^sha256:[0-9a-f]{64}$'
 
 log() { echo "[DEPLOY] $*"; }
 die() { echo "[DEPLOY ERROR] $*" >&2; exit 1; }
-compose() { docker compose -f "${COMPOSE_FILE}" "$@"; }
+compose() { docker compose -f "${COMPOSE_FILE}" ${DEPLOY_COMPOSE_OVERRIDE:+-f "${DEPLOY_COMPOSE_OVERRIDE}"} "$@"; }
 
 read_state() { # state file -> "api web" (empty when missing)
   [[ -f "$1" ]] || { echo " "; return; }

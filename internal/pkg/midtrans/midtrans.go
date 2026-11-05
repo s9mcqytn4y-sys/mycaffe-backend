@@ -55,7 +55,8 @@ func (c *Client) newCoreAPIClient() coreapi.Client {
 	client.New(c.serverKey, c.env)
 	client.HttpClient = &midtrans.HttpClientImplementation{
 		HttpClient: &http.Client{Timeout: 12 * time.Second},
-		Logger:     midtrans.GetDefaultLogger(c.env),
+		// Errors only: the SDK's sandbox default logs raw request/response bodies (QR strings, merchant id).
+		Logger: &midtrans.LoggerImplementation{LogLevel: midtrans.LogError},
 	}
 	return client
 }

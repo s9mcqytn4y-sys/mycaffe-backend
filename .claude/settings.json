@@ -5,15 +5,36 @@
       "Bash(go test *)",
       "Bash(go vet *)",
       "Bash(gofmt *)",
+      "Bash(go build *)",
+      "Bash(go run *)",
       "Bash(go mod tidy*)",
       "Bash(git status*)",
       "Bash(git diff*)",
       "Bash(git log*)",
       "Bash(git branch*)",
+      "Bash(git checkout *)",
+      "Bash(git switch *)",
+      "Bash(git fetch *)",
+      "Bash(git pull *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
       "Bash(docker compose * ps*)",
       "Bash(docker compose * logs*)",
+      "Bash(docker compose * config*)",
+      "Bash(docker compose * up*)",
+      "Bash(docker compose * down*)",
       "Bash(gh pr *)",
-      "Bash(gh run *)"
+      "Bash(gh run *)",
+      "Bash(gh issue *)",
+      "Bash(gh api *)",
+      "Bash(cloudflared *)",
+      "Bash(npx wrangler *)",
+      "Bash(wrangler *)",
+      "Bash(defuddle *)",
+      "Bash(python *)",
+      "Bash(uv *)",
+      "Bash(uvx *)",
+      "Bash(blender -b *)"
     ],
     "deny": [
       "Read(./.env)",
@@ -22,7 +43,9 @@
       "Read(./.env.production)",
       "Edit(./.env)",
       "Edit(./.env.demo)",
-      "Bash(rm -rf *)",
+      "Edit(./.env.local)",
+      "Edit(./.env.production)",
+      "Bash(rm -rf /)",
       "Bash(git push --force*)",
       "Bash(git reset --hard*)"
     ]
@@ -31,4 +54,3 @@
     "APP_ENV": "development"
   }
 }
-

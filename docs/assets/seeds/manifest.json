@@ -1,0 +1,717 @@
+{
+  "cdn_base": "https://cdn.abbdullaziz.online/seeds",
+  "products": {
+    "d0000001-0000-4000-8000-000000000001": {
+      "slug": "classic-iced-latte",
+      "name": "Classic Iced Latte",
+      "primary_url": "https://cdn.abbdullaziz.online/seeds/products/classic-iced-latte-1x1.webp",
+      "size_bytes": 22168,
+      "object_key": "seeds/products/classic-iced-latte-1x1.webp",
+      "variants_json": {
+        "original": "https://cdn.abbdullaziz.online/seeds/products/classic-iced-latte-1x1.webp",
+        "square_1x1": "https://cdn.abbdullaziz.online/seeds/products/classic-iced-latte-1x1.webp",
+        "card_4x3": "https://cdn.abbdullaziz.online/seeds/products/classic-iced-latte-4x3.webp",
+        "thumb": "https://cdn.abbdullaziz.online/seeds/products/classic-iced-latte-thumb.webp"
+      }
+    },
+    "d0000002-0000-4000-8000-000000000002": {
+      "slug": "caffe-latte",
+      "name": "Caffe Latte",
+      "primary_url": "https://cdn.abbdullaziz.online/seeds/products/caffe-latte-1x1.webp",
+      "size_bytes": 24198,
+      "object_key": "seeds/products/caffe-latte-1x1.webp",
+      "variants_json": {
+        "original": "https://cdn.abbdullaziz.online/seeds/products/caffe-latte-1x1.webp",
+        "square_1x1": "https://cdn.abbdullaziz.online/seeds/products/caffe-latte-1x1.webp",
+        "card_4x3": "https://cdn.abbdullaziz.online/seeds/products/caffe-latte-4x3.webp",
+        "thumb": "https://cdn.abbdullaziz.online/seeds/products/caffe-latte-thumb.webp"
+      }
+    },
+    "d0000003-0000-4000-8000-000000000003": {
+      "slug": "americano-double-shot",
+      "name": "Americano (Double Shot)",
+      "primary_url": "https://cdn.abbdullaziz.online/seeds/products/americano-double-shot-1x1.webp",
+      "size_bytes": 25014,
+      "object_key": "seeds/products/americano-double-shot-1x1.webp",
+      "variants_json": {
+        "original": "https://cdn.abbdullaziz.online/seeds/products/americano-double-shot-1x1.webp",
+        "square_1x1": "https://cdn.abbdullaziz.online/seeds/products/americano-double-shot-1x1.webp",
+        "card_4x3": "https://cdn.abbdullaziz.online/seeds/products/americano-double-shot-4x3.webp",
+        "thumb": "https://cdn.abbdullaziz.online/seeds/products/americano-double-shot-thumb.webp"
+      }
+    },
+    "d0000004-0000-4000-8000-000000000004": {
+      "slug": "v60-single-origin-gayo",
+      "name": "V60 Single Origin Gayo",
+      "primary_url": "https://cdn.abbdullaziz.online/seeds/products/v60-single-origin-gayo-1x1.webp",
+      "size_bytes": 21484,
+      "object_key": "seeds/products/v60-single-origin-gayo-1x1.webp",
+      "variants_json": {
+        "original": "https://cdn.abbdullaziz.online/seeds/products/v60-single-origin-gayo-1x1.webp",
+        "square_1x1": "https://cdn.abbdullaziz.online/seeds/products/v60-single-origin-gayo-1x1.webp",
+        "card_4x3": "https://cdn.abbdullaziz.online/seeds/products/v60-single-origin-gayo-4x3.webp",
+        "thumb": "https://cdn.abbdullaziz.online/seeds/products/v60-single-origin-gayo-thumb.webp"
+      }
+    },
+    "d0000005-0000-4000-8000-000000000005": {
+      "slug": "butter-croissant-artisanal",
+      "name": "Butter Croissant Artisanal",
+      "primary_url": "https://cdn.abbdullaziz.online/seeds/products/butter-croissant-artisanal-1x1.webp",
+      "size_bytes": 28776,
+      "object_key": "seeds/products/butter-croissant-artisanal-1x1.webp",
+      "variants_json": {
+        "original": "https://cdn.abbdullaziz.online/seeds/products/butter-croissant-artisanal-1x1.webp",
+        "square_1x1": "https://cdn.abbdullaziz.online/seeds/products/butter-croissant-artisanal-1x1.webp",
+        "card_4x3": "https://cdn.abbdullaziz.online/seeds/products/butter-croissant-artisanal-4x3.webp",
+        "thumb": "https://cdn.abbdullaziz.online/seeds/products/butter-croissant-artisanal-thumb.webp"
+      }
+    },
+    "d0000006-0000-4000-8000-000000000006": {
+      "slug": "express-cold-brew",
+      "name": "Express Cold Brew",
+      "primary_url": "https://cdn.abbdullaziz.online/seeds/products/express-cold-brew-1x1.webp",
+      "size_bytes": 22548,
+      "object_key": "seeds/products/express-cold-brew-1x1.webp",
+      "variants_json": {
+        "original": "https://cdn.abbdullaziz.online/seeds/products/express-cold-brew-1x1.webp",
+        "square_1x1": "https://cdn.abbdullaziz.online/seeds/products/express-cold-brew-1x1.webp",
+        "card_4x3": "https://cdn.abbdullaziz.online/seeds/products/express-cold-brew-4x3.webp",
+        "thumb": "https://cdn.abbdullaziz.online/seeds/products/express-cold-brew-thumb.webp"
+      }
+    },
+    "d0000007-0000-4000-8000-000000000007": {
+      "slug": "kopi-susu-gula-aren-senopati",
+      "name": "Es Kopi Susu Aren Senopati",
+      "primary_url": "https://cdn.abbdullaziz.online/seeds/products/kopi-susu-gula-aren-senopati-1x1.webp",
+      "size_bytes": 23720,
+      "object_key": "seeds/products/kopi-susu-gula-aren-senopati-1x1.webp",
+      "variants_json": {
+        "original": "https://cdn.abbdullaziz.online/seeds/products/kopi-susu-gula-aren-senopati-1x1.webp",
+        "square_1x1": "https://cdn.abbdullaziz.online/seeds/products/kopi-susu-gula-aren-senopati-1x1.webp",
+        "card_4x3": "https://cdn.abbdullaziz.online/seeds/products/kopi-susu-gula-aren-senopati-4x3.webp",
+        "thumb": "https://cdn.abbdullaziz.online/seeds/products/kopi-susu-gula-aren-senopati-thumb.webp"
+      }
+    },
+    "d0000008-0000-4000-8000-000000000008": {
+      "slug": "salted-caramel-cloud-macchiato",
+      "name": "Salted Caramel Cloud Macchiato",
+      "primary_url": "https://cdn.abbdullaziz.online/seeds/products/salted-caramel-cloud-macchiato-1x1.webp",
+      "size_bytes": 24716,
+      "object_key": "seeds/products/salted-caramel-cloud-macchiato-1x1.webp",
+      "variants_json": {
+        "original": "https://cdn.abbdullaziz.online/seeds/products/salted-caramel-cloud-macchiato-1x1.webp",
+        "square_1x1": "https://cdn.abbdullaziz.online/seeds/products/salted-caramel-cloud-macchiato-1x1.webp",
+        "card_4x3": "https://cdn.abbdullaziz.online/seeds/products/salted-caramel-cloud-macchiato-4x3.webp",
+        "thumb": "https://cdn.abbdullaziz.online/seeds/products/salted-caramel-cloud-macchiato-thumb.webp"
+      }
+    },
+    "d0000009-0000-4000-8000-000000000009": {
+      "slug": "pistachio-crema-cold-latte",
+      "name": "Pistachio Crema Cold Latte",
+      "primary_url": "https://cdn.abbdullaziz.online/seeds/products/pistachio-crema-cold-latte-1x1.webp",
+      "size_bytes": 24420,
+      "object_key": "seeds/products/pistachio-crema-cold-latte-1x1.webp",
+      "variants_json": {
+        "original": "https://cdn.abbdullaziz.online/seeds/products/pistachio-crema-cold-latte-1x1.webp",
+        "square_1x1": "https://cdn.abbdullaziz.online/seeds/products/pistachio-crema-cold-latte-1x1.webp",
+        "card_4x3": "https://cdn.abbdullaziz.online/seeds/products/pistachio-crema-cold-latte-4x3.webp",
+        "thumb": "https://cdn.abbdullaziz.online/seeds/products/pistachio-crema-cold-latte-thumb.webp"
+      }
+    },
+    "d0000010-0000-4000-8000-000000000010": {
+      "slug": "yuzu-espresso-tonica",
+      "name": "Yuzu Espresso Tonica",
+      "primary_url": "https://cdn.abbdullaziz.online/seeds/products/yuzu-espresso-tonica-1x1.webp",
+      "size_bytes": 22946,
+      "object_key": "seeds/products/yuzu-espresso-tonica-1x1.webp",
+      "variants_json": {
+        "original": "https://cdn.abbdullaziz.online/seeds/products/yuzu-espresso-tonica-1x1.webp",
+        "square_1x1": "https://cdn.abbdullaziz.online/seeds/products/yuzu-espresso-tonica-1x1.webp",
+        "card_4x3": "https://cdn.abbdullaziz.online/seeds/products/yuzu-espresso-tonica-4x3.webp",
+        "thumb": "https://cdn.abbdullaziz.online/seeds/products/yuzu-espresso-tonica-thumb.webp"
+      }
+    },
+    "d0000011-0000-4000-8000-000000000011": {
+      "slug": "velvet-cappuccino",
+      "name": "Velvet Cappuccino",
+      "primary_url": "https://cdn.abbdullaziz.online/seeds/products/velvet-cappuccino-1x1.webp",
+      "size_bytes": 25856,
+      "object_key": "seeds/products/velvet-cappuccino-1x1.webp",
+      "variants_json": {
+        "original": "https://cdn.abbdullaziz.online/seeds/products/velvet-cappuccino-1x1.webp",
+        "square_1x1": "https://cdn.abbdullaziz.online/seeds/products/velvet-cappuccino-1x1.webp",
+        "card_4x3": "https://cdn.abbdullaziz.online/seeds/products/velvet-cappuccino-4x3.webp",
+        "thumb": "https://cdn.abbdullaziz.online/seeds/products/velvet-cappuccino-thumb.webp"
+      }
+    },
+    "d0000012-0000-4000-8000-000000000012": {
+      "slug": "flat-white-double-ristretto",
+      "name": "Flat White Double Ristretto",
+      "primary_url": "https://cdn.abbdullaziz.online/seeds/products/flat-white-double-ristretto-1x1.webp",
+      "size_bytes": 25548,
+      "object_key": "seeds/products/flat-white-double-ristretto-1x1.webp",
+      "variants_json": {
+        "original": "https://cdn.abbdullaziz.online/seeds/products/flat-white-double-ristretto-1x1.webp",
+        "square_1x1": "https://cdn.abbdullaziz.online/seeds/products/flat-white-double-ristretto-1x1.webp",
+        "card_4x3": "https://cdn.abbdullaziz.online/seeds/products/flat-white-double-ristretto-4x3.webp",
+        "thumb": "https://cdn.abbdullaziz.online/seeds/products/flat-white-double-ristretto-thumb.webp"
+      }
+    },
+    "d0000013-0000-4000-8000-000000000013": {
+      "slug": "piccolo-latte-4oz",
+      "name": "Piccolo Latte (4 oz)",
+      "primary_url": "https://cdn.abbdullaziz.online/seeds/products/piccolo-latte-4oz-1x1.webp",
+      "size_bytes": 25730,
+      "object_key": "seeds/products/piccolo-latte-4oz-1x1.webp",
+      "variants_json": {
+        "original": "https://cdn.abbdullaziz.online/seeds/products/piccolo-latte-4oz-1x1.webp",
+        "square_1x1": "https://cdn.abbdullaziz.online/seeds/products/piccolo-latte-4oz-1x1.webp",
+        "card_4x3": "https://cdn.abbdullaziz.online/seeds/products/piccolo-latte-4oz-4x3.webp",
+        "thumb": "https://cdn.abbdullaziz.online/seeds/products/piccolo-latte-4oz-thumb.webp"
+      }
+    },
+    "d0000014-0000-4000-8000-000000000014": {
+      "slug": "japanese-iced-filter-kintamani",
+      "name": "Japanese Iced Bali Kintamani",
+      "primary_url": "https://cdn.abbdullaziz.online/seeds/products/japanese-iced-filter-kintamani-1x1.webp",
+      "size_bytes": 23154,
+      "object_key": "seeds/products/japanese-iced-filter-kintamani-1x1.webp",
+      "variants_json": {
+        "original": "https://cdn.abbdullaziz.online/seeds/products/japanese-iced-filter-kintamani-1x1.webp",
+        "square_1x1": "https://cdn.abbdullaziz.online/seeds/products/japanese-iced-filter-kintamani-1x1.webp",
+        "card_4x3": "https://cdn.abbdullaziz.online/seeds/products/japanese-iced-filter-kintamani-4x3.webp",
+        "thumb": "https://cdn.abbdullaziz.online/seeds/products/japanese-iced-filter-kintamani-thumb.webp"
+      }
+    },
+    "d0000015-0000-4000-8000-000000000015": {
+      "slug": "kalita-wave-flores-bajawa",
+      "name": "Kalita Wave Flores Bajawa",
+      "primary_url": "https://cdn.abbdullaziz.online/seeds/products/kalita-wave-flores-bajawa-1x1.webp",
+      "size_bytes": 22512,
+      "object_key": "seeds/products/kalita-wave-flores-bajawa-1x1.webp",
+      "variants_json": {
+        "original": "https://cdn.abbdullaziz.online/seeds/products/kalita-wave-flores-bajawa-1x1.webp",
+        "square_1x1": "https://cdn.abbdullaziz.online/seeds/products/kalita-wave-flores-bajawa-1x1.webp",
+        "card_4x3": "https://cdn.abbdullaziz.online/seeds/products/kalita-wave-flores-bajawa-4x3.webp",
+        "thumb": "https://cdn.abbdullaziz.online/seeds/products/kalita-wave-flores-bajawa-thumb.webp"
+      }
+    },
+    "d0000016-0000-4000-8000-000000000016": {
+      "slug": "nitro-cold-brew-cascade",
+      "name": "Nitro Cold Brew Cascade",
+      "primary_url": "https://cdn.abbdullaziz.online/seeds/products/nitro-cold-brew-cascade-1x1.webp",
+      "size_bytes": 23190,
+      "object_key": "seeds/products/nitro-cold-brew-cascade-1x1.webp",
+      "variants_json": {
+        "original": "https://cdn.abbdullaziz.online/seeds/products/nitro-cold-brew-cascade-1x1.webp",
+        "square_1x1": "https://cdn.abbdullaziz.online/seeds/products/nitro-cold-brew-cascade-1x1.webp",
+        "card_4x3": "https://cdn.abbdullaziz.online/seeds/products/nitro-cold-brew-cascade-4x3.webp",
+        "thumb": "https://cdn.abbdullaziz.online/seeds/products/nitro-cold-brew-cascade-thumb.webp"
+      }
+    },
+    "d0000017-0000-4000-8000-000000000017": {
+      "slug": "pain-au-chocolat-valrhona",
+      "name": "Pain au Chocolat Valrhona",
+      "primary_url": "https://cdn.abbdullaziz.online/seeds/products/pain-au-chocolat-valrhona-1x1.webp",
+      "size_bytes": 25216,
+      "object_key": "seeds/products/pain-au-chocolat-valrhona-1x1.webp",
+      "variants_json": {
+        "original": "https://cdn.abbdullaziz.online/seeds/products/pain-au-chocolat-valrhona-1x1.webp",
+        "square_1x1": "https://cdn.abbdullaziz.online/seeds/products/pain-au-chocolat-valrhona-1x1.webp",
+        "card_4x3": "https://cdn.abbdullaziz.online/seeds/products/pain-au-chocolat-valrhona-4x3.webp",
+        "thumb": "https://cdn.abbdullaziz.online/seeds/products/pain-au-chocolat-valrhona-thumb.webp"
+      }
+    },
+    "d0000018-0000-4000-8000-000000000018": {
+      "slug": "almond-kouign-amann",
+      "name": "Caramelized Almond Kouign-Amann",
+      "primary_url": "https://cdn.abbdullaziz.online/seeds/products/almond-kouign-amann-1x1.webp",
+      "size_bytes": 30130,
+      "object_key": "seeds/products/almond-kouign-amann-1x1.webp",
+      "variants_json": {
+        "original": "https://cdn.abbdullaziz.online/seeds/products/almond-kouign-amann-1x1.webp",
+        "square_1x1": "https://cdn.abbdullaziz.online/seeds/products/almond-kouign-amann-1x1.webp",
+        "card_4x3": "https://cdn.abbdullaziz.online/seeds/products/almond-kouign-amann-4x3.webp",
+        "thumb": "https://cdn.abbdullaziz.online/seeds/products/almond-kouign-amann-thumb.webp"
+      }
+    },
+    "d0000019-0000-4000-8000-000000000019": {
+      "slug": "basque-burnt-cheesecake",
+      "name": "Basque Burnt Cheesecake Slice",
+      "primary_url": "https://cdn.abbdullaziz.online/seeds/products/basque-burnt-cheesecake-1x1.webp",
+      "size_bytes": 29502,
+      "object_key": "seeds/products/basque-burnt-cheesecake-1x1.webp",
+      "variants_json": {
+        "original": "https://cdn.abbdullaziz.online/seeds/products/basque-burnt-cheesecake-1x1.webp",
+        "square_1x1": "https://cdn.abbdullaziz.online/seeds/products/basque-burnt-cheesecake-1x1.webp",
+        "card_4x3": "https://cdn.abbdullaziz.online/seeds/products/basque-burnt-cheesecake-4x3.webp",
+        "thumb": "https://cdn.abbdullaziz.online/seeds/products/basque-burnt-cheesecake-thumb.webp"
+      }
+    },
+    "d0000020-0000-4000-8000-000000000020": {
+      "slug": "uji-ceremonial-matcha-latte",
+      "name": "Uji Ceremonial Matcha Latte",
+      "primary_url": "https://cdn.abbdullaziz.online/seeds/products/uji-ceremonial-matcha-latte-1x1.webp",
+      "size_bytes": 24988,
+      "object_key": "seeds/products/uji-ceremonial-matcha-latte-1x1.webp",
+      "variants_json": {
+        "original": "https://cdn.abbdullaziz.online/seeds/products/uji-ceremonial-matcha-latte-1x1.webp",
+        "square_1x1": "https://cdn.abbdullaziz.online/seeds/products/uji-ceremonial-matcha-latte-1x1.webp",
+        "card_4x3": "https://cdn.abbdullaziz.online/seeds/products/uji-ceremonial-matcha-latte-4x3.webp",
+        "thumb": "https://cdn.abbdullaziz.online/seeds/products/uji-ceremonial-matcha-latte-thumb.webp"
+      }
+    },
+    "d0000021-0000-4000-8000-000000000021": {
+      "slug": "hojicha-roasted-oat-latte",
+      "name": "Hojicha Roasted Oat Latte",
+      "primary_url": "https://cdn.abbdullaziz.online/seeds/products/hojicha-roasted-oat-latte-1x1.webp",
+      "size_bytes": 27276,
+      "object_key": "seeds/products/hojicha-roasted-oat-latte-1x1.webp",
+      "variants_json": {
+        "original": "https://cdn.abbdullaziz.online/seeds/products/hojicha-roasted-oat-latte-1x1.webp",
+        "square_1x1": "https://cdn.abbdullaziz.online/seeds/products/hojicha-roasted-oat-latte-1x1.webp",
+        "card_4x3": "https://cdn.abbdullaziz.online/seeds/products/hojicha-roasted-oat-latte-4x3.webp",
+        "thumb": "https://cdn.abbdullaziz.online/seeds/products/hojicha-roasted-oat-latte-thumb.webp"
+      }
+    },
+    "d0000022-0000-4000-8000-000000000022": {
+      "slug": "single-origin-dark-choco-karo",
+      "name": "72% Single Origin Choco Karo",
+      "primary_url": "https://cdn.abbdullaziz.online/seeds/products/single-origin-dark-choco-karo-1x1.webp",
+      "size_bytes": 27092,
+      "object_key": "seeds/products/single-origin-dark-choco-karo-1x1.webp",
+      "variants_json": {
+        "original": "https://cdn.abbdullaziz.online/seeds/products/single-origin-dark-choco-karo-1x1.webp",
+        "square_1x1": "https://cdn.abbdullaziz.online/seeds/products/single-origin-dark-choco-karo-1x1.webp",
+        "card_4x3": "https://cdn.abbdullaziz.online/seeds/products/single-origin-dark-choco-karo-4x3.webp",
+        "thumb": "https://cdn.abbdullaziz.online/seeds/products/single-origin-dark-choco-karo-thumb.webp"
+      }
+    },
+    "d0000023-0000-4000-8000-000000000023": {
+      "slug": "hibiscus-berry-artisan-tea",
+      "name": "Hibiscus Berry Cold Brew Tea",
+      "primary_url": "https://cdn.abbdullaziz.online/seeds/products/hibiscus-berry-artisan-tea-1x1.webp",
+      "size_bytes": 23910,
+      "object_key": "seeds/products/hibiscus-berry-artisan-tea-1x1.webp",
+      "variants_json": {
+        "original": "https://cdn.abbdullaziz.online/seeds/products/hibiscus-berry-artisan-tea-1x1.webp",
+        "square_1x1": "https://cdn.abbdullaziz.online/seeds/products/hibiscus-berry-artisan-tea-1x1.webp",
+        "card_4x3": "https://cdn.abbdullaziz.online/seeds/products/hibiscus-berry-artisan-tea-4x3.webp",
+        "thumb": "https://cdn.abbdullaziz.online/seeds/products/hibiscus-berry-artisan-tea-thumb.webp"
+      }
+    },
+    "d0000024-0000-4000-8000-000000000024": {
+      "slug": "truffle-scrambled-egg-brioche",
+      "name": "Truffle Egg & Smoked Beef Brioche",
+      "primary_url": "https://cdn.abbdullaziz.online/seeds/products/truffle-scrambled-egg-brioche-1x1.webp",
+      "size_bytes": 29674,
+      "object_key": "seeds/products/truffle-scrambled-egg-brioche-1x1.webp",
+      "variants_json": {
+        "original": "https://cdn.abbdullaziz.online/seeds/products/truffle-scrambled-egg-brioche-1x1.webp",
+        "square_1x1": "https://cdn.abbdullaziz.online/seeds/products/truffle-scrambled-egg-brioche-1x1.webp",
+        "card_4x3": "https://cdn.abbdullaziz.online/seeds/products/truffle-scrambled-egg-brioche-4x3.webp",
+        "thumb": "https://cdn.abbdullaziz.online/seeds/products/truffle-scrambled-egg-brioche-thumb.webp"
+      }
+    },
+    "d0000025-0000-4000-8000-000000000025": {
+      "slug": "crispy-chicken-sambal-matah-bowl",
+      "name": "Crispy Chicken Sambal Matah Bowl",
+      "primary_url": "https://cdn.abbdullaziz.online/seeds/products/crispy-chicken-sambal-matah-bowl-1x1.webp",
+      "size_bytes": 30458,
+      "object_key": "seeds/products/crispy-chicken-sambal-matah-bowl-1x1.webp",
+      "variants_json": {
+        "original": "https://cdn.abbdullaziz.online/seeds/products/crispy-chicken-sambal-matah-bowl-1x1.webp",
+        "square_1x1": "https://cdn.abbdullaziz.online/seeds/products/crispy-chicken-sambal-matah-bowl-1x1.webp",
+        "card_4x3": "https://cdn.abbdullaziz.online/seeds/products/crispy-chicken-sambal-matah-bowl-4x3.webp",
+        "thumb": "https://cdn.abbdullaziz.online/seeds/products/crispy-chicken-sambal-matah-bowl-thumb.webp"
+      }
+    },
+    "d0000026-0000-4000-8000-000000000026": {
+      "slug": "wagyu-beef-lasagna-al-forno",
+      "name": "Wagyu Beef Lasagna Al Forno",
+      "primary_url": "https://cdn.abbdullaziz.online/seeds/products/wagyu-beef-lasagna-al-forno-1x1.webp",
+      "size_bytes": 29854,
+      "object_key": "seeds/products/wagyu-beef-lasagna-al-forno-1x1.webp",
+      "variants_json": {
+        "original": "https://cdn.abbdullaziz.online/seeds/products/wagyu-beef-lasagna-al-forno-1x1.webp",
+        "square_1x1": "https://cdn.abbdullaziz.online/seeds/products/wagyu-beef-lasagna-al-forno-1x1.webp",
+        "card_4x3": "https://cdn.abbdullaziz.online/seeds/products/wagyu-beef-lasagna-al-forno-4x3.webp",
+        "thumb": "https://cdn.abbdullaziz.online/seeds/products/wagyu-beef-lasagna-al-forno-thumb.webp"
+      }
+    },
+    "d0000027-0000-4000-8000-000000000027": {
+      "slug": "truffle-parmesan-pommes-frites",
+      "name": "Truffle Parmesan Pommes Frites",
+      "primary_url": "https://cdn.abbdullaziz.online/seeds/products/truffle-parmesan-pommes-frites-1x1.webp",
+      "size_bytes": 30020,
+      "object_key": "seeds/products/truffle-parmesan-pommes-frites-1x1.webp",
+      "variants_json": {
+        "original": "https://cdn.abbdullaziz.online/seeds/products/truffle-parmesan-pommes-frites-1x1.webp",
+        "square_1x1": "https://cdn.abbdullaziz.online/seeds/products/truffle-parmesan-pommes-frites-1x1.webp",
+        "card_4x3": "https://cdn.abbdullaziz.online/seeds/products/truffle-parmesan-pommes-frites-4x3.webp",
+        "thumb": "https://cdn.abbdullaziz.online/seeds/products/truffle-parmesan-pommes-frites-thumb.webp"
+      }
+    },
+    "d0000028-0000-4000-8000-000000000028": {
+      "slug": "roastery-house-blend-beans",
+      "name": "Espresso Crema House Blend (Beans)",
+      "primary_url": "https://cdn.abbdullaziz.online/seeds/products/roastery-house-blend-beans-1x1.webp",
+      "size_bytes": 22258,
+      "object_key": "seeds/products/roastery-house-blend-beans-1x1.webp",
+      "variants_json": {
+        "original": "https://cdn.abbdullaziz.online/seeds/products/roastery-house-blend-beans-1x1.webp",
+        "square_1x1": "https://cdn.abbdullaziz.online/seeds/products/roastery-house-blend-beans-1x1.webp",
+        "card_4x3": "https://cdn.abbdullaziz.online/seeds/products/roastery-house-blend-beans-4x3.webp",
+        "thumb": "https://cdn.abbdullaziz.online/seeds/products/roastery-house-blend-beans-thumb.webp"
+      }
+    },
+    "d0000029-0000-4000-8000-000000000029": {
+      "slug": "aceh-gayo-wine-process-beans",
+      "name": "Aceh Gayo Natural Wine Process",
+      "primary_url": "https://cdn.abbdullaziz.online/seeds/products/aceh-gayo-wine-process-beans-1x1.webp",
+      "size_bytes": 21178,
+      "object_key": "seeds/products/aceh-gayo-wine-process-beans-1x1.webp",
+      "variants_json": {
+        "original": "https://cdn.abbdullaziz.online/seeds/products/aceh-gayo-wine-process-beans-1x1.webp",
+        "square_1x1": "https://cdn.abbdullaziz.online/seeds/products/aceh-gayo-wine-process-beans-1x1.webp",
+        "card_4x3": "https://cdn.abbdullaziz.online/seeds/products/aceh-gayo-wine-process-beans-4x3.webp",
+        "thumb": "https://cdn.abbdullaziz.online/seeds/products/aceh-gayo-wine-process-beans-thumb.webp"
+      }
+    },
+    "d0000030-0000-4000-8000-000000000030": {
+      "slug": "es-kopi-susu-komuter",
+      "name": "Es Kopi Susu Komuter MRT",
+      "primary_url": "https://cdn.abbdullaziz.online/seeds/products/es-kopi-susu-komuter-1x1.webp",
+      "size_bytes": 23560,
+      "object_key": "seeds/products/es-kopi-susu-komuter-1x1.webp",
+      "variants_json": {
+        "original": "https://cdn.abbdullaziz.online/seeds/products/es-kopi-susu-komuter-1x1.webp",
+        "square_1x1": "https://cdn.abbdullaziz.online/seeds/products/es-kopi-susu-komuter-1x1.webp",
+        "card_4x3": "https://cdn.abbdullaziz.online/seeds/products/es-kopi-susu-komuter-4x3.webp",
+        "thumb": "https://cdn.abbdullaziz.online/seeds/products/es-kopi-susu-komuter-thumb.webp"
+      }
+    },
+    "d0000031-0000-4000-8000-000000000031": {
+      "slug": "iced-shaken-brown-sugar-americano",
+      "name": "Shaken Brown Sugar Americano",
+      "primary_url": "https://cdn.abbdullaziz.online/seeds/products/iced-shaken-brown-sugar-americano-1x1.webp",
+      "size_bytes": 24314,
+      "object_key": "seeds/products/iced-shaken-brown-sugar-americano-1x1.webp",
+      "variants_json": {
+        "original": "https://cdn.abbdullaziz.online/seeds/products/iced-shaken-brown-sugar-americano-1x1.webp",
+        "square_1x1": "https://cdn.abbdullaziz.online/seeds/products/iced-shaken-brown-sugar-americano-1x1.webp",
+        "card_4x3": "https://cdn.abbdullaziz.online/seeds/products/iced-shaken-brown-sugar-americano-4x3.webp",
+        "thumb": "https://cdn.abbdullaziz.online/seeds/products/iced-shaken-brown-sugar-americano-thumb.webp"
+      }
+    },
+    "d0000032-0000-4000-8000-000000000032": {
+      "slug": "express-iced-matcha-boost",
+      "name": "Express Iced Matcha Boost",
+      "primary_url": "https://cdn.abbdullaziz.online/seeds/products/express-iced-matcha-boost-1x1.webp",
+      "size_bytes": 24180,
+      "object_key": "seeds/products/express-iced-matcha-boost-1x1.webp",
+      "variants_json": {
+        "original": "https://cdn.abbdullaziz.online/seeds/products/express-iced-matcha-boost-1x1.webp",
+        "square_1x1": "https://cdn.abbdullaziz.online/seeds/products/express-iced-matcha-boost-1x1.webp",
+        "card_4x3": "https://cdn.abbdullaziz.online/seeds/products/express-iced-matcha-boost-4x3.webp",
+        "thumb": "https://cdn.abbdullaziz.online/seeds/products/express-iced-matcha-boost-thumb.webp"
+      }
+    },
+    "d0000033-0000-4000-8000-000000000033": {
+      "slug": "iced-belgian-choco-malt",
+      "name": "Iced Belgian Choco Malt",
+      "primary_url": "https://cdn.abbdullaziz.online/seeds/products/iced-belgian-choco-malt-1x1.webp",
+      "size_bytes": 22486,
+      "object_key": "seeds/products/iced-belgian-choco-malt-1x1.webp",
+      "variants_json": {
+        "original": "https://cdn.abbdullaziz.online/seeds/products/iced-belgian-choco-malt-1x1.webp",
+        "square_1x1": "https://cdn.abbdullaziz.online/seeds/products/iced-belgian-choco-malt-1x1.webp",
+        "card_4x3": "https://cdn.abbdullaziz.online/seeds/products/iced-belgian-choco-malt-4x3.webp",
+        "thumb": "https://cdn.abbdullaziz.online/seeds/products/iced-belgian-choco-malt-thumb.webp"
+      }
+    },
+    "d0000034-0000-4000-8000-000000000034": {
+      "slug": "botol-kopi-susu-aren-500ml",
+      "name": "Botol Kopi Susu Aren (500ml)",
+      "primary_url": "https://cdn.abbdullaziz.online/seeds/products/botol-kopi-susu-aren-500ml-1x1.webp",
+      "size_bytes": 21440,
+      "object_key": "seeds/products/botol-kopi-susu-aren-500ml-1x1.webp",
+      "variants_json": {
+        "original": "https://cdn.abbdullaziz.online/seeds/products/botol-kopi-susu-aren-500ml-1x1.webp",
+        "square_1x1": "https://cdn.abbdullaziz.online/seeds/products/botol-kopi-susu-aren-500ml-1x1.webp",
+        "card_4x3": "https://cdn.abbdullaziz.online/seeds/products/botol-kopi-susu-aren-500ml-4x3.webp",
+        "thumb": "https://cdn.abbdullaziz.online/seeds/products/botol-kopi-susu-aren-500ml-thumb.webp"
+      }
+    },
+    "d0000035-0000-4000-8000-000000000035": {
+      "slug": "botol-cold-brew-black-500ml",
+      "name": "Botol Cold Brew Black (500ml)",
+      "primary_url": "https://cdn.abbdullaziz.online/seeds/products/botol-cold-brew-black-500ml-1x1.webp",
+      "size_bytes": 21502,
+      "object_key": "seeds/products/botol-cold-brew-black-500ml-1x1.webp",
+      "variants_json": {
+        "original": "https://cdn.abbdullaziz.online/seeds/products/botol-cold-brew-black-500ml-1x1.webp",
+        "square_1x1": "https://cdn.abbdullaziz.online/seeds/products/botol-cold-brew-black-500ml-1x1.webp",
+        "card_4x3": "https://cdn.abbdullaziz.online/seeds/products/botol-cold-brew-black-500ml-4x3.webp",
+        "thumb": "https://cdn.abbdullaziz.online/seeds/products/botol-cold-brew-black-500ml-thumb.webp"
+      }
+    },
+    "d0000036-0000-4000-8000-000000000036": {
+      "slug": "smoked-beef-cheddar-croissant",
+      "name": "Smoked Beef & Cheddar Croissant",
+      "primary_url": "https://cdn.abbdullaziz.online/seeds/products/smoked-beef-cheddar-croissant-1x1.webp",
+      "size_bytes": 30054,
+      "object_key": "seeds/products/smoked-beef-cheddar-croissant-1x1.webp",
+      "variants_json": {
+        "original": "https://cdn.abbdullaziz.online/seeds/products/smoked-beef-cheddar-croissant-1x1.webp",
+        "square_1x1": "https://cdn.abbdullaziz.online/seeds/products/smoked-beef-cheddar-croissant-1x1.webp",
+        "card_4x3": "https://cdn.abbdullaziz.online/seeds/products/smoked-beef-cheddar-croissant-4x3.webp",
+        "thumb": "https://cdn.abbdullaziz.online/seeds/products/smoked-beef-cheddar-croissant-thumb.webp"
+      }
+    },
+    "d0000037-0000-4000-8000-000000000037": {
+      "slug": "cinnamon-sugar-cruffin",
+      "name": "Cinnamon Sugar Brioche Cruffin",
+      "primary_url": "https://cdn.abbdullaziz.online/seeds/products/cinnamon-sugar-cruffin-1x1.webp",
+      "size_bytes": 29376,
+      "object_key": "seeds/products/cinnamon-sugar-cruffin-1x1.webp",
+      "variants_json": {
+        "original": "https://cdn.abbdullaziz.online/seeds/products/cinnamon-sugar-cruffin-1x1.webp",
+        "square_1x1": "https://cdn.abbdullaziz.online/seeds/products/cinnamon-sugar-cruffin-1x1.webp",
+        "card_4x3": "https://cdn.abbdullaziz.online/seeds/products/cinnamon-sugar-cruffin-4x3.webp",
+        "thumb": "https://cdn.abbdullaziz.online/seeds/products/cinnamon-sugar-cruffin-thumb.webp"
+      }
+    },
+    "d0000038-0000-4000-8000-000000000038": {
+      "slug": "banana-walnut-coffee-cake",
+      "name": "Banana Walnut Espresso Loaf",
+      "primary_url": "https://cdn.abbdullaziz.online/seeds/products/banana-walnut-coffee-cake-1x1.webp",
+      "size_bytes": 29546,
+      "object_key": "seeds/products/banana-walnut-coffee-cake-1x1.webp",
+      "variants_json": {
+        "original": "https://cdn.abbdullaziz.online/seeds/products/banana-walnut-coffee-cake-1x1.webp",
+        "square_1x1": "https://cdn.abbdullaziz.online/seeds/products/banana-walnut-coffee-cake-1x1.webp",
+        "card_4x3": "https://cdn.abbdullaziz.online/seeds/products/banana-walnut-coffee-cake-4x3.webp",
+        "thumb": "https://cdn.abbdullaziz.online/seeds/products/banana-walnut-coffee-cake-thumb.webp"
+      }
+    }
+  },
+  "variants": {
+    "size-reguler": {
+      "rel_path": "variants/size-reguler.webp",
+      "cdn_url": "https://cdn.abbdullaziz.online/seeds/variants/size-reguler.webp",
+      "width": 400,
+      "height": 400,
+      "size_bytes": 8932
+    },
+    "size-large": {
+      "rel_path": "variants/size-large.webp",
+      "cdn_url": "https://cdn.abbdullaziz.online/seeds/variants/size-large.webp",
+      "width": 400,
+      "height": 400,
+      "size_bytes": 7984
+    },
+    "serve-hot": {
+      "rel_path": "variants/serve-hot.webp",
+      "cdn_url": "https://cdn.abbdullaziz.online/seeds/variants/serve-hot.webp",
+      "width": 400,
+      "height": 400,
+      "size_bytes": 9462
+    },
+    "serve-iced": {
+      "rel_path": "variants/serve-iced.webp",
+      "cdn_url": "https://cdn.abbdullaziz.online/seeds/variants/serve-iced.webp",
+      "width": 400,
+      "height": 400,
+      "size_bytes": 8480
+    },
+    "beans-250g": {
+      "rel_path": "variants/beans-250g.webp",
+      "cdn_url": "https://cdn.abbdullaziz.online/seeds/variants/beans-250g.webp",
+      "width": 400,
+      "height": 400,
+      "size_bytes": 7310
+    },
+    "beans-500g": {
+      "rel_path": "variants/beans-500g.webp",
+      "cdn_url": "https://cdn.abbdullaziz.online/seeds/variants/beans-500g.webp",
+      "width": 400,
+      "height": 400,
+      "size_bytes": 6870
+    },
+    "bottle-500ml": {
+      "rel_path": "variants/bottle-500ml.webp",
+      "cdn_url": "https://cdn.abbdullaziz.online/seeds/variants/bottle-500ml.webp",
+      "width": 400,
+      "height": 400,
+      "size_bytes": 6236
+    },
+    "bottle-1000ml": {
+      "rel_path": "variants/bottle-1000ml.webp",
+      "cdn_url": "https://cdn.abbdullaziz.online/seeds/variants/bottle-1000ml.webp",
+      "width": 400,
+      "height": 400,
+      "size_bytes": 6172
+    }
+  },
+  "addons": {
+    "milk-dairy": {
+      "rel_path": "addons/milk-dairy.webp",
+      "cdn_url": "https://cdn.abbdullaziz.online/seeds/addons/milk-dairy.webp",
+      "width": 400,
+      "height": 400,
+      "size_bytes": 8992
+    },
+    "milk-oat": {
+      "rel_path": "addons/milk-oat.webp",
+      "cdn_url": "https://cdn.abbdullaziz.online/seeds/addons/milk-oat.webp",
+      "width": 400,
+      "height": 400,
+      "size_bytes": 8058
+    },
+    "milk-almond": {
+      "rel_path": "addons/milk-almond.webp",
+      "cdn_url": "https://cdn.abbdullaziz.online/seeds/addons/milk-almond.webp",
+      "width": 400,
+      "height": 400,
+      "size_bytes": 8414
+    },
+    "milk-soy": {
+      "rel_path": "addons/milk-soy.webp",
+      "cdn_url": "https://cdn.abbdullaziz.online/seeds/addons/milk-soy.webp",
+      "width": 400,
+      "height": 400,
+      "size_bytes": 8374
+    },
+    "sugar-normal": {
+      "rel_path": "addons/sugar-normal.webp",
+      "cdn_url": "https://cdn.abbdullaziz.online/seeds/addons/sugar-normal.webp",
+      "width": 400,
+      "height": 400,
+      "size_bytes": 7962
+    },
+    "sugar-less": {
+      "rel_path": "addons/sugar-less.webp",
+      "cdn_url": "https://cdn.abbdullaziz.online/seeds/addons/sugar-less.webp",
+      "width": 400,
+      "height": 400,
+      "size_bytes": 7742
+    },
+    "sugar-zero": {
+      "rel_path": "addons/sugar-zero.webp",
+      "cdn_url": "https://cdn.abbdullaziz.online/seeds/addons/sugar-zero.webp",
+      "width": 400,
+      "height": 400,
+      "size_bytes": 7692
+    },
+    "ice-normal": {
+      "rel_path": "addons/ice-normal.webp",
+      "cdn_url": "https://cdn.abbdullaziz.online/seeds/addons/ice-normal.webp",
+      "width": 400,
+      "height": 400,
+      "size_bytes": 7860
+    },
+    "ice-less": {
+      "rel_path": "addons/ice-less.webp",
+      "cdn_url": "https://cdn.abbdullaziz.online/seeds/addons/ice-less.webp",
+      "width": 400,
+      "height": 400,
+      "size_bytes": 7410
+    },
+    "shot-extra-espresso": {
+      "rel_path": "addons/shot-extra-espresso.webp",
+      "cdn_url": "https://cdn.abbdullaziz.online/seeds/addons/shot-extra-espresso.webp",
+      "width": 400,
+      "height": 400,
+      "size_bytes": 8540
+    },
+    "shot-decaf": {
+      "rel_path": "addons/shot-decaf.webp",
+      "cdn_url": "https://cdn.abbdullaziz.online/seeds/addons/shot-decaf.webp",
+      "width": 400,
+      "height": 400,
+      "size_bytes": 6776
+    },
+    "sub-standard-pour": {
+      "rel_path": "addons/sub-standard-pour.webp",
+      "cdn_url": "https://cdn.abbdullaziz.online/seeds/addons/sub-standard-pour.webp",
+      "width": 400,
+      "height": 400,
+      "size_bytes": 9150
+    },
+    "sub-oat-cold-foam": {
+      "rel_path": "addons/sub-oat-cold-foam.webp",
+      "cdn_url": "https://cdn.abbdullaziz.online/seeds/addons/sub-oat-cold-foam.webp",
+      "width": 400,
+      "height": 400,
+      "size_bytes": 8738
+    },
+    "sub-caramel-drizzle": {
+      "rel_path": "addons/sub-caramel-drizzle.webp",
+      "cdn_url": "https://cdn.abbdullaziz.online/seeds/addons/sub-caramel-drizzle.webp",
+      "width": 400,
+      "height": 400,
+      "size_bytes": 8574
+    },
+    "pastry-warmed": {
+      "rel_path": "addons/pastry-warmed.webp",
+      "cdn_url": "https://cdn.abbdullaziz.online/seeds/addons/pastry-warmed.webp",
+      "width": 400,
+      "height": 400,
+      "size_bytes": 9852
+    },
+    "pastry-butter-jam": {
+      "rel_path": "addons/pastry-butter-jam.webp",
+      "cdn_url": "https://cdn.abbdullaziz.online/seeds/addons/pastry-butter-jam.webp",
+      "width": 400,
+      "height": 400,
+      "size_bytes": 9622
+    }
+  },
+  "onboarding": {
+    "hero-qr-table-ordering": {
+      "rel_path": "onboarding/hero-qr-table-ordering.webp",
+      "cdn_url": "https://cdn.abbdullaziz.online/seeds/onboarding/hero-qr-table-ordering.webp",
+      "width": 1280,
+      "height": 720,
+      "size_bytes": 21402
+    },
+    "hero-pos-cashier-kds": {
+      "rel_path": "onboarding/hero-pos-cashier-kds.webp",
+      "cdn_url": "https://cdn.abbdullaziz.online/seeds/onboarding/hero-pos-cashier-kds.webp",
+      "width": 1280,
+      "height": 720,
+      "size_bytes": 23956
+    },
+    "hero-flagship-roastery": {
+      "rel_path": "onboarding/hero-flagship-roastery.webp",
+      "cdn_url": "https://cdn.abbdullaziz.online/seeds/onboarding/hero-flagship-roastery.webp",
+      "width": 1280,
+      "height": 720,
+      "size_bytes": 21940
+    },
+    "hero-express-grab-go": {
+      "rel_path": "onboarding/hero-express-grab-go.webp",
+      "cdn_url": "https://cdn.abbdullaziz.online/seeds/onboarding/hero-express-grab-go.webp",
+      "width": 1280,
+      "height": 720,
+      "size_bytes": 21188
+    }
+  },
+  "stores": {
+    "flagship-senopati-logo": {
+      "rel_path": "stores/flagship-senopati-logo.webp",
+      "cdn_url": "https://cdn.abbdullaziz.online/seeds/stores/flagship-senopati-logo.webp",
+      "width": 512,
+      "height": 512,
+      "size_bytes": 13336
+    },
+    "express-sudirman-logo": {
+      "rel_path": "stores/express-sudirman-logo.webp",
+      "cdn_url": "https://cdn.abbdullaziz.online/seeds/stores/express-sudirman-logo.webp",
+      "width": 512,
+      "height": 512,
+      "size_bytes": 9598
+    }
+  }
+}

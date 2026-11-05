@@ -55,4 +55,6 @@ type TableBoardEntry struct {
 	Session      *TableSession `json:"session,omitempty"`
 	UnpaidOrders int           `json:"unpaid_orders"`
 	UnpaidAmount int64         `json:"unpaid_amount"`
+	// MergedIntoTableID is set when this table is merged into the session of another table (W5).
+	MergedIntoTableID *uuid.UUID `json:"merged_into_table_id,omitempty"`
 }

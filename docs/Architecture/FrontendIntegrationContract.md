@@ -42,7 +42,8 @@ boleh dirender**, dan **celah yang harus ditutup backend**.
 - **Pesanan:** `POST /pos/orders/quote`, `POST /pos/orders`, `POST /pos/orders/:id/payments`.
 - **Tab dan meja:**
   - tab: `POST /pos/tabs`, `POST /pos/tabs/:id/rounds`, `GET /pos/tabs/:id`, `POST /pos/tabs/:id/close` (split bill di body), `POST /pos/tabs/:id/reopen`;
-  - meja: `GET /pos/tables`, `POST /pos/tables/:id/sessions`, `POST /pos/table-sessions/:id/close`.
+  - meja: `GET /pos/tables?section=`, `POST /pos/tables/:id/sessions`, `POST /pos/table-sessions/:id/close`;
+  - pindah/gabung/pisah (v0.9, W5): `POST /pos/table-sessions/:id/move` `{to_table_id}`, `/merge` `{session_id}`, `/split` `{table_id}`. Meja yang digabung muncul di papan dengan `merged_into_table_id` dan sesi serta total tagihan bersama; event `table.moved`, `table.merged`, `table.split` di kanal `pos` berarti papan meja perlu dimuat ulang.
 - **Shift:**
   - shift: `POST /pos/shifts`, `GET /pos/shifts/current`, `POST /pos/shifts/:id/close`, `GET /pos/shifts/:id/x-report`, `GET /pos/shifts/:id/z-report`;
   - kas: `POST /pos/shifts/movements`.

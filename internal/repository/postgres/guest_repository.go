@@ -37,11 +37,13 @@ type GuestSessionRow struct {
 	TableActive        bool       `db:"table_active"`
 }
 
-func (r *GuestRepository) InsertGuestSession(ctx context.Context, tx *sqlx.Tx, id, storeID, tableSessionID uuid.UUID, tokenHash []byte, createdAt, expiresAt time.Time) error {
+// InsertGuestSession binds a device to the table session it orders into and to the table it scanned;
+// they differ when that table is merged into another table's session (W5).
+func (r *GuestRepository) InsertGuestSession(ctx context.Context, tx *sqlx.Tx, id, storeID, tableSessionID, tableID uuid.UUID, tokenHash []byte, createdAt, expiresAt time.Time) error {
 	_, err := tx.ExecContext(ctx, `
-		INSERT INTO guest_sessions (id, store_id, table_session_id, token_hash, created_at, expires_at)
-		VALUES ($1, $2, $3, $4, $5, $6)
-	`, id, storeID, tableSessionID, tokenHash, createdAt, expiresAt)
+		INSERT INTO guest_sessions (id, store_id, table_session_id, table_id, token_hash, created_at, expires_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+	`, id, storeID, tableSessionID, tableID, tokenHash, createdAt, expiresAt)
 	if err != nil {
 		return fmt.Errorf("failed to create guest session: %w", err)
 	}
@@ -57,7 +59,7 @@ func (r *GuestRepository) GetGuestSession(ctx context.Context, tx *sqlx.Tx, stor
 			(t.is_active AND t.archived_at IS NULL) AS table_active
 		FROM guest_sessions g
 		JOIN table_sessions ts ON ts.store_id = g.store_id AND ts.id = g.table_session_id
-		JOIN tables t ON t.store_id = ts.store_id AND t.id = ts.table_id
+		JOIN tables t ON t.store_id = ts.store_id AND t.id = COALESCE(g.table_id, ts.table_id)
 		WHERE g.store_id = $1 AND g.id = $2`
 	if forUpdate {
 		query += ` FOR UPDATE OF g, ts`

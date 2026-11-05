@@ -87,9 +87,14 @@ func (r *TableRepository) UpdateTable(ctx context.Context, tx *sqlx.Tx, t *domai
 // CloseSettledSessions lazily closes sessions whose auto-close countdown has passed (decision QR7).
 func (r *TableRepository) CloseSettledSessions(ctx context.Context, tx *sqlx.Tx, storeID uuid.UUID, idleMinutes int, now time.Time) error {
 	_, err := tx.ExecContext(ctx, `
-		UPDATE table_sessions SET status = 'closed', closed_at = $3, close_reason = 'auto'
-		WHERE store_id = $1 AND status = 'open' AND settled_at IS NOT NULL
-		  AND settled_at + make_interval(mins => $2) <= $3
+		WITH closed AS (
+			UPDATE table_sessions SET status = 'closed', closed_at = $3, close_reason = 'auto'
+			WHERE store_id = $1 AND status = 'open' AND settled_at IS NOT NULL
+			  AND settled_at + make_interval(mins => $2) <= $3
+			RETURNING id
+		)
+		UPDATE table_session_links SET unlinked_at = $3
+		WHERE store_id = $1 AND unlinked_at IS NULL AND primary_session_id IN (SELECT id FROM closed)
 	`, storeID, idleMinutes, now)
 	if err != nil {
 		return fmt.Errorf("failed to auto-close table sessions: %w", err)
@@ -106,6 +111,7 @@ func (r *TableRepository) ListBoard(ctx context.Context, tx *sqlx.Tx, storeID uu
 		OpenedVia      *string    `db:"session_opened_via"`
 		OpenedByUserID *uuid.UUID `db:"session_opened_by"`
 		SettledAt      *time.Time `db:"session_settled_at"`
+		SessionTableID *uuid.UUID `db:"session_table_id"`
 		UnpaidOrders   int        `db:"unpaid_orders"`
 		UnpaidAmount   int64      `db:"unpaid_amount"`
 	}
@@ -113,10 +119,12 @@ func (r *TableRepository) ListBoard(ctx context.Context, tx *sqlx.Tx, storeID uu
 		SELECT t.id, t.store_id, t.table_number, t.label, t.section, t.capacity, t.qr_token, t.qr_rotated_at,
 			t.is_active, t.archived_at, t.created_at, t.updated_at,
 			s.id AS session_id, s.opened_at AS session_opened_at, s.opened_via AS session_opened_via,
-			s.opened_by_user_id AS session_opened_by, s.settled_at AS session_settled_at,
+			s.opened_by_user_id AS session_opened_by, s.settled_at AS session_settled_at, s.table_id AS session_table_id,
 			COUNT(o.id) AS unpaid_orders, COALESCE(SUM(o.total_amount - o.paid_amount), 0) AS unpaid_amount
 		FROM tables t
-		LEFT JOIN table_sessions s ON s.store_id = t.store_id AND s.table_id = t.id AND s.status = 'open'
+		LEFT JOIN table_session_links l ON l.store_id = t.store_id AND l.table_id = t.id AND l.unlinked_at IS NULL
+		LEFT JOIN table_sessions s ON s.store_id = t.store_id AND s.status = 'open'
+			AND (s.table_id = t.id OR s.id = l.primary_session_id)
 		LEFT JOIN orders o ON o.store_id = t.store_id AND o.table_session_id = s.id AND `+unpaidOrderFilter+`
 		WHERE t.store_id = $1 AND t.archived_at IS NULL
 		GROUP BY t.id, s.id
@@ -134,8 +142,11 @@ func (r *TableRepository) ListBoard(ctx context.Context, tx *sqlx.Tx, storeID uu
 				e.Status = domain.TableStatusSettled
 			}
 			e.Session = &domain.TableSession{
-				ID: *row.SessionID, TableID: row.ID, Status: domain.TableSessionOpen, OpenedAt: *row.OpenedAt,
+				ID: *row.SessionID, TableID: *row.SessionTableID, Status: domain.TableSessionOpen, OpenedAt: *row.OpenedAt,
 				OpenedVia: *row.OpenedVia, OpenedByUserID: row.OpenedByUserID, SettledAt: row.SettledAt,
+			}
+			if *row.SessionTableID != row.ID {
+				e.MergedIntoTableID = row.SessionTableID
 			}
 		}
 		out[i] = e
@@ -143,11 +154,15 @@ func (r *TableRepository) ListBoard(ctx context.Context, tx *sqlx.Tx, storeID uu
 	return out, nil
 }
 
-// GetOpenSessionForUpdate returns the table's open session, or nil when the table is free.
+// GetOpenSessionForUpdate returns the session a table orders into: its own open session, or the
+// primary session it is merged into (W5). nil when the table is free.
 func (r *TableRepository) GetOpenSessionForUpdate(ctx context.Context, tx *sqlx.Tx, storeID, tableID uuid.UUID) (*domain.TableSession, error) {
 	var s domain.TableSession
 	err := tx.GetContext(ctx, &s, `SELECT `+tableSessionColumns+` FROM table_sessions
-		WHERE store_id = $1 AND table_id = $2 AND status = 'open' FOR UPDATE`, storeID, tableID)
+		WHERE store_id = $1 AND status = 'open' AND (table_id = $2 OR id = (
+			SELECT primary_session_id FROM table_session_links
+			WHERE store_id = $1 AND table_id = $2 AND unlinked_at IS NULL))
+		ORDER BY (table_id = $2) DESC LIMIT 1 FOR UPDATE`, storeID, tableID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -180,10 +195,15 @@ func (r *TableRepository) InsertSession(ctx context.Context, tx *sqlx.Tx, s *dom
 	return nil
 }
 
+// CloseSession closes the session and frees the tables merged into it.
 func (r *TableRepository) CloseSession(ctx context.Context, tx *sqlx.Tx, s *domain.TableSession) error {
 	_, err := tx.ExecContext(ctx, `
-		UPDATE table_sessions SET status = 'closed', closed_at = $3, closed_by_user_id = $4, close_reason = $5
-		WHERE store_id = $1 AND id = $2
+		WITH closed AS (
+			UPDATE table_sessions SET status = 'closed', closed_at = $3, closed_by_user_id = $4, close_reason = $5
+			WHERE store_id = $1 AND id = $2
+		)
+		UPDATE table_session_links SET unlinked_at = $3, unlinked_by_user_id = $4
+		WHERE store_id = $1 AND primary_session_id = $2 AND unlinked_at IS NULL
 	`, s.StoreID, s.ID, s.ClosedAt, s.ClosedByUserID, s.CloseReason)
 	if err != nil {
 		return fmt.Errorf("failed to close table session: %w", err)
@@ -207,4 +227,67 @@ func (r *TableRepository) HasOpenShift(ctx context.Context, tx *sqlx.Tx, storeID
 		return false, fmt.Errorf("failed to check open shifts: %w", err)
 	}
 	return open, nil
+}
+
+// MoveSession seats the whole session at another table; its orders placed at the old table follow.
+func (r *TableRepository) MoveSession(ctx context.Context, tx *sqlx.Tx, storeID, sessionID uuid.UUID, from, to *domain.Table) error {
+	if _, err := tx.ExecContext(ctx, `UPDATE table_sessions SET table_id = $3 WHERE store_id = $1 AND id = $2`,
+		storeID, sessionID, to.ID); err != nil {
+		return fmt.Errorf("failed to move table session: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE orders SET table_id = $4, table_number = $5
+		WHERE store_id = $1 AND table_session_id = $2 AND table_id = $3`,
+		storeID, sessionID, from.ID, to.ID, to.TableNumber); err != nil {
+		return fmt.Errorf("failed to move table orders: %w", err)
+	}
+	// Guests seated at the old table move with it; guests of merged tables keep their own table.
+	if _, err := tx.ExecContext(ctx, `UPDATE guest_sessions SET table_id = $4
+		WHERE store_id = $1 AND table_session_id = $2 AND COALESCE(table_id, $3) = $3`,
+		storeID, sessionID, from.ID, to.ID); err != nil {
+		return fmt.Errorf("failed to move table guests: %w", err)
+	}
+	return nil
+}
+
+// MergeSession folds the secondary session into the primary one (W5): orders, guest sessions and
+// links move, the secondary closes with reason "merged" and its table is linked to the primary.
+func (r *TableRepository) MergeSession(ctx context.Context, tx *sqlx.Tx, primary, secondary *domain.TableSession, userID uuid.UUID, now time.Time) error {
+	// One statement: every step sees the same snapshot and touches different rows. The primary may
+	// have been settled; the merged orders reopen it until refreshTableSettledTx runs again.
+	_, err := tx.ExecContext(ctx, `
+		WITH moved_orders AS (
+			UPDATE orders SET table_session_id = $2 WHERE store_id = $1 AND table_session_id = $3
+		), moved_guests AS (
+			UPDATE guest_sessions SET table_session_id = $2,
+				table_id = COALESCE(table_id, (SELECT table_id FROM table_sessions WHERE store_id = $1 AND id = $3))
+			WHERE store_id = $1 AND table_session_id = $3
+		), moved_links AS (
+			UPDATE table_session_links SET primary_session_id = $2
+			WHERE store_id = $1 AND primary_session_id = $3 AND unlinked_at IS NULL
+		), reopened AS (
+			UPDATE table_sessions SET settled_at = NULL WHERE store_id = $1 AND id = $2
+		), closed AS (
+			UPDATE table_sessions SET status = 'closed', closed_at = $4, closed_by_user_id = $5, close_reason = 'merged'
+			WHERE store_id = $1 AND id = $3
+			RETURNING table_id
+		)
+		INSERT INTO table_session_links (store_id, primary_session_id, table_id, linked_at, linked_by_user_id)
+		SELECT $1, $2, table_id, $4, $5 FROM closed
+	`, primary.StoreID, primary.ID, secondary.ID, now, userID)
+	if err != nil {
+		return fmt.Errorf("failed to merge table sessions: %w", err)
+	}
+	return nil
+}
+
+// UnlinkTable splits a merged table off its primary session; false when it was not linked to it.
+func (r *TableRepository) UnlinkTable(ctx context.Context, tx *sqlx.Tx, storeID, primaryID, tableID, userID uuid.UUID, now time.Time) (bool, error) {
+	res, err := tx.ExecContext(ctx, `UPDATE table_session_links SET unlinked_at = $4, unlinked_by_user_id = $5
+		WHERE store_id = $1 AND primary_session_id = $2 AND table_id = $3 AND unlinked_at IS NULL`,
+		storeID, primaryID, tableID, now, userID)
+	if err != nil {
+		return false, fmt.Errorf("failed to unlink table: %w", err)
+	}
+	n, err := res.RowsAffected()
+	return n == 1, err
 }

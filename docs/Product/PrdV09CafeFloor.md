@@ -40,7 +40,7 @@ Sumber: panduan pengguna dan halaman produk majoo, dicek 2026-11-05. Detail pari
 
 | PR | Lingkup | Keputusan | Migrasi |
 |----|---------|-----------|---------|
-| 9.1 | Pindah, gabung, pisah meja; filter area | W5 | `000033_table_session_links` |
+| 9.1 | Pindah, gabung, pisah meja; filter area | W5 | `000033_table_session_links` (**selesai**) |
 | 9.2 | Timer meja (peringatan saja) | W6 | `000034_table_timers` |
 | 9.3 | Layar antrean TV dengan token layar per toko | W7 | `000035_display_tokens` |
 | 9.4 | Antrean cetak: printer per stasiun, checker, label TSPL, agen cetak | W8 | `000036_printers_print_jobs` |
@@ -61,7 +61,7 @@ Area memakai kolom `tables.section` yang sudah ada; tidak ada tabel area baru.
 | `GET /pos/tables?section=` | staf | Papan meja difilter per area |
 | `POST /pos/table-sessions/:id/move` `{to_table_id}` | `TabManage` | Meja tujuan aktif dan tanpa sesi terbuka. Seluruh sesi pindah: `table_sessions.table_id` diganti, `orders.table_id` sesi ikut diperbarui. QR meja lama berhenti mengarah ke sesi |
 | `POST /pos/table-sessions/:id/merge` `{session_id}` | `TabManage` | Kedua sesi terbuka dan beda meja. Sesi kedua ditautkan ke sesi utama (`table_session_links`), pesanannya pindah ke sesi utama. QR kedua meja memesan ke sesi utama |
-| `POST /pos/table-sessions/:id/split` `{table_id}` | `TabManage` | Lepas tautan meja itu. Meja kembali punya sesi sendiri yang kosong; pesanan yang sudah ada tetap di sesi utama (dipisah lewat split bill yang sudah ada) |
+| `POST /pos/table-sessions/:id/split` `{table_id}` | `TabManage` | Lepas tautan meja itu. Meja kembali kosong (sesi baru dibuka saat dipindai atau didudukkan); pesanan yang sudah ada tetap di sesi utama (dipisah lewat split bill yang sudah ada) |
 
 Skema `table_session_links`: `store_id`, `primary_session_id`, `table_id`, `linked_at`,
 `linked_by_user_id`, `unlinked_at`; unik satu tautan aktif per meja; FK komposit `(store_id, id)`; RLS.
@@ -71,8 +71,9 @@ Event outbox ke kanal `pos`: `table.moved`, `table.merged`, `table.split`. Setia
 
 **Kriteria terima:**
 
-- Pindah ke meja yang punya sesi terbuka → `409 TABLE_OCCUPIED`.
-- Gabung sesi yang sudah `settled` atau punya split bill `partially_paid` → `409 SESSION_NOT_MERGEABLE`.
+- Pindah ke meja yang punya sesi terbuka atau sedang digabung → `409 TABLE_SESSION_OPEN`.
+- Gabung atau pindah sesi yang sudah ditutup/digabung → `409 TABLE_SESSION_NOT_OPEN`; pisah meja yang tidak tergabung → `409 TABLE_NOT_MERGED`.
+- Menutup sesi utama melepas semua meja yang tergabung.
 - Tamu yang memindai QR meja yang digabung melihat pesanan sesi utama.
 - Total tagihan setelah gabung = jumlah total kedua sesi sebelum gabung (dihitung ulang server, tes integrasi).
 - Dua kasir menggabungkan sesi yang sama bersamaan → satu berhasil, satu `409` (`SELECT … FOR UPDATE`, urutan UUID).

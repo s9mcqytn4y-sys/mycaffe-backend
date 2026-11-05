@@ -1577,6 +1577,56 @@ paths:
           $ref: "#/components/responses/ValidationFailed"
         "429":
           description: TOO_MANY_REQUESTS
+  /api/v1/public/guest/orders/{id}/receipt/send:
+    post:
+      security: []
+      tags: [Guest]
+      operationId: sendGuestReceipt
+      summary: The guest sends the receipt of one of their own paid QR orders (same rules as the cashier)
+      description: "Requires the guest cookie and `X-CSRF-Protection: 1`. Another guest's order answers 404."
+      x-implementation-status: implemented
+      parameters:
+        - $ref: "#/components/parameters/CsrfProtectionHeader"
+        - $ref: "#/components/parameters/ResourceID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReceiptSendRequest"
+      responses:
+        "202":
+          description: Queued; the message carries only the 90-day receipt link
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReceiptSendResult"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: RECEIPT_NOT_READY (order not paid)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Invalid channel or address, or PHONE_NOT_VERIFIED for SMS
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: RECEIPT_SEND_LIMIT (3 per order, 10 per recipient per day)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: WHATSAPP_UNAVAILABLE or SMS_UNAVAILABLE (driver not configured)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /api/v1/public/guest/orders/{id}/payments:
     post:
       security: []
@@ -3389,6 +3439,61 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/pos/orders/{id}/receipt/send:
+    post:
+      tags: [Receipts]
+      operationId: sendReceipt
+      summary: Send the digital receipt of a paid order by e-mail, WhatsApp or SMS (audited, W9)
+      description: >-
+        E-mail always; WhatsApp through the Cloud API template once WHATSAPP_ACCESS_TOKEN and
+        WHATSAPP_PHONE_NUMBER_ID are set; SMS only to a phone verified at the POS (V4). The recipient is stored
+        hashed and masked, never in plain text.
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - $ref: "#/components/parameters/ResourceID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReceiptSendRequest"
+      responses:
+        "202":
+          description: Queued; the message carries only the 90-day receipt link
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReceiptSendResult"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: RECEIPT_NOT_READY (order not paid)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Invalid channel or address, or PHONE_NOT_VERIFIED for SMS
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: RECEIPT_SEND_LIMIT (3 per order, 10 per recipient per day)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: WHATSAPP_UNAVAILABLE or SMS_UNAVAILABLE (driver not configured)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /api/v1/pos/orders/{id}/reprint:
     post:
       tags: [Printing]
@@ -4650,6 +4755,30 @@ components:
                 description: JSON snapshot of the selected modifiers
               notes:
                 type: string
+    ReceiptSendRequest:
+      type: object
+      required: [channel, to]
+      properties:
+        channel:
+          type: string
+          enum: [email, whatsapp, sms]
+        to:
+          type: string
+          description: E-mail address, or a phone number (08..., 62..., +62...) for whatsapp and sms
+    ReceiptSendResult:
+      type: object
+      required: [channel, recipient, expires_at]
+      properties:
+        channel:
+          type: string
+          enum: [email, whatsapp, sms]
+        recipient:
+          type: string
+          description: Masked, e.g. d***@gmail.com or +6281****890
+        expires_at:
+          type: string
+          format: date-time
+          description: Expiry of the receipt link
     Printer:
       type: object
       required: [id, name, station, format, paper_width_mm, copies, footer, is_active, created_at]

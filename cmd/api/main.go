@@ -222,7 +222,18 @@ func newMessageService(cfg *config.Config, db *sqlx.DB, ctx context.Context, mai
 		sender = webhookSender
 	}
 	messages := service.NewMessageService(db, sender)
+	// WhatsApp Cloud API receipts (W9): on only with both the access token and the phone number id.
+	whatsapp := "disabled"
+	if cfg.WhatsAppAccessToken != "" && cfg.WhatsAppPhoneNumberID != "" {
+		wa, err := sms.NewWhatsAppSender(cfg.WhatsAppAPIVersion, cfg.WhatsAppPhoneNumberID, cfg.WhatsAppAccessToken,
+			cfg.WhatsAppReceiptTemplate, cfg.WhatsAppTemplateLanguage)
+		if err != nil {
+			log.Fatalf("[FATAL CONFIG] WhatsApp initialization failed: %v", err)
+		}
+		messages.SetWhatsApp(wa)
+		whatsapp = "cloud_api"
+	}
 	go messages.StartWorker(ctx, 5*time.Second)
-	log.Printf("[SMS] driver=%s worker started", cfg.SMSDriver)
+	log.Printf("[SMS] driver=%s whatsapp=%s worker started", cfg.SMSDriver, whatsapp)
 	return messages
 }

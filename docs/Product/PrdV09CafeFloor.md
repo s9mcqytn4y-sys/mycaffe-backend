@@ -44,7 +44,7 @@ Sumber: panduan pengguna dan halaman produk majoo, dicek 2026-11-05. Detail pari
 | 9.2 | Timer meja (peringatan saja) | W6 | `000034_table_timers` (**selesai**) |
 | 9.3 | Layar antrean TV dengan token layar per toko | W7 | `000035_display_tokens` (**selesai**) |
 | 9.4 | Antrean cetak: printer per stasiun, checker, label TSPL, agen cetak | W8 | `000036_printers_print_jobs` (**selesai**) |
-| 9.5 | Struk digital: email, driver WhatsApp Cloud API, tautan SMS | W9 | `000037_receipt_deliveries` |
+| 9.5 | Struk digital: email, driver WhatsApp Cloud API, tautan SMS | W9 | `000037_receipt_deliveries` (**selesai**) |
 
 Di luar lingkup v0.9: pencarian SKU/barcode dan customer display (pindah ke v0.10 bersama perangkat),
 PIN otorisasi aksi meja, peta lantai grafis (koordinat meja), reservasi.
@@ -150,10 +150,13 @@ kembali `pending`.
 
 **Cerita:** Sebagai tamu, saya menerima struk di email atau WhatsApp setelah membayar.
 
-- `POST /pos/orders/:id/receipt/send` `{channel: email|whatsapp|sms, to}` dan versi tamu dari halaman
-  pelacak pesanan.
+- `POST /pos/orders/:id/receipt/send` `{channel: email|whatsapp|sms, to}` dan versi tamu
+  `POST /public/guest/orders/:id/receipt/send` lewat sesi tamu QR (cookie + CSRF, hanya pesanan sendiri;
+  tidak lewat token pelacak agar tidak perlu fungsi `SECURITY DEFINER` baru).
 - Email memakai `email_outbox` dan template baru. WhatsApp memakai driver baru di `message_outbox`
-  (Cloud API, template pesan disetujui Meta); tanpa token → `503 WHATSAPP_UNAVAILABLE`. SMS hanya ke
+  (Cloud API, template pesan disetujui Meta dengan tiga parameter: nama toko, nomor pesanan, tautan;
+  konfigurasi `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_RECEIPT_TEMPLATE`,
+  `WHATSAPP_TEMPLATE_LANGUAGE`, `WHATSAPP_API_VERSION`); tanpa token → `503 WHATSAPP_UNAVAILABLE`. SMS hanya ke
   nomor `customers` yang terverifikasi (V4) dan hanya berisi tautan struk.
 - Tabel `receipt_deliveries` untuk audit dan batas laju (per pesanan maks. 3 kirim, per nomor/email
   maks. 10 per hari).

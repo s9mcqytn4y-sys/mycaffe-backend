@@ -128,27 +128,33 @@ func (s *ReceiptService) Build(ctx context.Context, storeID, orderID uuid.UUID, 
 
 // IssueLink creates a 90-day digital receipt token for an order.
 func (s *ReceiptService) IssueLink(ctx context.Context, actor *AuthenticatedStaff, orderID uuid.UUID) (*ReceiptLink, error) {
+	var link *ReceiptLink
+	userID := actor.Staff.UserID
+	err := database.WithTenantTx(ctx, s.db, actor.Staff.Store.ID, func(tx *sqlx.Tx) error {
+		var err error
+		link, err = s.issueLinkTx(ctx, tx, actor.Staff.Store.ID, orderID, &userID)
+		return err
+	})
+	return link, err
+}
+
+// issueLinkTx creates the token inside the caller's transaction; createdBy is nil for a guest.
+func (s *ReceiptService) issueLinkTx(ctx context.Context, tx *sqlx.Tx, storeID, orderID uuid.UUID, createdBy *uuid.UUID) (*ReceiptLink, error) {
 	secret, hash, err := randomToken()
 	if err != nil {
 		return nil, err
 	}
-	storeID, id, now := actor.Staff.Store.ID, uuid.New(), s.nowFunc().UTC()
+	id, now := uuid.New(), s.nowFunc().UTC()
 	expires := now.Add(receiptLinkTTL)
-	err = database.WithTenantTx(ctx, s.db, storeID, func(tx *sqlx.Tx) error {
-		res, err := tx.ExecContext(ctx, `
-			INSERT INTO receipt_tokens (id, store_id, order_id, token_hash, created_by, created_at, expires_at)
-			SELECT $1, $2, o.id, $4, $5, $6, $7 FROM orders o WHERE o.store_id = $2 AND o.id = $3`,
-			id, storeID, orderID, hash, actor.Staff.UserID, now, expires)
-		if err != nil {
-			return fmt.Errorf("failed to issue receipt link: %w", err)
-		}
-		if n, _ := res.RowsAffected(); n == 0 {
-			return ErrReceiptNotFound
-		}
-		return nil
-	})
+	res, err := tx.ExecContext(ctx, `
+		INSERT INTO receipt_tokens (id, store_id, order_id, token_hash, created_by, created_at, expires_at)
+		SELECT $1, $2, o.id, $4, $5, $6, $7 FROM orders o WHERE o.store_id = $2 AND o.id = $3`,
+		id, storeID, orderID, hash, createdBy, now, expires)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to issue receipt link: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return nil, ErrReceiptNotFound
 	}
 	token := storeID.String() + "." + id.String() + "." + secret
 	return &ReceiptLink{Token: token, URL: s.LinkURL(token), ExpiresAt: expires}, nil

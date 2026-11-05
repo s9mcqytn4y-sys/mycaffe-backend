@@ -20,6 +20,7 @@ const (
 	TemplatePINChanged       = "pin_changed"
 	TemplateAccountLocked    = "account_locked"
 	TemplateOwnerPINAttempts = "owner_pin_attempts"
+	TemplateReceipt          = "receipt"
 )
 
 // Data is the template input. Fields a template does not use are ignored.
@@ -37,6 +38,8 @@ type Data struct {
 	ExpiresIn      string
 	ExpiresAt      string
 	EventAt        string
+	OrderNumber    string
+	TotalLabel     string
 	Year           int
 }
 

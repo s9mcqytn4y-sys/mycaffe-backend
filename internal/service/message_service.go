@@ -25,12 +25,16 @@ const (
 	messageScrubbed = "[dihapus setelah pengiriman]"
 )
 
-var ErrSMSUnavailable = errors.New("sms delivery is not configured")
+var (
+	ErrSMSUnavailable      = errors.New("sms delivery is not configured")
+	ErrWhatsAppUnavailable = errors.New("whatsapp delivery is not configured")
+)
 
 type MessageService struct {
-	db      *sqlx.DB
-	sender  sms.Sender // nil = disabled
-	nowFunc func() time.Time
+	db       *sqlx.DB
+	sender   sms.Sender // SMS; nil = disabled
+	whatsapp sms.Sender // WhatsApp Cloud API; nil = disabled (W9)
+	nowFunc  func() time.Time
 }
 
 // NewMessageService works without a sender (SMS_DRIVER=disabled): Enabled reports false and flows that
@@ -40,6 +44,43 @@ func NewMessageService(db *sqlx.DB, sender sms.Sender) *MessageService {
 }
 
 func (s *MessageService) Enabled() bool { return s != nil && s.sender != nil }
+
+// SetWhatsApp enables the WhatsApp channel (decision W9).
+func (s *MessageService) SetWhatsApp(sender sms.Sender) { s.whatsapp = sender }
+
+func (s *MessageService) WhatsAppEnabled() bool { return s != nil && s.whatsapp != nil }
+
+// EnqueueWhatsAppTx queues one WhatsApp template message; body holds the template parameters, one per line.
+func (s *MessageService) EnqueueWhatsAppTx(ctx context.Context, tx *sqlx.Tx, storeID uuid.UUID, toPhone, template, body, referenceID string) error {
+	if !s.WhatsAppEnabled() {
+		return ErrWhatsAppUnavailable
+	}
+	_, err := tx.ExecContext(ctx, `INSERT INTO message_outbox (store_id, channel, to_phone, template, body, reference_id, next_attempt_at)
+		VALUES ($1, 'whatsapp', $2, $3, $4, $5, $6)`, storeID, toPhone, template, body, referenceID, s.nowFunc().UTC())
+	if err != nil {
+		return fmt.Errorf("failed to enqueue whatsapp message: %w", err)
+	}
+	return nil
+}
+
+// senderFor returns the sender of a channel, nil when it is disabled.
+func (s *MessageService) senderFor(channel string) sms.Sender {
+	if channel == "whatsapp" {
+		return s.whatsapp
+	}
+	return s.sender
+}
+
+func (s *MessageService) channels() []string {
+	var out []string
+	if s.sender != nil {
+		out = append(out, "sms")
+	}
+	if s.whatsapp != nil {
+		out = append(out, "whatsapp")
+	}
+	return out
+}
 
 // EnqueueSMSTx queues one SMS in the caller's tenant transaction.
 func (s *MessageService) EnqueueSMSTx(ctx context.Context, tx *sqlx.Tx, storeID uuid.UUID, toPhone, template, body, referenceID string) error {
@@ -57,6 +98,7 @@ func (s *MessageService) EnqueueSMSTx(ctx context.Context, tx *sqlx.Tx, storeID 
 type queuedMessage struct {
 	ID       uuid.UUID `db:"id"`
 	StoreID  uuid.UUID `db:"store_id"`
+	Channel  string    `db:"channel"`
 	ToPhone  string    `db:"to_phone"`
 	Template string    `db:"template"`
 	Body     string    `db:"body"`
@@ -66,7 +108,8 @@ type queuedMessage struct {
 // DeliverDue claims due messages per store (SKIP LOCKED), sends outside the transaction and records
 // each outcome.
 func (s *MessageService) DeliverDue(ctx context.Context, batchLimit int) (sent int, err error) {
-	if !s.Enabled() {
+	channels := s.channels()
+	if len(channels) == 0 {
 		return 0, nil
 	}
 	var stores []uuid.UUID
@@ -80,16 +123,16 @@ func (s *MessageService) DeliverDue(ctx context.Context, batchLimit int) (sent i
 			return tx.SelectContext(ctx, &claimed, `
 				UPDATE message_outbox m SET status = 'sending', attempts = m.attempts + 1, locked_until = $3
 				WHERE m.id IN (
-					SELECT id FROM message_outbox WHERE store_id = $1
+					SELECT id FROM message_outbox WHERE store_id = $1 AND channel = ANY($5)
 					  AND ((status = 'pending' AND next_attempt_at <= $2) OR (status = 'sending' AND locked_until <= $2))
 					ORDER BY next_attempt_at LIMIT $4 FOR UPDATE SKIP LOCKED)
-				RETURNING id, store_id, to_phone, template, body, attempts`, storeID, now, now.Add(messageLease), batchLimit)
+				RETURNING id, store_id, channel, to_phone, template, body, attempts`, storeID, now, now.Add(messageLease), batchLimit, channels)
 		}); err != nil {
 			log.Printf("[SMS WORKER] store_id=%s claim error: %v", storeID, err)
 			continue
 		}
 		for _, m := range claimed {
-			sendErr := s.sender.Send(ctx, sms.Message{To: m.ToPhone, Body: m.Body})
+			sendErr := s.senderFor(m.Channel).Send(ctx, sms.Message{To: m.ToPhone, Body: m.Body})
 			if err := s.recordOutcome(ctx, m, sendErr); err != nil {
 				log.Printf("[SMS WORKER] message_id=%s outcome error: %v", m.ID, err)
 				continue
@@ -124,7 +167,7 @@ func (s *MessageService) recordOutcome(ctx context.Context, m queuedMessage, sen
 
 // StartWorker polls the queue until ctx is cancelled.
 func (s *MessageService) StartWorker(ctx context.Context, interval time.Duration) {
-	if !s.Enabled() {
+	if len(s.channels()) == 0 {
 		return
 	}
 	ticker := time.NewTicker(interval)

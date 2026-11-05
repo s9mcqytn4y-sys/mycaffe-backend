@@ -84,17 +84,22 @@ func (s *RealtimeService) IssueStaffTicket(ctx context.Context, actor *Authentic
 		return nil, ErrForbidden
 	}
 	userID, sessionID := actor.Staff.UserID, actor.SessionID
-	return s.issue(ctx, actor.Staff.Store.ID, channels, &userID, &sessionID, nil)
+	return s.issue(ctx, actor.Staff.Store.ID, channels, &userID, &sessionID, nil, nil)
 }
 
 func (s *RealtimeService) IssueGuestTicket(ctx context.Context, g *GuestIdentity) (*WSTicket, error) {
 	if g == nil {
 		return nil, ErrGuestSessionInvalid
 	}
-	return s.issue(ctx, g.StoreID, []string{realtime.ChannelGuestPrefix + g.SessionID.String()}, nil, nil, &g.SessionID)
+	return s.issue(ctx, g.StoreID, []string{realtime.ChannelGuestPrefix + g.SessionID.String()}, nil, nil, &g.SessionID, nil)
 }
 
-func (s *RealtimeService) issue(ctx context.Context, storeID uuid.UUID, channels []string, userID, authSessionID, guestSessionID *uuid.UUID) (*WSTicket, error) {
+// IssueDisplayTicket gives an authenticated queue display the "queue" channel only (W7).
+func (s *RealtimeService) IssueDisplayTicket(ctx context.Context, storeID, displayTokenID uuid.UUID) (*WSTicket, error) {
+	return s.issue(ctx, storeID, []string{realtime.ChannelQueue}, nil, nil, nil, &displayTokenID)
+}
+
+func (s *RealtimeService) issue(ctx context.Context, storeID uuid.UUID, channels []string, userID, authSessionID, guestSessionID, displayTokenID *uuid.UUID) (*WSTicket, error) {
 	secret, hash, err := randomToken()
 	if err != nil {
 		return nil, err
@@ -103,9 +108,9 @@ func (s *RealtimeService) issue(ctx context.Context, storeID uuid.UUID, channels
 	expires := now.Add(wsTicketTTL)
 	err = database.WithTenantTx(ctx, s.db, storeID, func(tx *sqlx.Tx) error {
 		_, err := tx.ExecContext(ctx, `
-			INSERT INTO ws_tickets (id, store_id, token_hash, user_id, auth_session_id, guest_session_id, channels, created_at, expires_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7::text[], $8, $9)
-		`, id, storeID, hash, userID, authSessionID, guestSessionID, channels, now, expires)
+			INSERT INTO ws_tickets (id, store_id, token_hash, user_id, auth_session_id, guest_session_id, display_token_id, channels, created_at, expires_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8::text[], $9, $10)
+		`, id, storeID, hash, userID, authSessionID, guestSessionID, displayTokenID, channels, now, expires)
 		return err
 	})
 	if err != nil {
@@ -123,6 +128,7 @@ type WSGrant struct {
 	UserID         *uuid.UUID
 	AuthSessionID  *uuid.UUID
 	GuestSessionID *uuid.UUID
+	DisplayTokenID *uuid.UUID
 }
 
 func (s *RealtimeService) Redeem(ctx context.Context, ticket string) (*WSGrant, error) {
@@ -144,9 +150,9 @@ func (s *RealtimeService) Redeem(ctx context.Context, ticket string) (*WSGrant, 
 			ExpiresAt time.Time  `db:"expires_at"`
 			UsedAt    *time.Time `db:"used_at"`
 		}
-		err := tx.QueryRowxContext(ctx, `SELECT token_hash, auth_session_id, user_id, guest_session_id, array_to_string(channels, ',') AS channels, expires_at, used_at
+		err := tx.QueryRowxContext(ctx, `SELECT token_hash, auth_session_id, user_id, guest_session_id, display_token_id, array_to_string(channels, ',') AS channels, expires_at, used_at
 			FROM ws_tickets WHERE store_id = $1 AND id = $2 FOR UPDATE`, storeID, ticketID).
-			Scan(&row.TokenHash, &grant.AuthSessionID, &grant.UserID, &grant.GuestSessionID, &row.Channels, &row.ExpiresAt, &row.UsedAt)
+			Scan(&row.TokenHash, &grant.AuthSessionID, &grant.UserID, &grant.GuestSessionID, &grant.DisplayTokenID, &row.Channels, &row.ExpiresAt, &row.UsedAt)
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrInvalidWSTicket
 		}
@@ -191,6 +197,12 @@ func (s *RealtimeService) Alive(ctx context.Context, grant *WSGrant) (bool, erro
 }
 
 func (s *RealtimeService) grantAliveTx(ctx context.Context, tx *sqlx.Tx, grant *WSGrant, now time.Time) (bool, error) {
+	if grant.DisplayTokenID != nil {
+		var live bool
+		err := tx.GetContext(ctx, &live, `SELECT EXISTS (SELECT 1 FROM display_tokens d JOIN stores s ON s.id = d.store_id
+			WHERE d.store_id = $1 AND d.id = $2 AND d.revoked_at IS NULL AND s.is_active)`, grant.StoreID, *grant.DisplayTokenID)
+		return live, err
+	}
 	if grant.GuestSessionID != nil {
 		g, err := s.guests.GetGuestSession(ctx, tx, grant.StoreID, *grant.GuestSessionID, false)
 		if errors.Is(err, postgres.ErrGuestSessionNotFound) {
@@ -233,6 +245,11 @@ const outboxSelect = `
 	FROM outbox_events e
 	LEFT JOIN orders o ON e.aggregate_type = 'order' AND o.store_id = e.store_id AND o.id::text = e.aggregate_id`
 
+// queueDisplayStatuses are shown on a queue display, or tell it to drop the number.
+var queueDisplayStatuses = map[string]bool{
+	"queued": true, "preparing": true, "ready": true, "served": true, "completed": true, "cancelled": true,
+}
+
 // kdsEvents reach the station screens; everything reaches the POS channel.
 var kdsEvents = map[string]bool{
 	"order.paid": true, "order.round_submitted": true, "order.cancelled": true, "order.expired": true,
@@ -254,6 +271,13 @@ func (r outboxRow) messages() []*realtime.EventMessage {
 		staff = append(staff, realtime.ChannelOwner)
 	}
 	out := []*realtime.EventMessage{{Seq: r.StoreSeq, Type: r.EventType, StoreID: store, Payload: r.Payload, Channels: staff}}
+	// Queue displays (W7) get a derived queue.updated with the queue number and status only.
+	if r.QueueNumber != nil && *r.QueueNumber != "" && r.Status != nil && queueDisplayStatuses[*r.Status] {
+		out = append(out, &realtime.EventMessage{
+			Seq: r.StoreSeq, Type: "queue.updated", StoreID: store, Channels: []string{realtime.ChannelQueue},
+			Payload: map[string]any{"queue_number": *r.QueueNumber, "status": *r.Status},
+		})
+	}
 	if r.GuestSessionID != nil && (strings.HasPrefix(r.EventType, "order.") || strings.HasPrefix(r.EventType, "payment.")) {
 		out = append(out, &realtime.EventMessage{
 			Seq: r.StoreSeq, Type: r.EventType, StoreID: store,

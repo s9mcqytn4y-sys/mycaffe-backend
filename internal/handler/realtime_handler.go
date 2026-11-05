@@ -80,6 +80,9 @@ func (h *RealtimeHandler) Connect(c *gin.Context) {
 	if grant.GuestSessionID != nil {
 		sub.GuestKey = grant.GuestSessionID.String()
 	}
+	if grant.DisplayTokenID != nil {
+		sub.GuestKey = "display:" + grant.DisplayTokenID.String() // per-display connection cap
+	}
 	if err := h.hub.Admit(sub); err != nil {
 		authError(c, http.StatusTooManyRequests, "WS_CONNECTION_LIMIT", "Terlalu banyak koneksi realtime aktif. Tutup tab lain lalu coba lagi.")
 		return

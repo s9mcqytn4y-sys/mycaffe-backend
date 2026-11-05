@@ -37,6 +37,7 @@ type handlerSet struct {
 	customer   *handler.CustomerHandler
 	outletCash *handler.OutletCashHandler
 	approval   *handler.ApprovalHandler
+	display    *handler.DisplayHandler
 	media      *handler.MediaHandler
 }
 
@@ -128,6 +129,7 @@ func wireHandlers(workerCtx context.Context, cfg *config.Config, db *sqlx.DB, hu
 
 	realtimeService := service.NewRealtimeService(db)
 	h.realtime = handler.NewRealtimeHandler(hub, realtimeService)
+	h.display = handler.NewDisplayHandler(service.NewDisplayService(db), realtimeService)
 
 	// Outbox relay (iteration 5c): LISTEN outbox + 2 s polling, at-least-once, ordered per store.
 	go realtimeService.RunRelay(workerCtx, hub)
@@ -248,6 +250,13 @@ func registerStoreAndPOSRoutes(v1 *gin.RouterGroup, h *handlerSet) {
 	pos.GET("/orders/:id/receipt", h.auth.RequirePermission(rbac.OrderReadStore), h.receipt.GetReceipt)
 	pos.POST("/orders/:id/receipt-link", h.auth.RequirePermission(rbac.OrderReadStore), h.receipt.IssueLink)
 	v1.GET("/public/receipts/:token", h.receipt.PublicReceipt)
+	// Queue TV displays (v0.9 PR 9.3, W7): owner manages tokens; displays read with "Authorization: Display <token>".
+	displays := v1.Group("/store/display-tokens", h.auth.RequirePermission(rbac.StoreSettingsManage))
+	displays.GET("", h.display.ListTokens)
+	displays.POST("", h.display.CreateToken)
+	displays.POST("/:id/revoke", h.display.RevokeToken)
+	v1.GET("/public/queue", h.display.Queue)
+	v1.POST("/public/queue/ws-ticket", h.display.IssueTicket)
 
 	// Owner reports (B2): read-only, business day in the store time zone, JSON or CSV.
 	reports := v1.Group("/reports", h.auth.RequirePermission(rbac.ReportFinanceRead))

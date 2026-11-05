@@ -42,7 +42,7 @@ Sumber: panduan pengguna dan halaman produk majoo, dicek 2026-11-05. Detail pari
 |----|---------|-----------|---------|
 | 9.1 | Pindah, gabung, pisah meja; filter area | W5 | `000033_table_session_links` (**selesai**) |
 | 9.2 | Timer meja (peringatan saja) | W6 | `000034_table_timers` (**selesai**) |
-| 9.3 | Layar antrean TV dengan token layar per toko | W7 | `000035_display_tokens` |
+| 9.3 | Layar antrean TV dengan token layar per toko | W7 | `000035_display_tokens` (**selesai**) |
 | 9.4 | Antrean cetak: printer per stasiun, checker, label TSPL, agen cetak | W8 | `000036_printers_print_jobs` |
 | 9.5 | Struk digital: email, driver WhatsApp Cloud API, tautan SMS | W9 | `000037_receipt_deliveries` |
 
@@ -111,8 +111,9 @@ diambil" di TV.
 - WebSocket: tiket dengan token layar, kanal baru `queue`, hanya event `queue.updated`
   `{queue_number, status}`.
 - Payload tanpa nama tamu, nomor HP, item, atau nominal (W7).
-- Resolusi token lewat fungsi `SECURITY DEFINER` baru `resolve_display_token` (masuk daftar fungsi yang
-  disetujui di `CLAUDE.md`), lalu `WithTenantTx`.
+- Token memuat `store_id` (pola kartu badge staf), jadi resolusi langsung lewat `WithTenantTx` dan RLS; tidak
+  perlu fungsi `SECURITY DEFINER` baru. Maksimal 10 layar aktif per toko; `last_seen_at` dicatat paling
+  sering sekali per menit. Event `queue.updated` diturunkan relay dari event pesanan yang ada, tidak disimpan.
 
 **Kriteria terima:** token dicabut → `401` dalam satu permintaan dan koneksi WS ditutup; token toko A tidak
 pernah melihat antrean toko B (tes RLS); batas laju per token.

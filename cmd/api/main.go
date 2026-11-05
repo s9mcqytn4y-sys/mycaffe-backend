@@ -219,6 +219,8 @@ func main() {
 			owner.POST("/:id/pin-reset", authHandler.SendPINReset)
 			owner.POST("/:id/temporary-pin", authHandler.IssueTemporaryPIN)
 			owner.POST("/:id/phone", authHandler.SetStaffPhone)
+			owner.POST("/:id/badge", authHandler.IssueBadge)
+			owner.POST("/:id/badge/revoke", authHandler.RevokeBadge)
 
 			store := v1.Group("/store")
 			store.GET("/settings", authHandler.RequireStaff(), posHandler.GetSettings)

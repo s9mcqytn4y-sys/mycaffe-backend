@@ -3811,6 +3811,74 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/staff/{id}/badge:
+    post:
+      tags: [Staff]
+      operationId: issueStaffBadge
+      summary: Issue a staff ID card QR token (owner, V14); the previous card stops working; audited
+      x-implementation-status: implemented
+      description: The token is returned once for printing as a QR code; only the SHA-256 of its secret is stored.
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "201":
+          description: New badge
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user_id: {type: string, format: uuid}
+                  token: {type: string}
+        "403":
+          description: FORBIDDEN
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: STAFF_NOT_FOUND
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/staff/{id}/badge/revoke:
+    post:
+      tags: [Staff]
+      operationId: revokeStaffBadge
+      summary: Revoke the staff member's active ID card (owner; audited)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Revoked
+        "403":
+          description: FORBIDDEN
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: STAFF_NOT_FOUND (no active badge)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /api/v1/staff/{id}/temporary-pin:
     post:
       tags: [Staff]
@@ -4942,8 +5010,12 @@ components:
     StaffLoginRequest:
       type: object
       additionalProperties: false
-      required: [store_slug, email, pin]
+      required: [pin]
+      description: Either store_slug + email or badge (scanned staff ID card, V14), always with the PIN.
       properties:
+        badge:
+          type: string
+          description: QR token from the staff ID card; replaces store_slug and email, never the PIN.
         store_slug:
           type: string
           minLength: 1

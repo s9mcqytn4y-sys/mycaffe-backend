@@ -221,7 +221,6 @@ func TestRealtimeIteration5cIntegration(t *testing.T) {
 	kitchen := login("central-cafe", "kitchen.central@mycaffe.local")
 
 	var firstSeq int64
-	var firstOrder uuid.UUID
 	t.Run("RelayDeliversToPOSWithSequence", func(t *testing.T) {
 		tk := ticket("/pos/ws-ticket", cashier, "")
 		if !strings.Contains(strings.Join(tk.Channels, ","), realtime.ChannelPOS) {
@@ -240,7 +239,7 @@ func TestRealtimeIteration5cIntegration(t *testing.T) {
 		if ev.Seq <= 0 || ev.StoreID != centralID.String() {
 			t.Fatalf("event must carry store and sequence: %+v", ev)
 		}
-		firstSeq, firstOrder = ev.Seq, res.Order.ID
+		firstSeq = ev.Seq
 		second := createOrder()
 		relay()
 		if ev2 := next(conn, isOrder("order.created", second.Order.ID)); ev2.Seq <= firstSeq {
@@ -269,9 +268,24 @@ func TestRealtimeIteration5cIntegration(t *testing.T) {
 	})
 
 	t.Run("ReplayAfterLastSeq", func(t *testing.T) {
-		conn, _ := dial(ticket("/pos/ws-ticket", cashier, "").Ticket, firstSeq-1)
-		if ev := next(conn, isOrder("order.created", firstOrder)); ev.Seq != firstSeq {
-			t.Fatalf("replay must resend seq %d, got %d", firstSeq, ev.Seq)
+		// Other packages write events to this store in parallel; replay from an event created just now
+		// so the gap stays far below the 500-event resync limit.
+		res := createOrder()
+		relay()
+		var seq int64
+		inStore(centralID, func(tx *sqlx.Tx) error {
+			return tx.GetContext(ctx, &seq, `SELECT store_seq FROM outbox_events WHERE store_id = $1 AND event_type = 'order.created' AND aggregate_id = $2`,
+				centralID, res.Order.ID.String())
+		})
+		conn, _ := dial(ticket("/pos/ws-ticket", cashier, "").Ticket, seq-1)
+		ev := next(conn, func(ev wsEvent) bool {
+			if ev.Type == "resync_required" {
+				t.Fatalf("replay of one event must not need a resync")
+			}
+			return isOrder("order.created", res.Order.ID)(ev)
+		})
+		if ev.Seq != seq {
+			t.Fatalf("replay must resend seq %d, got %d", seq, ev.Seq)
 		}
 	})
 

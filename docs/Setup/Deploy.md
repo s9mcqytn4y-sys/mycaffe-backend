@@ -107,3 +107,8 @@ in `/opt/actions-runner` as the systemd service `actions.runner.s9mcqytn4y-sys-m
 user `runner` (docker group, passwordless sudo because the workflows install tools). Jobs run only while the PC and
 WSL are up; one job at a time. Re-register after a reinstall with a fresh token from
 `gh api -X POST repos/s9mcqytn4y-sys/mycaffe-backend/actions/runners/registration-token`.
+
+Host prerequisites learned on the first run: `build-essential` (gcc for `go test -race`), `postgresql-client`, and
+`/etc/docker/daemon.json` with `"dns": ["1.1.1.1", "8.8.8.8"]` (containers cannot reach the WSL DNS tunnel at
+10.255.255.254). The CI PostgreSQL service publishes host port 55432, because Docker Desktop on the same machine
+already forwards 127.0.0.1:5432 into the shared WSL network.

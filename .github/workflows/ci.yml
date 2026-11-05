@@ -138,7 +138,7 @@ jobs:
           POSTGRES_PASSWORD: mycaffe_super_password
           POSTGRES_DB: mycaffe_test
         ports:
-          - 5432:5432
+          - 55432:5432
         options: >-
           --health-cmd pg_isready
           --health-interval 5s
@@ -163,7 +163,7 @@ jobs:
       - name: Bootstrap Non-Superuser Roles (mycaffe_migrator & mycaffe_app)
         env:
           PGHOST: localhost
-          PGPORT: "5432"
+          PGPORT: "55432"
           PGPASSWORD: mycaffe_super_password
           POSTGRES_USER: postgres
           POSTGRES_DB: mycaffe_test
@@ -177,7 +177,7 @@ jobs:
       - name: Apply Initial Schema Migration via Go Migrator CLI (as Non-Superuser mycaffe_migrator)
         env:
           APP_ENV: test
-          DATABASE_URL: postgres://mycaffe_migrator:mycaffe_migrator_password@localhost:5432/mycaffe_test?sslmode=disable
+          DATABASE_URL: postgres://mycaffe_migrator:mycaffe_migrator_password@localhost:55432/mycaffe_test?sslmode=disable
           DB_APP_USER: mycaffe_app
           DB_APP_PASSWORD: mycaffe_app_password
         run: |
@@ -187,12 +187,12 @@ jobs:
         env:
           PGPASSWORD: mycaffe_migrator_password
         run: |
-          psql -h localhost -p 5432 -U mycaffe_migrator -d mycaffe_test -v ON_ERROR_STOP=1 -f scripts/verify/verify_schema_constraints.sql
+          psql -h localhost -p 55432 -U mycaffe_migrator -d mycaffe_test -v ON_ERROR_STOP=1 -f scripts/verify/verify_schema_constraints.sql
 
       - name: Test Migration Rollback via Go Migrator CLI
         env:
           APP_ENV: test
-          DATABASE_URL: postgres://mycaffe_migrator:mycaffe_migrator_password@localhost:5432/mycaffe_test?sslmode=disable
+          DATABASE_URL: postgres://mycaffe_migrator:mycaffe_migrator_password@localhost:55432/mycaffe_test?sslmode=disable
         run: |
           go run ./cmd/migrate -action=down
           go run ./cmd/migrate -action=down
@@ -208,7 +208,7 @@ jobs:
       - name: Re-apply Migration & Verify Idempotent Up
         env:
           APP_ENV: test
-          DATABASE_URL: postgres://mycaffe_migrator:mycaffe_migrator_password@localhost:5432/mycaffe_test?sslmode=disable
+          DATABASE_URL: postgres://mycaffe_migrator:mycaffe_migrator_password@localhost:55432/mycaffe_test?sslmode=disable
           DB_APP_USER: mycaffe_app
           DB_APP_PASSWORD: mycaffe_app_password
         run: |
@@ -218,26 +218,26 @@ jobs:
       - name: Test Idempotent Seed Execution via Go Migrator CLI (Run Twice)
         env:
           APP_ENV: test
-          DATABASE_URL: postgres://mycaffe_migrator:mycaffe_migrator_password@localhost:5432/mycaffe_test?sslmode=disable
+          DATABASE_URL: postgres://mycaffe_migrator:mycaffe_migrator_password@localhost:55432/mycaffe_test?sslmode=disable
           PGPASSWORD: mycaffe_migrator_password
         run: |
           echo "Executing Seed (Run 1)..."
           go run ./cmd/migrate -action=seed
 
           echo "Capturing row counts after first seed..."
-          STORE_COUNT_BEFORE=$(psql -h localhost -p 5432 -U mycaffe_migrator -d mycaffe_test -t -A -c "SELECT COUNT(*) FROM stores;")
-          ORDER_COUNT_BEFORE=$(psql -h localhost -p 5432 -U mycaffe_migrator -d mycaffe_test -t -A -c "SELECT COUNT(*) FROM orders;")
-          MOD_GROUP_COUNT_BEFORE=$(psql -h localhost -p 5432 -U mycaffe_migrator -d mycaffe_test -t -A -c "SELECT COUNT(*) FROM modifier_groups;")
-          SPLIT_COUNT_BEFORE=$(psql -h localhost -p 5432 -U mycaffe_migrator -d mycaffe_test -t -A -c "SELECT COUNT(*) FROM payment_splits;")
+          STORE_COUNT_BEFORE=$(psql -h localhost -p 55432 -U mycaffe_migrator -d mycaffe_test -t -A -c "SELECT COUNT(*) FROM stores;")
+          ORDER_COUNT_BEFORE=$(psql -h localhost -p 55432 -U mycaffe_migrator -d mycaffe_test -t -A -c "SELECT COUNT(*) FROM orders;")
+          MOD_GROUP_COUNT_BEFORE=$(psql -h localhost -p 55432 -U mycaffe_migrator -d mycaffe_test -t -A -c "SELECT COUNT(*) FROM modifier_groups;")
+          SPLIT_COUNT_BEFORE=$(psql -h localhost -p 55432 -U mycaffe_migrator -d mycaffe_test -t -A -c "SELECT COUNT(*) FROM payment_splits;")
 
           echo "Executing Seed (Run 2 - Idempotency Verification)..."
           go run ./cmd/migrate -action=seed
 
           echo "Verifying row stability after second seed..."
-          STORE_COUNT_AFTER=$(psql -h localhost -p 5432 -U mycaffe_migrator -d mycaffe_test -t -A -c "SELECT COUNT(*) FROM stores;")
-          ORDER_COUNT_AFTER=$(psql -h localhost -p 5432 -U mycaffe_migrator -d mycaffe_test -t -A -c "SELECT COUNT(*) FROM orders;")
-          MOD_GROUP_COUNT_AFTER=$(psql -h localhost -p 5432 -U mycaffe_migrator -d mycaffe_test -t -A -c "SELECT COUNT(*) FROM modifier_groups;")
-          SPLIT_COUNT_AFTER=$(psql -h localhost -p 5432 -U mycaffe_migrator -d mycaffe_test -t -A -c "SELECT COUNT(*) FROM payment_splits;")
+          STORE_COUNT_AFTER=$(psql -h localhost -p 55432 -U mycaffe_migrator -d mycaffe_test -t -A -c "SELECT COUNT(*) FROM stores;")
+          ORDER_COUNT_AFTER=$(psql -h localhost -p 55432 -U mycaffe_migrator -d mycaffe_test -t -A -c "SELECT COUNT(*) FROM orders;")
+          MOD_GROUP_COUNT_AFTER=$(psql -h localhost -p 55432 -U mycaffe_migrator -d mycaffe_test -t -A -c "SELECT COUNT(*) FROM modifier_groups;")
+          SPLIT_COUNT_AFTER=$(psql -h localhost -p 55432 -U mycaffe_migrator -d mycaffe_test -t -A -c "SELECT COUNT(*) FROM payment_splits;")
           if [ "$STORE_COUNT_BEFORE" != "$STORE_COUNT_AFTER" ] || [ "$ORDER_COUNT_BEFORE" != "$ORDER_COUNT_AFTER" ] || [ "$MOD_GROUP_COUNT_BEFORE" != "$MOD_GROUP_COUNT_AFTER" ] || [ "$SPLIT_COUNT_BEFORE" != "$SPLIT_COUNT_AFTER" ]; then
             echo "Seed idempotency failed!"
             echo "Before: Stores=$STORE_COUNT_BEFORE, Orders=$ORDER_COUNT_BEFORE, ModGroups=$MOD_GROUP_COUNT_BEFORE, Splits=$SPLIT_COUNT_BEFORE"
@@ -248,8 +248,8 @@ jobs:
 
       - name: Verify Direct TCP Login, RLS & Transactional Order/Payment/Auth Services Connected as mycaffe_app
         env:
-          TEST_APP_DATABASE_URL: postgres://mycaffe_app:mycaffe_app_password@localhost:5432/mycaffe_test?sslmode=disable
-          TEST_MIGRATOR_DATABASE_URL: postgres://mycaffe_migrator:mycaffe_migrator_password@localhost:5432/mycaffe_test?sslmode=disable
+          TEST_APP_DATABASE_URL: postgres://mycaffe_app:mycaffe_app_password@localhost:55432/mycaffe_test?sslmode=disable
+          TEST_MIGRATOR_DATABASE_URL: postgres://mycaffe_migrator:mycaffe_migrator_password@localhost:55432/mycaffe_test?sslmode=disable
         run: |
           # Same command as ./scripts/dev.ps1 test-int: every package, so a new integration test cannot be left out.
           set -o pipefail

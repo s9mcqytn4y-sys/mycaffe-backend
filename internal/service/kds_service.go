@@ -70,6 +70,16 @@ func createKDSTicketsTx(ctx context.Context, tx *sqlx.Tx, orders *postgres.Order
 			return 0, err
 		}
 	}
+	// Print queue (PR 9.4): only newly created tickets print, so a replayed webhook never prints twice.
+	if len(created) > 0 {
+		stations := map[string]bool{}
+		for _, t := range created {
+			stations[t.Station] = true
+		}
+		if _, err := enqueuePrintJobsTx(ctx, tx, orders, order, printScope{roundID: roundID, stations: stations}, now); err != nil {
+			return 0, err
+		}
+	}
 	var total int
 	err := tx.GetContext(ctx, &total, `SELECT COUNT(*) FROM kds_tickets WHERE store_id = $1 AND order_id = $2 AND round_id IS NOT DISTINCT FROM $3`,
 		order.StoreID, order.ID, roundID)

@@ -95,6 +95,15 @@ services:
       MIDTRANS_IS_PRODUCTION: "true"
       # Hostinger mailbox (smtp.hostinger.com:465, implicit TLS). The API refuses to start without it.
       EMAIL_DRIVER: smtp
+      SMS_DRIVER: ${SMS_DRIVER:-disabled}
+      SMS_EMAIL_TO: ${SMS_EMAIL_TO:-}
+      SMS_WEBHOOK_URL: ${SMS_WEBHOOK_URL:-}
+      SMS_WEBHOOK_TOKEN: ${SMS_WEBHOOK_TOKEN:-}
+      WHATSAPP_API_VERSION: ${WHATSAPP_API_VERSION:-v21.0}
+      WHATSAPP_PHONE_NUMBER_ID: ${WHATSAPP_PHONE_NUMBER_ID:-}
+      WHATSAPP_ACCESS_TOKEN: ${WHATSAPP_ACCESS_TOKEN:-}
+      WHATSAPP_RECEIPT_TEMPLATE: ${WHATSAPP_RECEIPT_TEMPLATE:-struk_digital}
+      WHATSAPP_TEMPLATE_LANGUAGE: ${WHATSAPP_TEMPLATE_LANGUAGE:-id}
       SMTP_HOST: ${SMTP_HOST:-smtp.hostinger.com}
       SMTP_PORT: ${SMTP_PORT:-465}
       SMTP_USERNAME: ${SMTP_USERNAME:?SMTP_USERNAME must be set}
@@ -135,8 +144,10 @@ services:
           memory: 128M
 
   web:
-    image: ghcr.io/s9mcqytn4y-sys/mycaffe-web@${WEB_IMAGE_DIGEST:?WEB_IMAGE_DIGEST must be set (use scripts/deploy/deploy.sh)}
+    image: ghcr.io/s9mcqytn4y-sys/mycaffe-web@${WEB_IMAGE_DIGEST:-}
     container_name: mycaffe-web
+    # Optional until the frontend exists (decision W3): deploy.sh enables the profile when a web digest is given.
+    profiles: ["web"]
     restart: unless-stopped
     depends_on:
       api:
@@ -170,8 +181,6 @@ services:
     depends_on:
       api:
         condition: service_healthy
-      web:
-        condition: service_started
     networks:
       - mycaffe-edge
     deploy:

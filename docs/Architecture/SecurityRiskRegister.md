@@ -23,7 +23,7 @@ Nothing here claims the system is "secure"; it lists what is controlled and what
 
 | ID | Risk | Location | Status / next step |
 | ---- | ------ | ---------- | -------------------- |
-| R1 | `.env` pointed `DATABASE_URL` at a remote Supabase host | local `.env` | **Resolved 2026-10-31**: Supabase removed from `.env`, MCP config, CLI; `dev.ps1` also ignores remote DSNs. A pre-cleanup copy is in `.env.bak` (git-ignored) — delete it once local dev is confirmed |
+| R1 | `.env` pointed `DATABASE_URL` at a remote Supabase host | local `.env` | **Resolved**: Supabase removed from `.env`, MCP config, CLI; `.env.bak` and `.env.local` deleted |
 | R2 | **No real WebSocket authentication for browsers** (headers cannot be set on `new WebSocket`) | `internal/handler/realtime_handler.go` | Mitigated (5c, PR A): single-use WS tickets via `?ticket=`, per-guest/IP/store connection caps, session revalidation every 30 s |
 | R3 | **No backup restore drill yet** (scripts exist, never restored on a real VPS) | `scripts/backup/*` | Blocked — needs VPS; drill is a release gate |
 
@@ -31,12 +31,12 @@ Nothing here claims the system is "secure"; it lists what is controlled and what
 
 | ID | Risk | Location | Status / next step |
 | ---- | ------ | ---------- | -------------------- |
-| R4 | **Split-bill settlement marks all splits paid** | `internal/service/payment_service.go` `commitPaidOrderTx` | Open — must be reworked before open tab/split (backlog 8); POS currently creates single-split orders |
-| R5 | **Duplicate settlement only emits an event**; nobody is alerted yet | `flagDuplicateSettlementTx` | Open — owner email + refund queue UI (backlog 8, 11) |
-| R6 | Sentry captures startup errors only; **HTTP panics are not reported** (gin Recovery logs them) | `cmd/api/main.go` | Open — add Sentry middleware (module `sentry-go/gin`) with PII scrubbing |
-| R7 | **No metrics/tracing** (latency, error rate, worker lag, email backlog) | — | Open — Prometheus-style `/metrics` on an internal port or Sentry performance (backlog) |
-| R8 | **Media upload** (was: not implemented) | `internal/service/media_service.go`, `internal/pkg/imaging` | Mitigated (B3): presigned PUT, server-side size and magic-byte check, dimension cap, EXIF stripped by re-encoding, JPEG variants, image_url only from verified uploads; real R2 presign untested until credentials are set |
-| R9 | **Email failures are invisible** to the owner (`email_outbox.status='failed'`) | `email_outbox` | Open — backoffice view + alert (backlog 11) |
+| R4 | **Split-bill settlement marks all splits paid** | `internal/service/payment_service.go` | Mitigated (4c-2): payments bind to `split_id`, order becomes `paid` only when all splits are settled |
+| R5 | **Duplicate settlement only emits an event**; nobody is alerted yet | `flagDuplicateSettlementTx` | Open — owner email + refund queue UI |
+| R6 | Sentry captures startup errors only; **HTTP panics are not reported** | `internal/handler/middleware.go` | **Mitigated**: `SentryClientOptions` + `ScrubSentryEvent` (`BeforeSend` redacts headers/cookies/query/body) + `Recover()` & `AccessLog()` 5xx capture with `request_id`/`route`/`store_id` tags (`TestScrubSentryEventRedactsCredentialsAndPII`) |
+| R7 | **No metrics/tracing** (latency, error rate, worker lag, email backlog) | `internal/pkg/metrics` | **Mitigated (PR 8.3)**: Prometheus `/metrics` on internal port `:9091` + Grafana Alloy shipper |
+| R8 | **Media upload** | `internal/service/media_service.go`, `internal/pkg/imaging` | **Mitigated (B3 & R2 live)**: presigned PUT to `mycaffe-media` (`https://cdn.abbdullaziz.online`), magic-byte & dimension check, EXIF stripped, JPEG variants |
+| R9 | **Email failures are invisible** to the owner (`email_outbox.status='failed'`) | `email_outbox` | Mitigated via `mycaffe_outbox_pending` / `mycaffe_outbox_failed` Prometheus metrics |
 | R10 | Production Nginx has no `client_max_body_size` override (nginx default 1 MB) and no CSP | `deploy/nginx/nginx.prod.conf` | Accepted for API-only host; add CSP on the frontend host |
 | R11 | **Guest ordering not authenticated yet** | `/api/v1/public/guest/*` | Mitigated (5b): signed table QR, guest session cookie, per-IP and per-guest limits, pay-first |
 
@@ -88,7 +88,7 @@ Nothing here claims the system is "secure"; it lists what is controlled and what
 | x/term | hidden PIN prompt in CLI | already in graph |
 | gorilla/websocket | realtime hub | origin check enforced |
 | midtrans-go | Core API | sandbox in dev/demo |
-| sentry-go | error reporting | HTTP middleware missing (R6) |
+| sentry-go | error reporting | HTTP panic & 5xx middleware + `BeforeSend` PII scrubbing (R6 mitigated) |
 | godotenv | local `.env` | never overrides set variables |
 
 No CGO dependencies; static binaries. Run `./scripts/dev.ps1 check` (includes `govulncheck`) before each PR.

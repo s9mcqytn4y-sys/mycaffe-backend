@@ -90,14 +90,22 @@ services:
       MIDTRANS_IS_PRODUCTION: "false"
       # Email: log driver by default; set SMTP_* (Gmail app password) to really send.
       EMAIL_DRIVER: ${EMAIL_DRIVER:-log}
-      SMS_DRIVER: ${SMS_DRIVER:-disabled} # log is refused in staging (docs/Setup/Sms.md)
+      SMS_DRIVER: ${SMS_DRIVER:-disabled} # log is refused in staging (docs/Setup/Sms.md); use email or webhook for demo
+      SMS_EMAIL_TO: ${SMS_EMAIL_TO:-}
+      SMS_WEBHOOK_URL: ${SMS_WEBHOOK_URL:-}
+      SMS_WEBHOOK_TOKEN: ${SMS_WEBHOOK_TOKEN:-}
+      WHATSAPP_API_VERSION: ${WHATSAPP_API_VERSION:-v21.0}
+      WHATSAPP_PHONE_NUMBER_ID: ${WHATSAPP_PHONE_NUMBER_ID:-}
+      WHATSAPP_ACCESS_TOKEN: ${WHATSAPP_ACCESS_TOKEN:-}
+      WHATSAPP_RECEIPT_TEMPLATE: ${WHATSAPP_RECEIPT_TEMPLATE:-struk_digital}
+      WHATSAPP_TEMPLATE_LANGUAGE: ${WHATSAPP_TEMPLATE_LANGUAGE:-id}
       SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USERNAME: ${SMTP_USERNAME:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       EMAIL_FROM_ADDRESS: ${EMAIL_FROM_ADDRESS:-}
       EMAIL_FROM_NAME: ${EMAIL_FROM_NAME:-MyCaffe Demo}
-      APP_PUBLIC_URL: ${APP_PUBLIC_URL:-http://localhost:8088}
+      APP_PUBLIC_URL: ${APP_PUBLIC_URL:-https://demo.abbdullaziz.online}
       DEFAULT_STORE_SLUG: ${DEFAULT_STORE_SLUG:-central-cafe}
       STORAGE_DRIVER: ${STORAGE_DRIVER:-local}
       R2_ACCOUNT_ID: ${R2_ACCOUNT_ID:-}
@@ -106,7 +114,8 @@ services:
       R2_BUCKET_NAME: ${R2_BUCKET_NAME:-mycaffe-media}
       R2_PRIVATE_BUCKET_NAME: ${R2_PRIVATE_BUCKET_NAME:-mycaffe-private-media}
       R2_PUBLIC_URL: ${R2_PUBLIC_URL:-}
-      SENTRY_ENVIRONMENT: staging
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-staging}
     networks:
       - mycaffe-edge
       - mycaffe-data
@@ -142,9 +151,11 @@ services:
   tunnel:
     image: cloudflare/cloudflared:2026.10.2
     restart: unless-stopped
-    # Quick Tunnel: the public URL is printed in `docker compose logs tunnel` and changes on restart.
-    # Switch to a Named Tunnel (stable hostname) with: tunnel run --token ${CLOUDFLARE_TUNNEL_TOKEN}
-    command: tunnel --no-autoupdate --metrics 0.0.0.0:2000 --url http://nginx:80
+    # Named Tunnel (mycaffe-demo -> https://demo.abbdullaziz.online) when CLOUDFLARE_TUNNEL_TOKEN is set.
+    # For an ephemeral Quick Tunnel without a token, set CLOUDFLARE_TUNNEL_COMMAND="--url http://nginx:80".
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    command: tunnel --no-autoupdate --metrics 0.0.0.0:2000 ${CLOUDFLARE_TUNNEL_COMMAND:-run}
     depends_on:
       nginx:
         condition: service_healthy

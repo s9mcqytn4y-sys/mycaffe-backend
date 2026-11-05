@@ -33,6 +33,10 @@ tags:
     description: Tables, derived table occupancy, table sessions and public QR resolution (iteration 5a)
   - name: Guest
     description: QR guest sessions, pay-first guest orders and the public order tracker (iteration 5b)
+  - name: Printing
+    description: Print queue, printers per station and the print agent API (v0.9 PR 9.4, W8)
+  - name: Display
+    description: Queue TV displays with per-store display tokens (v0.9 PR 9.3, W7)
   - name: Realtime
     description: Outbox relay over WebSocket with single-use tickets, per-store sequence and replay (iteration 5c)
   - name: Customers
@@ -1056,6 +1060,14 @@ paths:
       x-implementation-status: implemented
       security:
         - BearerStaffJWT: []
+      parameters:
+        - name: section
+          in: query
+          required: false
+          description: Only tables of this area (tables.section), case-insensitive (PR 9.1)
+          schema:
+            type: string
+            maxLength: 50
       responses:
         "200":
           description: Non-archived tables of the caller's store
@@ -1226,6 +1238,196 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/pos/table-sessions/{id}/move:
+    post:
+      tags: [Tables]
+      operationId: moveTableSession
+      summary: "Move the whole session to a free table (tab.manage, audited, W5)"
+      description: >-
+        Orders placed at the old table follow it; tables merged into the session stay merged. Emits table.moved on the pos channel.
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - $ref: "#/components/parameters/ResourceID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [to_table_id]
+              properties:
+                to_table_id:
+                  type: string
+                  format: uuid
+                  description: Target table; must be active, with no open session and not merged into one
+      responses:
+        "200":
+          description: The session after the change
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TableSession"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: TABLE_SESSION_OPEN (target occupied or merged), TABLE_INACTIVE, TABLE_SESSION_NOT_OPEN
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Same table or same session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationErrorResponse"
+  /api/v1/pos/table-sessions/{id}/merge:
+    post:
+      tags: [Tables]
+      operationId: mergeTableSession
+      summary: "Merge another open session into this one: one shared bill (tab.manage, audited, W5)"
+      description: >-
+        The other session closes with close_reason merged; its orders and guest sessions move here and its table is linked, so its QR orders into this session. Emits table.merged.
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - $ref: "#/components/parameters/ResourceID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [session_id]
+              properties:
+                session_id:
+                  type: string
+                  format: uuid
+                  description: Open session of another table to fold into this one
+      responses:
+        "200":
+          description: The session after the change
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TableSession"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: TABLE_SESSION_NOT_OPEN (either session already closed or merged)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Same table or same session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationErrorResponse"
+  /api/v1/pos/table-sessions/{id}/split:
+    post:
+      tags: [Tables]
+      operationId: splitTableFromSession
+      summary: "Take a merged table off the session (tab.manage, audited, W5)"
+      description: >-
+        The table becomes free; orders stay on the shared bill (divide them with the split bill). Emits table.split.
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - $ref: "#/components/parameters/ResourceID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [table_id]
+              properties:
+                table_id:
+                  type: string
+                  format: uuid
+                  description: Table currently merged into this session
+      responses:
+        "200":
+          description: The session after the change
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TableSession"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: TABLE_NOT_MERGED, TABLE_SESSION_NOT_OPEN
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Same table or same session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationErrorResponse"
+  /api/v1/pos/table-sessions/{id}/extend:
+    post:
+      tags: [Tables]
+      operationId: extendTableTimer
+      summary: "Give a table more time (tab.manage, audited, W6)"
+      description: >-
+        ends_at moves to max(ends_at, now) + minutes; warning and expiry re-arm. Emits table.timer_extended.
+        The worker publishes table.timer_warning and table.timer_expired on the pos channel, once each; the
+        timer never refuses orders.
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - $ref: "#/components/parameters/ResourceID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [minutes]
+              properties:
+                minutes:
+                  type: integer
+                  minimum: 1
+                  maximum: 240
+      responses:
+        "200":
+          description: The session with the new ends_at
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TableSession"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: TABLE_TIMER_OFF (session opened without a store time limit), TABLE_SESSION_NOT_OPEN
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: minutes outside 1-240
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationErrorResponse"
   /api/v1/public/qr/{token}:
     get:
       security: []
@@ -1375,6 +1577,56 @@ paths:
           $ref: "#/components/responses/ValidationFailed"
         "429":
           description: TOO_MANY_REQUESTS
+  /api/v1/public/guest/orders/{id}/receipt/send:
+    post:
+      security: []
+      tags: [Guest]
+      operationId: sendGuestReceipt
+      summary: The guest sends the receipt of one of their own paid QR orders (same rules as the cashier)
+      description: "Requires the guest cookie and `X-CSRF-Protection: 1`. Another guest's order answers 404."
+      x-implementation-status: implemented
+      parameters:
+        - $ref: "#/components/parameters/CsrfProtectionHeader"
+        - $ref: "#/components/parameters/ResourceID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReceiptSendRequest"
+      responses:
+        "202":
+          description: Queued; the message carries only the 90-day receipt link
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReceiptSendResult"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: RECEIPT_NOT_READY (order not paid)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Invalid channel or address, or PHONE_NOT_VERIFIED for SMS
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: RECEIPT_SEND_LIMIT (3 per order, 10 per recipient per day)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: WHATSAPP_UNAVAILABLE or SMS_UNAVAILABLE (driver not configured)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /api/v1/public/guest/orders/{id}/payments:
     post:
       security: []
@@ -2931,6 +3183,411 @@ paths:
           description: Forbidden - lacks order.read.store
         "404":
           description: NOT_FOUND
+  /api/v1/store/display-tokens:
+    get:
+      tags: [Display]
+      operationId: listDisplayTokens
+      summary: Queue TV displays of the store, newest active first (store.settings.manage)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: Displays without their tokens
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [display_tokens]
+                properties:
+                  display_tokens:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/DisplayToken"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      tags: [Display]
+      operationId: createDisplayToken
+      summary: Register a queue TV display; the token is returned once (store.settings.manage, audited, W7)
+      description: At most 10 active displays per store. Put the token on the TV app; it reads with "Authorization Display <token>".
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+                  maxLength: 50
+      responses:
+        "201":
+          description: The display with its one-time token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DisplayToken"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: DISPLAY_TOKEN_LIMIT
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Blank or too long name
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationErrorResponse"
+  /api/v1/store/display-tokens/{id}/revoke:
+    post:
+      tags: [Display]
+      operationId: revokeDisplayToken
+      summary: Revoke a display at once; open WebSockets close on the next liveness check (audited, idempotent)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - $ref: "#/components/parameters/ResourceID"
+      responses:
+        "204":
+          description: Revoked (or already revoked)
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/v1/store/printers:
+    get:
+      tags: [Printing]
+      operationId: listPrinters
+      summary: Printers of the store, without agent tokens (store.settings.manage)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: Printers
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [printers]
+                properties:
+                  printers:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Printer"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      tags: [Printing]
+      operationId: createPrinter
+      summary: Register a printer for a station; the agent token is returned once (audited, W8)
+      description: >-
+        Stations bar and kitchen print their lines, checker prints the whole order or round, label prints
+        one TSPL label per bar cup. Format follows the station (label = tspl, else escpos). Defaults: 58 mm
+        paper, 40x30 mm labels, 1 copy.
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PrinterInput"
+      responses:
+        "201":
+          description: Printer with its one-time agent_token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Printer"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          description: Invalid printer settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationErrorResponse"
+  /api/v1/store/printers/{id}:
+    patch:
+      tags: [Printing]
+      operationId: updatePrinter
+      summary: Change a printer (name, station, size, copies, footer, active) (audited)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - $ref: "#/components/parameters/ResourceID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PrinterInput"
+      responses:
+        "200":
+          description: Updated printer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Printer"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          description: Invalid printer settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationErrorResponse"
+  /api/v1/store/printers/{id}/rotate-token:
+    post:
+      tags: [Printing]
+      operationId: rotatePrinterToken
+      summary: Replace the agent token; the old one stops at once (audited)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - $ref: "#/components/parameters/ResourceID"
+      responses:
+        "200":
+          description: Printer with its new one-time agent_token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Printer"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/v1/print-agent/jobs/claim:
+    post:
+      security:
+        - PrinterToken: []
+      tags: [Printing]
+      operationId: claimPrintJob
+      summary: Claim the oldest due job of this printer (print agent)
+      description: >-
+        Due means pending and past next_attempt_at, or claimed but not acknowledged within 60 s. A job
+        handed out 5 times without an ack goes dead (print_job.failed). Poll every 2-5 s.
+      x-implementation-status: implemented
+      responses:
+        "200":
+          description: A job to print
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentJob"
+        "204":
+          description: Nothing to print
+        "401":
+          description: PRINTER_TOKEN_INVALID (unknown, rotated, inactive printer or store)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/print-agent/jobs/{id}/ack:
+    post:
+      security:
+        - PrinterToken: []
+      tags: [Printing]
+      operationId: ackPrintJob
+      summary: Report the print result (print agent)
+      description: printed is final (print_job.printed); failed retries after attempts x 10 s and goes dead after 5 attempts. A repeated printed ack is a no-op.
+      x-implementation-status: implemented
+      parameters:
+        - $ref: "#/components/parameters/ResourceID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  enum: [printed, failed]
+                error:
+                  type: string
+                  maxLength: 500
+      responses:
+        "204":
+          description: Recorded
+        "401":
+          description: PRINTER_TOKEN_INVALID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: PRINT_JOB_NOT_FOUND (not claimed by this printer)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/pos/orders/{id}/receipt/send:
+    post:
+      tags: [Receipts]
+      operationId: sendReceipt
+      summary: Send the digital receipt of a paid order by e-mail, WhatsApp or SMS (audited, W9)
+      description: >-
+        E-mail always; WhatsApp through the Cloud API template once WHATSAPP_ACCESS_TOKEN and
+        WHATSAPP_PHONE_NUMBER_ID are set; SMS only to a phone verified at the POS (V4). The recipient is stored
+        hashed and masked, never in plain text.
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - $ref: "#/components/parameters/ResourceID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReceiptSendRequest"
+      responses:
+        "202":
+          description: Queued; the message carries only the 90-day receipt link
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReceiptSendResult"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: RECEIPT_NOT_READY (order not paid)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Invalid channel or address, or PHONE_NOT_VERIFIED for SMS
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: RECEIPT_SEND_LIMIT (3 per order, 10 per recipient per day)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: WHATSAPP_UNAVAILABLE or SMS_UNAVAILABLE (driver not configured)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/pos/orders/{id}/reprint:
+    post:
+      tags: [Printing]
+      operationId: reprintOrder
+      summary: Queue a reprint of an order's tickets, checker slip or labels, marked CETAK ULANG (audited)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - $ref: "#/components/parameters/ResourceID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind]
+              properties:
+                kind:
+                  type: string
+                  enum: [ticket, checker, label]
+      responses:
+        "202":
+          description: Jobs queued
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [jobs]
+                properties:
+                  jobs:
+                    type: integer
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: PRINTER_NOT_CONFIGURED (no active printer for this kind)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Unknown kind
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationErrorResponse"
+  /api/v1/public/queue:
+    get:
+      security:
+        - DisplayToken: []
+      tags: [Display]
+      operationId: getQueueDisplay
+      summary: Today's queue for a TV display, queue numbers and status only (W7)
+      description: >-
+        Orders of the store's current day (store time zone) that are queued, preparing or ready, oldest first,
+        at most 200. Never names, phone numbers, items or amounts. Cache-Control no-store; nginx rate limit public_limit.
+      x-implementation-status: implemented
+      responses:
+        "200":
+          description: Queue
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QueueView"
+        "401":
+          description: DISPLAY_TOKEN_INVALID (missing, unknown, revoked, or store inactive)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/public/queue/ws-ticket:
+    post:
+      security:
+        - DisplayToken: []
+      tags: [Display]
+      operationId: issueDisplayWSTicket
+      summary: Single-use 30 s WebSocket ticket for channel queue (display token)
+      description: The channel carries queue.updated events with payload {queue_number, status} only.
+      x-implementation-status: implemented
+      responses:
+        "201":
+          description: Ticket for channel queue
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WSTicket"
+        "401":
+          description: DISPLAY_TOKEN_INVALID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /api/v1/public/receipts/{token}:
     get:
       security: []
@@ -3931,6 +4588,16 @@ paths:
 
 components:
   securitySchemes:
+    PrinterToken:
+      type: apiKey
+      in: header
+      name: Authorization
+      description: 'Print agent token sent as "Printer <token>" (W8). One per printer, rotated by the owner; grants claim and ack for that printer only.'
+    DisplayToken:
+      type: apiKey
+      in: header
+      name: Authorization
+      description: 'Queue TV display token sent as "Display <token>" (W7). Revocable by the owner; grants the public queue and channel queue only.'
     BearerStaffJWT:
       type: http
       scheme: bearer
@@ -4088,6 +4755,153 @@ components:
                 description: JSON snapshot of the selected modifiers
               notes:
                 type: string
+    ReceiptSendRequest:
+      type: object
+      required: [channel, to]
+      properties:
+        channel:
+          type: string
+          enum: [email, whatsapp, sms]
+        to:
+          type: string
+          description: E-mail address, or a phone number (08..., 62..., +62...) for whatsapp and sms
+    ReceiptSendResult:
+      type: object
+      required: [channel, recipient, expires_at]
+      properties:
+        channel:
+          type: string
+          enum: [email, whatsapp, sms]
+        recipient:
+          type: string
+          description: Masked, e.g. d***@gmail.com or +6281****890
+        expires_at:
+          type: string
+          format: date-time
+          description: Expiry of the receipt link
+    Printer:
+      type: object
+      required: [id, name, station, format, paper_width_mm, copies, footer, is_active, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        station:
+          type: string
+          enum: [bar, kitchen, checker, label]
+        format:
+          type: string
+          enum: [escpos, tspl]
+        paper_width_mm:
+          type: integer
+          description: 58 or 80 for escpos; 25-110 for tspl labels
+        label_height_mm:
+          type: integer
+          description: 15-100, tspl labels only
+        copies:
+          type: integer
+          minimum: 1
+          maximum: 5
+        footer:
+          type: string
+          maxLength: 100
+        is_active:
+          type: boolean
+        last_seen_at:
+          type: string
+          format: date-time
+          description: Last agent contact, updated at most once a minute
+        created_at:
+          type: string
+          format: date-time
+        agent_token:
+          type: string
+          description: Only when created or rotated; "<store_id>.<printer_id>.<secret>", only its hash is stored
+    PrinterInput:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 50
+        station:
+          type: string
+          enum: [bar, kitchen, checker, label]
+          description: Required on create
+        paper_width_mm:
+          type: integer
+        label_height_mm:
+          type: integer
+        copies:
+          type: integer
+          minimum: 1
+          maximum: 5
+        footer:
+          type: string
+          maxLength: 100
+        is_active:
+          type: boolean
+    AgentJob:
+      type: object
+      required: [id, kind, format, payload_base64, attempts]
+      properties:
+        id:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum: [ticket, checker, label]
+        format:
+          type: string
+          enum: [escpos, tspl]
+        payload_base64:
+          type: string
+          description: Raw printer bytes rendered on the server; copies are already included
+        attempts:
+          type: integer
+    DisplayToken:
+      type: object
+      required: [id, name, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        revoked_at:
+          type: string
+          format: date-time
+        last_seen_at:
+          type: string
+          format: date-time
+          description: Updated at most once a minute while the display reads the queue
+        token:
+          type: string
+          description: Only in the create response; "<store_id>.<token_id>.<secret>", only its hash is stored
+    QueueView:
+      type: object
+      required: [store_name, orders]
+      properties:
+        store_name:
+          type: string
+        orders:
+          type: array
+          items:
+            type: object
+            required: [queue_number, status, updated_at]
+            properties:
+              queue_number:
+                type: string
+              status:
+                type: string
+                enum: [queued, preparing, ready]
+              updated_at:
+                type: string
+                format: date-time
     WSTicket:
       type: object
       required: [ticket, expires_at, channels]
@@ -4277,7 +5091,20 @@ components:
           format: uuid
         close_reason:
           type: string
-          enum: [cashier, auto]
+          enum: [cashier, auto, merged]
+        ends_at:
+          type: string
+          format: date-time
+          description: Table time limit end (W6); absent when the session opened without a store limit
+        warned_at:
+          type: string
+          format: date-time
+        expired_at:
+          type: string
+          format: date-time
+        extended_minutes:
+          type: integer
+          minimum: 0
     TableBoardEntry:
       allOf:
         - $ref: "#/components/schemas/Table"
@@ -4295,6 +5122,14 @@ components:
             unpaid_amount:
               type: integer
               format: int64
+            merged_into_table_id:
+              type: string
+              format: uuid
+              description: Set when this table is merged into the session of that table (W5); session and unpaid totals are the shared ones
+            timer_state:
+              type: string
+              enum: [none, ok, warning, expired]
+              description: Derived at read time from session.ends_at and table_timer_warning_minutes (W6)
     PublicTable:
       type: object
       required: [store_name, store_slug, table_number, label, ordering_open]
@@ -5652,6 +6487,14 @@ components:
         cashier_sees_expected_cash:
           type: boolean
           description: When false (default) a cashier's X-report hides expected cash while the shift is open (blind count).
+        table_time_limit_minutes:
+          type: integer
+          description: Table time limit for sessions opened from now on (W6); 0 (default) off, otherwise 15-480. Warnings only.
+        table_timer_warning_minutes:
+          type: integer
+          minimum: 1
+          maximum: 60
+          description: Warn this many minutes before a table's time ends; shorter than the limit. Default 10.
 
     InitiatePaymentResponse:
       type: object

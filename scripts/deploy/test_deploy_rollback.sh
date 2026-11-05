@@ -42,7 +42,7 @@ state() { grep "^$2=" "${DEPLOY_STATE_DIR}/$1.env" | cut -d= -f2; }
 expect() { [[ "$2" == "$3" ]] || { echo "FAIL: $1: got '$2', want '$3'" >&2; exit 1; }; echo "ok: $1"; }
 
 if "${HERE}/deploy.sh" not-a-digest; then echo "FAIL: invalid digest accepted" >&2; exit 1; fi
-if "${HERE}/deploy.sh" "${GOOD1}"; then echo "FAIL: first deploy without web digest accepted" >&2; exit 1; fi
+if "${HERE}/deploy.sh" "${GOOD1}" not-a-digest; then echo "FAIL: invalid web digest accepted" >&2; exit 1; fi
 echo "ok: invalid arguments rejected"
 
 "${HERE}/deploy.sh" "${GOOD1}" "${WEB}"

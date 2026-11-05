@@ -35,17 +35,28 @@ type Config struct {
 	StaffPINLockout         time.Duration
 
 	// Email (owner decision E5): "log" writes emails to the server log (dev/test only),
-	// "smtp" delivers through SMTP (Gmail app password for dev/demo, Hostinger for production).
+	// "smtp" delivers through SMTP (Gmail app password for dev/demo, Hostinger for production),
+	// "disabled" turns off email delivery outside production.
 	EmailDriver string
-	// SMSDriver is log (development/test only: OTPs are secrets) or disabled (V4, V5).
-	SMSDriver      string
-	SMTPHost       string
-	SMTPPort       int
-	SMTPUsername   string
-	SMTPPassword   string
-	SMTPTLSMode    string // "starttls" (587) or "implicit" (465)
-	EmailFromEmail string
-	EmailFromName  string
+	// SMSDriver is "log" (development/test only: OTPs are secrets), "email" (free SMS-to-Email SMTP bridge),
+	// "webhook" (HTTP POST gateway for Telegram/WhatsApp/Fonnte), or "disabled" (V4, V5).
+	SMSDriver       string
+	SMSEmailTo      string
+	SMSWebhookURL   string
+	SMSWebhookToken string
+	// WhatsApp Cloud API receipts (decision W9); off until the access token and phone number id are set.
+	WhatsAppAPIVersion       string
+	WhatsAppPhoneNumberID    string
+	WhatsAppAccessToken      string
+	WhatsAppReceiptTemplate  string
+	WhatsAppTemplateLanguage string
+	SMTPHost                 string
+	SMTPPort                 int
+	SMTPUsername             string
+	SMTPPassword             string
+	SMTPTLSMode              string // "starttls" (587) or "implicit" (465)
+	EmailFromEmail           string
+	EmailFromName            string
 	// AppPublicURL is the frontend origin used in links inside emails.
 	AppPublicURL string
 
@@ -153,48 +164,56 @@ func LoadConfig() (*Config, error) {
 	}
 
 	cfg := &Config{
-		AppEnv:                  appEnv,
-		Port:                    getEnv("PORT", "8080"),
-		MetricsAddr:             getEnv("METRICS_ADDR", "127.0.0.1:9091"),
-		FrontendURL:             frontendURL,
-		AllowedOrigins:          allowedOrigins,
-		TrustedProxies:          splitCSV(getEnv("TRUSTED_PROXIES", "")),
-		DatabaseURL:             getEnv("DATABASE_URL", ""),
-		DatabaseMigrationURL:    getEnv("DATABASE_MIGRATION_URL", getEnv("DATABASE_URL", "")),
-		DBAppUser:               getEnv("DB_APP_USER", "mycaffe_app"),
-		DBAppPassword:           getEnv("DB_APP_PASSWORD", ""),
-		JWTSecret:               getEnv("JWT_SECRET_KEY", ""),
-		JWTExpiryHours:          jwtHours,
-		StaffAccessTokenTTL:     staffAccessTTL,
-		StaffRefreshTokenTTL:    staffRefreshTTL,
-		StaffSessionIdleTimeout: staffIdle,
-		StaffMaxSessions:        staffMaxSessions,
-		StaffPINMaxFailures:     staffPINMaxFailures,
-		StaffPINLockout:         staffPINLockout,
-		EmailDriver:             emailDriver,
-		SMSDriver:               smsDriver,
-		SMTPHost:                getEnv("SMTP_HOST", ""),
-		SMTPPort:                smtpPort,
-		SMTPUsername:            getEnv("SMTP_USERNAME", ""),
-		SMTPPassword:            getEnv("SMTP_PASSWORD", ""),
-		SMTPTLSMode:             smtpTLSMode,
-		EmailFromEmail:          getEnv("EMAIL_FROM_ADDRESS", getEnv("SMTP_USERNAME", "")),
-		EmailFromName:           getEnv("EMAIL_FROM_NAME", "MyCaffe"),
-		AppPublicURL:            strings.TrimRight(getEnv("APP_PUBLIC_URL", frontendURL), "/"),
-		DefaultStoreSlug:        strings.ToLower(strings.TrimSpace(getEnv("DEFAULT_STORE_SLUG", ""))),
-		MidtransMerchantID:      getEnv("MIDTRANS_MERCHANT_ID", ""),
-		MidtransServerKey:       getEnv("MIDTRANS_SERVER_KEY", ""),
-		MidtransClientKey:       getEnv("MIDTRANS_CLIENT_KEY", ""),
-		MidtransIsProduction:    isProd,
-		StorageDriver:           getEnv("STORAGE_DRIVER", "local"),
-		R2AccountID:             getEnv("R2_ACCOUNT_ID", ""),
-		R2AccessKeyID:           getEnv("R2_ACCESS_KEY_ID", ""),
-		R2SecretAccessKey:       getEnv("R2_SECRET_ACCESS_KEY", ""),
-		R2BucketName:            getEnv("R2_BUCKET_NAME", ""),
-		R2PrivateBucketName:     getEnv("R2_PRIVATE_BUCKET_NAME", ""),
-		R2PublicURL:             getEnv("R2_PUBLIC_URL", ""),
-		SentryDSN:               getEnv("SENTRY_DSN", ""),
-		SentryEnvironment:       getEnv("SENTRY_ENVIRONMENT", "development"),
+		AppEnv:                   appEnv,
+		Port:                     getEnv("PORT", "8080"),
+		MetricsAddr:              getEnv("METRICS_ADDR", "127.0.0.1:9091"),
+		FrontendURL:              frontendURL,
+		AllowedOrigins:           allowedOrigins,
+		TrustedProxies:           splitCSV(getEnv("TRUSTED_PROXIES", "")),
+		DatabaseURL:              getEnv("DATABASE_URL", ""),
+		DatabaseMigrationURL:     getEnv("DATABASE_MIGRATION_URL", getEnv("DATABASE_URL", "")),
+		DBAppUser:                getEnv("DB_APP_USER", "mycaffe_app"),
+		DBAppPassword:            getEnv("DB_APP_PASSWORD", ""),
+		JWTSecret:                getEnv("JWT_SECRET_KEY", ""),
+		JWTExpiryHours:           jwtHours,
+		StaffAccessTokenTTL:      staffAccessTTL,
+		StaffRefreshTokenTTL:     staffRefreshTTL,
+		StaffSessionIdleTimeout:  staffIdle,
+		StaffMaxSessions:         staffMaxSessions,
+		StaffPINMaxFailures:      staffPINMaxFailures,
+		StaffPINLockout:          staffPINLockout,
+		EmailDriver:              emailDriver,
+		SMSDriver:                smsDriver,
+		SMSEmailTo:               strings.TrimSpace(getEnv("SMS_EMAIL_TO", getEnv("EMAIL_FROM_ADDRESS", getEnv("SMTP_USERNAME", "")))),
+		SMSWebhookURL:            strings.TrimSpace(getEnv("SMS_WEBHOOK_URL", "")),
+		SMSWebhookToken:          strings.TrimSpace(getEnv("SMS_WEBHOOK_TOKEN", "")),
+		WhatsAppAPIVersion:       strings.TrimSpace(getEnv("WHATSAPP_API_VERSION", "v21.0")),
+		WhatsAppPhoneNumberID:    strings.TrimSpace(getEnv("WHATSAPP_PHONE_NUMBER_ID", "")),
+		WhatsAppAccessToken:      strings.TrimSpace(getEnv("WHATSAPP_ACCESS_TOKEN", "")),
+		WhatsAppReceiptTemplate:  strings.TrimSpace(getEnv("WHATSAPP_RECEIPT_TEMPLATE", "struk_digital")),
+		WhatsAppTemplateLanguage: strings.TrimSpace(getEnv("WHATSAPP_TEMPLATE_LANGUAGE", "id")),
+		SMTPHost:                 getEnv("SMTP_HOST", ""),
+		SMTPPort:                 smtpPort,
+		SMTPUsername:             getEnv("SMTP_USERNAME", ""),
+		SMTPPassword:             getEnv("SMTP_PASSWORD", ""),
+		SMTPTLSMode:              smtpTLSMode,
+		EmailFromEmail:           getEnv("EMAIL_FROM_ADDRESS", getEnv("SMTP_USERNAME", "")),
+		EmailFromName:            getEnv("EMAIL_FROM_NAME", "MyCaffe"),
+		AppPublicURL:             strings.TrimRight(getEnv("APP_PUBLIC_URL", frontendURL), "/"),
+		DefaultStoreSlug:         strings.ToLower(strings.TrimSpace(getEnv("DEFAULT_STORE_SLUG", ""))),
+		MidtransMerchantID:       getEnv("MIDTRANS_MERCHANT_ID", ""),
+		MidtransServerKey:        getEnv("MIDTRANS_SERVER_KEY", ""),
+		MidtransClientKey:        getEnv("MIDTRANS_CLIENT_KEY", ""),
+		MidtransIsProduction:     isProd,
+		StorageDriver:            getEnv("STORAGE_DRIVER", "local"),
+		R2AccountID:              getEnv("R2_ACCOUNT_ID", ""),
+		R2AccessKeyID:            getEnv("R2_ACCESS_KEY_ID", ""),
+		R2SecretAccessKey:        getEnv("R2_SECRET_ACCESS_KEY", ""),
+		R2BucketName:             getEnv("R2_BUCKET_NAME", ""),
+		R2PrivateBucketName:      getEnv("R2_PRIVATE_BUCKET_NAME", ""),
+		R2PublicURL:              getEnv("R2_PUBLIC_URL", ""),
+		SentryDSN:                getEnv("SENTRY_DSN", ""),
+		SentryEnvironment:        getEnv("SENTRY_ENVIRONMENT", appEnv),
 	}
 
 	if err := ValidateConfig(cfg); err != nil {
@@ -354,8 +373,29 @@ func validateSMSConfig(cfg *Config) error {
 			return fmt.Errorf("[SECURITY FAIL-CLOSED] SMS_DRIVER=log would print OTP codes; not allowed in %s", cfg.AppEnv)
 		}
 		return nil
+	case "email":
+		if cfg.EmailDriver != "smtp" && cfg.EmailDriver != "log" {
+			return errors.New("SMS_DRIVER=email requires EMAIL_DRIVER=smtp (or EMAIL_DRIVER=log in development/test)")
+		}
+		recipient := strings.TrimSpace(cfg.SMSEmailTo)
+		if recipient == "" {
+			recipient = strings.TrimSpace(cfg.EmailFromEmail)
+		}
+		if recipient == "" || containsPlaceholderPattern(recipient) {
+			return errors.New("SMS_DRIVER=email requires a valid non-placeholder SMS_EMAIL_TO or EMAIL_FROM_ADDRESS")
+		}
+		return nil
+	case "webhook":
+		u, err := url.Parse(strings.TrimSpace(cfg.SMSWebhookURL))
+		if err != nil || u.Scheme == "" || u.Host == "" {
+			return errors.New("SMS_DRIVER=webhook requires a valid absolute SMS_WEBHOOK_URL")
+		}
+		if cfg.AppEnv == "production" && u.Scheme != "https" {
+			return errors.New("[SECURITY FAIL-CLOSED] production SMS_WEBHOOK_URL must use https")
+		}
+		return nil
 	}
-	return fmt.Errorf("invalid SMS_DRIVER %q: allowed values are log, disabled", cfg.SMSDriver)
+	return fmt.Errorf("invalid SMS_DRIVER %q: allowed values are log, email, webhook, disabled", cfg.SMSDriver)
 }
 
 func containsPlaceholderPattern(val string) bool {
@@ -418,9 +458,14 @@ func validateEmailConfig(cfg *Config) error {
 			return errors.New("[SECURITY FAIL-CLOSED] EMAIL_DRIVER=log is not allowed in production")
 		}
 		return nil
+	case "disabled":
+		if cfg.AppEnv == "production" {
+			return errors.New("[SECURITY FAIL-CLOSED] EMAIL_DRIVER=disabled is not allowed in production")
+		}
+		return nil
 	case "smtp":
 	default:
-		return fmt.Errorf("invalid EMAIL_DRIVER %q: allowed values are log, smtp", cfg.EmailDriver)
+		return fmt.Errorf("invalid EMAIL_DRIVER %q: allowed values are log, smtp, disabled", cfg.EmailDriver)
 	}
 	if cfg.SMTPHost == "" || cfg.SMTPUsername == "" || cfg.SMTPPassword == "" || cfg.EmailFromEmail == "" {
 		return errors.New("EMAIL_DRIVER=smtp requires SMTP_HOST, SMTP_USERNAME, SMTP_PASSWORD and EMAIL_FROM_ADDRESS (or set EMAIL_DRIVER=log outside production)")

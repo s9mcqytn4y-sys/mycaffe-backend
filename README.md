@@ -10,8 +10,8 @@ Backend RESTful API dan Realtime Hub untuk platform white-label multi-tenant QR 
 - **Infrastructure**: Docker Compose (`docker-compose.yml` & `docker-compose.prod.yml`) & Nginx Reverse Proxy (Hostinger KVM 2 / Ubuntu 24.04 LTS)
 - **Payment Gateway**: Midtrans Core API Custom UI (`qris`, `bank_transfer`, `gopay`, `shopeepay`, `card`, `cstore`) + Cashier Offline (`cash`, `static_qris`, `edc`)
 - **Realtime Hub**: Gorilla WebSocket (`internal/realtime`)
-- **Cloudflare R2 Storage**: Triple-Bucket (`mycaffe-media` untuk CDN gambar katalog publik, `mycaffe-private-media` untuk presigned GET 15m QRIS statis/dokumen, & `mycaffe-backups` untuk backup `pg_dump` terenkripsi GPG AES256+SHA512)
-- **Monitoring & Error Tracking**: Sentry Go SDK
+- **Cloudflare R2 Storage**: Triple-Bucket (`mycaffe-media` di `https://cdn.abbdullaziz.online` untuk CDN gambar katalog publik, `mycaffe-private-media` untuk presigned GET 15m QRIS statis/dokumen, & `mycaffe-backups` untuk backup `pg_dump` terenkripsi GPG AES256+SHA512)
+- **Monitoring & Error Tracking**: Sentry Go SDK (dengan middleware panic/5xx recovery & PII scrubbing) + Prometheus `/metrics` (`:9091`) & Grafana Alloy
 
 ---
 
@@ -21,14 +21,14 @@ Backend RESTful API dan Realtime Hub untuk platform white-label multi-tenant QR 
 3. **Order Idempotency & Atomic Stock Locking**: Pembuatan pesanan di `OrderService` mengunci baris stok produk dan opsi modifier secara terurut (`SELECT ... ORDER BY id ASC FOR UPDATE`), memvalidasi `idempotency_key` beserta `orders.request_hash` (SHA-256), mengalokasikan nomor urut harian (`store_daily_sequences`), dan menulis event ke `outbox_events` dalam satu transaksi ACID.
 4. **Webhook Verification**: Webhook Midtrans diverifikasi menggunakan signature key resmi SHA-512:
    $$\text{SHA512}(\text{order\_id} + \text{status\_code} + \text{gross\_amount} + \text{ServerKey})$$
-5. **Fail-Closed Operations**: Startup server ditolak (`log.Fatalf`) bila `DATABASE_URL` kosong di `staging`/`production`, dan bila secret masih placeholder atau lemah di `production` (di `staging` belum diperiksa, lihat DemoReadinessChecklist L-2). Endpoint publik (QR tamu, tracker, struk) memakai token bertanda tangan dan resolver `SECURITY DEFINER` yang sempit; fitur tanpa konfigurasi (mis. R2) menjawab `503`.
+5. **Fail-Closed Operations**: Startup server ditolak (`log.Fatalf`) bila `DATABASE_URL` kosong atau bila `JWT_SECRET_KEY` lemah/placeholder di `staging` maupun `production` (L-1..L-3 tertutup). Endpoint publik (QR tamu, tracker, struk) memakai token bertanda tangan dan resolver `SECURITY DEFINER` yang sempit; fitur tanpa konfigurasi (mis. R2/SMS) menjawab `503`.
 6. **Zero In-Place Coding on Production VPS**: Dilarang mengedit kode sumber, mengubah migrasi SQL, atau menjalankan `go build` langsung di server VPS produksi. Seluruh perubahan wajib melalui alur `feature/*` -> PR `staging` (CI hijau) -> PR `main` -> penarikan image kontainer bertanda versi dari `ghcr.io`.
 
 ---
 
 ## Feature Status
 
-Rilis terakhir: **v0.6.0** (2026-11-04). Status per modul (empat kategori `AGENTS.md`) dipelihara di
+Status saat ini: **v0.8 (PR 8.5b — 29 migrasi PostgreSQL 18, 42 tabel)**. Status per modul (empat kategori `AGENTS.md`) dipelihara di
 satu tempat saja, yaitu [docs/Architecture/Roadmap.md](docs/Architecture/Roadmap.md). Kontrak untuk
 frontend ada di
 [docs/Architecture/FrontendIntegrationContract.md](docs/Architecture/FrontendIntegrationContract.md).
@@ -67,9 +67,9 @@ Prasyarat: Go 1.27.3, Docker Desktop. Semua perintah ada di `scripts/dev.ps1`
 | Auth, sesi & RBAC | [docs/Architecture/Adr003StaffAuthenticationSessionAndRbac.md](docs/Architecture/Adr003StaffAuthenticationSessionAndRbac.md) |
 | Modernisasi Skema Menu & Modifier (ADR-004) | [docs/Architecture/Adr004CatalogSchemaModernization.md](docs/Architecture/Adr004CatalogSchemaModernization.md) |
 | Rencana Split Bill Iterasi 4c-2 (arsip) | [docs/Archive/Iteration4c2SplitBillPlan.md](docs/Archive/Iteration4c2SplitBillPlan.md) |
-| Topologi VPS | [docs/Architecture/Adr002SingleVpsDockerTopology.md](docs/Architecture/Adr002SingleVpsDockerTopology.md) |
+| Topologi VPS & Skalabilitas Data (ADR-002, ADR-008) | [docs/Architecture/Adr002SingleVpsDockerTopology.md](docs/Architecture/Adr002SingleVpsDockerTopology.md), [docs/Architecture/Adr008DataPlatformAndScaling.md](docs/Architecture/Adr008DataPlatformAndScaling.md) |
 | Kontrak database & ledger pembayaran | [Phase01DatabaseContract.md](docs/Architecture/Phase01DatabaseContract.md), [Phase01PaymentLedgerSpec.md](docs/Architecture/Phase01PaymentLedgerSpec.md) |
-| Email, demo, lingkungan Windows | [docs/Setup/Email.md](docs/Setup/Email.md), [docs/Setup/DemoStagingEnvironment.md](docs/Setup/DemoStagingEnvironment.md), [docs/Setup/WindowsDevEnvironment.md](docs/Setup/WindowsDevEnvironment.md) |
+| Email, SMS/OTP, Demo (`abbdullaziz.online`), Monitoring, Onboarding | [docs/Setup/Email.md](docs/Setup/Email.md), [docs/Setup/Sms.md](docs/Setup/Sms.md), [docs/Setup/DemoStagingEnvironment.md](docs/Setup/DemoStagingEnvironment.md), [docs/Setup/Monitoring.md](docs/Setup/Monitoring.md), [docs/Setup/FirstClientOnboardingRunbook.md](docs/Setup/FirstClientOnboardingRunbook.md) |
 | Kontrak API & standar CRUD/error | [docs/Api/OpenApi.yaml](docs/Api/OpenApi.yaml), [docs/Architecture/ApiConventions.md](docs/Architecture/ApiConventions.md) |
 
 ---

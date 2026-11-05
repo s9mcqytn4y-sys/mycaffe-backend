@@ -5,4 +5,5 @@ set -euo pipefail
 set -a
 . "${DEPLOY_STATE_DIR:-/var/lib/mycaffe/deploy}/current.env"
 set +a
-exec docker compose -f "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/deploy/docker/docker-compose.prod.yml" "$@"
+[[ -n "${WEB_IMAGE_DIGEST:-}" ]] && export COMPOSE_PROFILES=web
+exec docker compose -f "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/deploy/docker/docker-compose.prod.yml" ${DEPLOY_COMPOSE_OVERRIDE:+-f "${DEPLOY_COMPOSE_OVERRIDE}"} "$@"

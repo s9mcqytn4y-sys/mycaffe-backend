@@ -21,8 +21,8 @@ Cloudflare, so there is no Certbot and no certificate volume. The firewall and p
 On the VPS, as user `mycaffe`, from `/opt/mycaffe` (the released tag's `deploy/` and `scripts/`, see [BackupAndRestore.md](BackupAndRestore.md) §2):
 
 ```bash
-scripts/deploy/deploy.sh sha256:<api digest>                      # web keeps its running digest
-scripts/deploy/deploy.sh sha256:<api digest> sha256:<web digest>  # first deploy, or a new web image
+scripts/deploy/deploy.sh sha256:<api digest>                      # web keeps its running digest; API-only while none was given
+scripts/deploy/deploy.sh sha256:<api digest> sha256:<web digest>  # adds or updates the optional web frontend (profile `web`, W3)
 ```
 
 What it does, in order:
@@ -87,3 +87,15 @@ deployed digest from `/var/lib/mycaffe/deploy/current.env`.
 - Only `api` health decides success. A broken `web` image is not rolled back automatically (it has no healthcheck yet); fix forward or run `deploy.sh rollback`.
 - `postgres`, `nginx`, `certbot` and `alloy` images are not managed by `deploy.sh`.
 - Tested in CI with a local registry (`scripts/deploy/test_deploy_rollback.sh`). The first run on a real VPS still needs a manual check.
+
+## 8. Demo host (WSL Ubuntu, decision W2)
+
+The public demo runs the same images and scripts as production on WSL Ubuntu 24.04, provisioned with
+[OperationsRunbook.md](OperationsRunbook.md) §1 steps 1–3 (user `mycaffe`, systemd, Docker Engine, ufw).
+Differences, all on the host and none in the images:
+
+- `/etc/profile.d/mycaffe-demo.sh` exports `DEPLOY_COMPOSE_OVERRIDE=/opt/mycaffe/deploy/docker/docker-compose.demo-vps.yml`
+  (staging config, Midtrans sandbox, no Grafana agent) and `DEPLOY_SKIP_BACKUP=true` until the demo has an R2 backup bucket.
+- `/opt/mycaffe/deploy/docker/.env` links to `/etc/mycaffe/prod.env` (mode 600): fresh database passwords and JWT key,
+  provider keys copied from the owner's `.env.demo`.
+- Ingress is the `mycaffe-demo` Named Tunnel: public hostname `demo.abbdullaziz.online` → `http://nginx:80`.

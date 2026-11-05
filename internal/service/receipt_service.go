@@ -67,13 +67,15 @@ type ReceiptStore struct {
 
 type ReceiptLine struct {
 	itemID    uuid.UUID
-	Name      string   `json:"name"`
-	Variant   string   `json:"variant,omitempty"`
-	Options   []string `json:"options,omitempty"`
-	Notes     string   `json:"notes,omitempty"`
-	Quantity  int      `json:"quantity"`
-	UnitPrice int64    `json:"unit_price"`
-	Amount    int64    `json:"amount"`
+	station   string     // prep station snapshot, used by print routing
+	roundID   *uuid.UUID // open-tab round of the line, used by print routing
+	Name      string     `json:"name"`
+	Variant   string     `json:"variant,omitempty"`
+	Options   []string   `json:"options,omitempty"`
+	Notes     string     `json:"notes,omitempty"`
+	Quantity  int        `json:"quantity"`
+	UnitPrice int64      `json:"unit_price"`
+	Amount    int64      `json:"amount"`
 }
 
 type ReceiptPayment struct {
@@ -126,27 +128,33 @@ func (s *ReceiptService) Build(ctx context.Context, storeID, orderID uuid.UUID, 
 
 // IssueLink creates a 90-day digital receipt token for an order.
 func (s *ReceiptService) IssueLink(ctx context.Context, actor *AuthenticatedStaff, orderID uuid.UUID) (*ReceiptLink, error) {
+	var link *ReceiptLink
+	userID := actor.Staff.UserID
+	err := database.WithTenantTx(ctx, s.db, actor.Staff.Store.ID, func(tx *sqlx.Tx) error {
+		var err error
+		link, err = s.issueLinkTx(ctx, tx, actor.Staff.Store.ID, orderID, &userID)
+		return err
+	})
+	return link, err
+}
+
+// issueLinkTx creates the token inside the caller's transaction; createdBy is nil for a guest.
+func (s *ReceiptService) issueLinkTx(ctx context.Context, tx *sqlx.Tx, storeID, orderID uuid.UUID, createdBy *uuid.UUID) (*ReceiptLink, error) {
 	secret, hash, err := randomToken()
 	if err != nil {
 		return nil, err
 	}
-	storeID, id, now := actor.Staff.Store.ID, uuid.New(), s.nowFunc().UTC()
+	id, now := uuid.New(), s.nowFunc().UTC()
 	expires := now.Add(receiptLinkTTL)
-	err = database.WithTenantTx(ctx, s.db, storeID, func(tx *sqlx.Tx) error {
-		res, err := tx.ExecContext(ctx, `
-			INSERT INTO receipt_tokens (id, store_id, order_id, token_hash, created_by, created_at, expires_at)
-			SELECT $1, $2, o.id, $4, $5, $6, $7 FROM orders o WHERE o.store_id = $2 AND o.id = $3`,
-			id, storeID, orderID, hash, actor.Staff.UserID, now, expires)
-		if err != nil {
-			return fmt.Errorf("failed to issue receipt link: %w", err)
-		}
-		if n, _ := res.RowsAffected(); n == 0 {
-			return ErrReceiptNotFound
-		}
-		return nil
-	})
+	res, err := tx.ExecContext(ctx, `
+		INSERT INTO receipt_tokens (id, store_id, order_id, token_hash, created_by, created_at, expires_at)
+		SELECT $1, $2, o.id, $4, $5, $6, $7 FROM orders o WHERE o.store_id = $2 AND o.id = $3`,
+		id, storeID, orderID, hash, createdBy, now, expires)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to issue receipt link: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return nil, ErrReceiptNotFound
 	}
 	token := storeID.String() + "." + id.String() + "." + secret
 	return &ReceiptLink{Token: token, URL: s.LinkURL(token), ExpiresAt: expires}, nil
@@ -347,17 +355,19 @@ func splitLines(lines []ReceiptLine, qty map[uuid.UUID]int) []ReceiptLine {
 
 func receiptLinesTx(ctx context.Context, tx *sqlx.Tx, storeID, orderID uuid.UUID) ([]ReceiptLine, error) {
 	var items []struct {
-		ID        uuid.UUID `db:"id"`
-		Name      string    `db:"snapshot_name"`
-		Variant   string    `db:"snapshot_variant_name"`
-		Notes     string    `db:"notes"`
-		Quantity  int       `db:"quantity"`
-		UnitPrice int64     `db:"snapshot_price"`
-		Amount    int64     `db:"subtotal_amount"`
+		ID        uuid.UUID  `db:"id"`
+		Name      string     `db:"snapshot_name"`
+		Variant   string     `db:"snapshot_variant_name"`
+		Notes     string     `db:"notes"`
+		Quantity  int        `db:"quantity"`
+		UnitPrice int64      `db:"snapshot_price"`
+		Amount    int64      `db:"subtotal_amount"`
+		Station   string     `db:"station"`
+		RoundID   *uuid.UUID `db:"round_id"`
 	}
 	if err := tx.SelectContext(ctx, &items, `
 		SELECT id, snapshot_name, COALESCE(snapshot_variant_name, '') AS snapshot_variant_name, COALESCE(notes, '') AS notes,
-			quantity, snapshot_price, subtotal_amount
+			quantity, snapshot_price, subtotal_amount, COALESCE(snapshot_prep_station, 'none') AS station, round_id
 		FROM order_items WHERE store_id = $1 AND order_id = $2 ORDER BY created_at, id`, storeID, orderID); err != nil {
 		return nil, fmt.Errorf("failed to load receipt lines: %w", err)
 	}
@@ -387,7 +397,7 @@ func receiptLinesTx(ctx context.Context, tx *sqlx.Tx, storeID, orderID uuid.UUID
 	}
 	lines := make([]ReceiptLine, len(items))
 	for i, it := range items {
-		lines[i] = ReceiptLine{itemID: it.ID, Name: it.Name, Variant: it.Variant, Options: byItem[it.ID], Notes: it.Notes,
+		lines[i] = ReceiptLine{itemID: it.ID, station: it.Station, roundID: it.RoundID, Name: it.Name, Variant: it.Variant, Options: byItem[it.ID], Notes: it.Notes,
 			Quantity: it.Quantity, UnitPrice: it.UnitPrice, Amount: it.Amount}
 	}
 	return lines, nil

@@ -355,6 +355,36 @@ BEGIN
     IF has_table_privilege('mycaffe_app', 'public.kds_tickets', 'DELETE') THEN
         RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may DELETE kds_tickets!';
     END IF;
+    -- 10F-18. Receipt deliveries (migration 000037): RLS on, append-only for the app role.
+    IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.receipt_deliveries'::regclass) THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: receipt_deliveries does not have row-level security enabled!';
+    END IF;
+    IF has_table_privilege('mycaffe_app', 'public.receipt_deliveries', 'DELETE')
+       OR has_table_privilege('mycaffe_app', 'public.receipt_deliveries', 'UPDATE') THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may change receipt_deliveries!';
+    END IF;
+    -- 10F-17. Printers and print jobs (migration 000036): RLS on, never deleted by the app role.
+    IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.printers'::regclass)
+       OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.print_jobs'::regclass) THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: printers/print_jobs do not have row-level security enabled!';
+    END IF;
+    IF has_table_privilege('mycaffe_app', 'public.printers', 'DELETE') OR has_table_privilege('mycaffe_app', 'public.print_jobs', 'DELETE') THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may DELETE printers/print_jobs!';
+    END IF;
+    -- 10F-16. Queue display tokens (migration 000035): RLS on, never deleted by the app role.
+    IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.display_tokens'::regclass) THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: display_tokens does not have row-level security enabled!';
+    END IF;
+    IF has_table_privilege('mycaffe_app', 'public.display_tokens', 'DELETE') THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may DELETE display_tokens!';
+    END IF;
+    -- 10F-15. Table merge links (migration 000033): RLS on, never deleted by the app role.
+    IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.table_session_links'::regclass) THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: table_session_links does not have row-level security enabled!';
+    END IF;
+    IF has_table_privilege('mycaffe_app', 'public.table_session_links', 'DELETE') THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may DELETE table_session_links!';
+    END IF;
     -- 10F-14. Staff badges (migration 000032): RLS on, never deleted by the app role.
     IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.staff_badges'::regclass) THEN
         RAISE EXCEPTION 'SECURITY FAILURE: staff_badges does not have row-level security enabled!';
@@ -447,6 +477,16 @@ BEGIN
         WHERE p.proname = 'list_stores_with_due_email' AND a.grantee = 0 AND a.privilege_type = 'EXECUTE'
     ) THEN
         RAISE EXCEPTION 'SECURITY FAILURE: list_stores_with_due_email is executable by PUBLIC!';
+    END IF;
+    -- Table timer worker discovery (migration 000034): app role only, never PUBLIC.
+    IF NOT has_function_privilege('mycaffe_app', 'public.list_stores_with_due_table_timers()', 'EXECUTE') THEN
+        RAISE EXCEPTION 'list_stores_with_due_table_timers is not executable by mycaffe_app';
+    END IF;
+    IF EXISTS (
+        SELECT 1 FROM pg_proc p, aclexplode(p.proacl) a
+        WHERE p.proname = 'list_stores_with_due_table_timers' AND a.grantee = 0 AND a.privilege_type = 'EXECUTE'
+    ) THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: list_stores_with_due_table_timers is executable by PUBLIC!';
     END IF;
 
     RAISE NOTICE 'SUCCESS: Row-Level Security (RLS) on stores/orders/payments/notifications and DELETE privilege revocation verified.';

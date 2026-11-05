@@ -95,7 +95,18 @@ func TestStaffLifecycleIntegration(t *testing.T) {
 	}
 	deliver := func(t *testing.T) {
 		t.Helper()
-		if _, err := emailSvc.DeliverDue(ctx, 100); err != nil {
+		// next_attempt_at comes from the database clock and the worker compares it with the Go clock; a
+		// few milliseconds of Docker VM skew leaves mail inserted just now "not yet due". Shift only
+		// mail due within that window, never retries scheduled minutes ahead.
+		if err := database.WithTenantTx(ctx, db, storeAID, func(tx *sqlx.Tx) error {
+			_, err := tx.ExecContext(ctx, `UPDATE email_outbox SET next_attempt_at = next_attempt_at - INTERVAL '2 seconds'
+				WHERE store_id = $1 AND status = 'pending' AND next_attempt_at <= NOW() + INTERVAL '2 seconds'`, storeAID)
+			return err
+		}); err != nil {
+			t.Fatalf("align due mail: %v", err)
+		}
+		// Claims are oldest first; other tests leave more than one batch of due mail in the shared store.
+		if _, err := emailSvc.DeliverDue(ctx, 100000); err != nil {
 			t.Fatalf("deliver: %v", err)
 		}
 	}

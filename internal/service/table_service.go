@@ -7,12 +7,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/domain"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/database"
+	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/metrics"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/rbac"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/repository/postgres"
 )
@@ -65,23 +68,41 @@ func newQRToken() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
-// ListTables returns the table board. Lazy auto-close (QR7) runs first, so statuses are current.
-// The QR token is only shown to staff who may manage QR codes.
-func (s *TableService) ListTables(ctx context.Context, actor *AuthenticatedStaff) ([]domain.TableBoardEntry, error) {
+// ListTables returns the table board, optionally one area (tables.section, case-insensitive). Lazy
+// auto-close (QR7) runs first, so statuses are current. The QR token is only shown to staff who may
+// manage QR codes.
+func (s *TableService) ListTables(ctx context.Context, actor *AuthenticatedStaff, section string) ([]domain.TableBoardEntry, error) {
 	if actor == nil {
 		return nil, ErrInvalidSession
 	}
 	var board []domain.TableBoardEntry
+	var settings domain.StoreSettings
 	err := s.tx(ctx, actor, func(tx *sqlx.Tx) error {
-		if err := s.closeSettled(ctx, tx, actor.Staff.Store.ID); err != nil {
+		var err error
+		if settings, err = s.settings.GetStoreSettings(ctx, tx, actor.Staff.Store.ID); err != nil {
 			return err
 		}
-		var err error
+		if err := s.repo.CloseSettledSessions(ctx, tx, actor.Staff.Store.ID, settings.TableIdleCloseMinutes, s.nowFunc().UTC()); err != nil {
+			return err
+		}
 		board, err = s.repo.ListBoard(ctx, tx, actor.Staff.Store.ID)
 		return err
 	})
 	if err != nil {
 		return nil, err
+	}
+	now := s.nowFunc().UTC()
+	for i := range board {
+		board[i].TimerState = board[i].Session.TimerState(now, settings.TableTimerWarningMinutes)
+	}
+	if section = strings.TrimSpace(section); section != "" {
+		filtered := board[:0]
+		for _, e := range board {
+			if strings.EqualFold(e.Section, section) {
+				filtered = append(filtered, e)
+			}
+		}
+		board = filtered
 	}
 	if !actor.Can(rbac.TableQRManage) {
 		for i := range board {
@@ -380,4 +401,248 @@ func mapTableError(err error) error {
 		return &ConflictError{Message: "data duplikat"}
 	}
 	return err
+}
+
+// Move, merge and split tables (v0.9 PR 9.1, decision W5).
+
+var (
+	ErrTableSessionNotOpen = errors.New("table session is not open")
+	ErrTableNotMerged      = errors.New("table is not merged into this session")
+)
+
+// MoveSession seats the whole session at another free table. Tables merged into it stay merged.
+func (s *TableService) MoveSession(ctx context.Context, actor *AuthenticatedStaff, sessionID, toTableID uuid.UUID) (*domain.TableSession, error) {
+	if !actor.Can(rbac.TabManage) {
+		return nil, ErrForbidden
+	}
+	var session *domain.TableSession
+	err := s.tx(ctx, actor, func(tx *sqlx.Tx) error {
+		storeID := actor.Staff.Store.ID
+		if err := s.closeSettled(ctx, tx, storeID); err != nil {
+			return err
+		}
+		var err error
+		if session, err = s.openSession(ctx, tx, storeID, sessionID); err != nil {
+			return err
+		}
+		if session.TableID == toTableID {
+			return &ValidationError{Fields: map[string]string{"to_table_id": "meja tujuan sama dengan meja sekarang"}}
+		}
+		from, err := s.repo.GetTable(ctx, tx, storeID, session.TableID, false)
+		if err != nil {
+			return err
+		}
+		to, err := s.repo.GetTable(ctx, tx, storeID, toTableID, true)
+		if err != nil {
+			return err
+		}
+		if !to.IsActive {
+			return ErrTableInactive
+		}
+		// The target must be free: no own session and not merged into another one.
+		if occupied, err := s.repo.GetOpenSessionForUpdate(ctx, tx, storeID, to.ID); err != nil || occupied != nil {
+			if err == nil {
+				err = ErrTableSessionOpen
+			}
+			return err
+		}
+		if err := s.repo.MoveSession(ctx, tx, storeID, session.ID, from, to); err != nil {
+			return err
+		}
+		session.TableID = to.ID
+		meta := map[string]any{"session_id": session.ID, "from_table_id": from.ID, "to_table_id": to.ID,
+			"from_table_number": from.TableNumber, "to_table_number": to.TableNumber}
+		return s.recordFloorChange(ctx, tx, actor, "TABLE_MOVE", "table.moved",
+			fmt.Sprintf("Meja %s dipindah ke meja %s", from.TableNumber, to.TableNumber), session.ID, meta)
+	})
+	return session, mapTableError(err)
+}
+
+// MergeSession folds the other session into this one: one bill, both tables' QR codes order into it.
+func (s *TableService) MergeSession(ctx context.Context, actor *AuthenticatedStaff, primaryID, otherID uuid.UUID) (*domain.TableSession, error) {
+	if !actor.Can(rbac.TabManage) {
+		return nil, ErrForbidden
+	}
+	if primaryID == otherID {
+		return nil, &ValidationError{Fields: map[string]string{"session_id": "tidak bisa menggabungkan sesi dengan dirinya sendiri"}}
+	}
+	var primary *domain.TableSession
+	err := s.tx(ctx, actor, func(tx *sqlx.Tx) error {
+		storeID := actor.Staff.Store.ID
+		if err := s.closeSettled(ctx, tx, storeID); err != nil {
+			return err
+		}
+		// Lock both sessions in UUID order so two cashiers merging the same pair cannot deadlock.
+		first, second := primaryID, otherID
+		if second.String() < first.String() {
+			first, second = second, first
+		}
+		locked := map[uuid.UUID]*domain.TableSession{}
+		for _, id := range []uuid.UUID{first, second} {
+			session, err := s.openSession(ctx, tx, storeID, id)
+			if err != nil {
+				return err
+			}
+			locked[id] = session
+		}
+		primary = locked[primaryID]
+		other := locked[otherID]
+		now, userID := s.nowFunc().UTC(), actor.Staff.UserID
+		if err := s.repo.MergeSession(ctx, tx, primary, other, userID, now); err != nil {
+			return err
+		}
+		if err := refreshTableSettledTx(ctx, tx, storeID, &primary.ID, now); err != nil {
+			return err
+		}
+		meta := map[string]any{"primary_session_id": primary.ID, "merged_session_id": other.ID,
+			"primary_table_id": primary.TableID, "merged_table_id": other.TableID}
+		return s.recordFloorChange(ctx, tx, actor, "TABLE_MERGE", "table.merged", "Meja digabung", primary.ID, meta)
+	})
+	return primary, mapTableError(err)
+}
+
+// SplitTable takes a merged table off the session. The table is free again; orders stay on the
+// session's bill and are divided with the split bill if needed.
+func (s *TableService) SplitTable(ctx context.Context, actor *AuthenticatedStaff, primaryID, tableID uuid.UUID) (*domain.TableSession, error) {
+	if !actor.Can(rbac.TabManage) {
+		return nil, ErrForbidden
+	}
+	var primary *domain.TableSession
+	err := s.tx(ctx, actor, func(tx *sqlx.Tx) error {
+		storeID := actor.Staff.Store.ID
+		var err error
+		if primary, err = s.openSession(ctx, tx, storeID, primaryID); err != nil {
+			return err
+		}
+		ok, err := s.repo.UnlinkTable(ctx, tx, storeID, primary.ID, tableID, actor.Staff.UserID, s.nowFunc().UTC())
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return ErrTableNotMerged
+		}
+		meta := map[string]any{"primary_session_id": primary.ID, "table_id": tableID}
+		return s.recordFloorChange(ctx, tx, actor, "TABLE_SPLIT", "table.split", "Meja dipisah", primary.ID, meta)
+	})
+	return primary, mapTableError(err)
+}
+
+func (s *TableService) openSession(ctx context.Context, tx *sqlx.Tx, storeID, id uuid.UUID) (*domain.TableSession, error) {
+	session, err := s.repo.GetSessionForUpdate(ctx, tx, storeID, id)
+	if err != nil {
+		return nil, err
+	}
+	if session.Status != domain.TableSessionOpen {
+		return nil, ErrTableSessionNotOpen
+	}
+	return session, nil
+}
+
+// recordFloorChange writes the audit row and the outbox event for the POS channel.
+func (s *TableService) recordFloorChange(ctx context.Context, tx *sqlx.Tx, actor *AuthenticatedStaff, action, event, reason string, sessionID uuid.UUID, meta map[string]any) error {
+	if err := s.audit(ctx, tx, actor, action, reason, sessionID, meta); err != nil {
+		return err
+	}
+	meta["actor_user_id"] = actor.Staff.UserID
+	payload, _ := json.Marshal(meta)
+	return s.orders.InsertOutboxEvent(ctx, tx, &domain.OutboxEvent{
+		ID: uuid.New(), StoreID: actor.Staff.Store.ID, EventType: event, AggregateType: "table_session",
+		AggregateID: sessionID.String(), Payload: string(payload), CreatedAt: s.nowFunc().UTC(),
+	})
+}
+
+// Table timer (v0.9 PR 9.2, decision W6): warnings only, orders are never refused.
+
+var ErrTableTimerOff = errors.New("table session has no timer")
+
+// ExtendTimer gives the table more time: ends_at moves to max(ends_at, now) + minutes.
+func (s *TableService) ExtendTimer(ctx context.Context, actor *AuthenticatedStaff, sessionID uuid.UUID, minutes int) (*domain.TableSession, error) {
+	if !actor.Can(rbac.TabManage) {
+		return nil, ErrForbidden
+	}
+	if minutes < 1 || minutes > 240 {
+		return nil, &ValidationError{Fields: map[string]string{"minutes": "harus 1-240 menit"}}
+	}
+	var session *domain.TableSession
+	err := s.tx(ctx, actor, func(tx *sqlx.Tx) error {
+		var err error
+		if session, err = s.openSession(ctx, tx, actor.Staff.Store.ID, sessionID); err != nil {
+			return err
+		}
+		if session.EndsAt == nil {
+			return ErrTableTimerOff
+		}
+		before := *session.EndsAt
+		if err := s.repo.ExtendTimer(ctx, tx, session, minutes, s.nowFunc().UTC()); err != nil {
+			return err
+		}
+		meta := map[string]any{"session_id": session.ID, "table_id": session.TableID, "minutes": minutes,
+			"ends_at_before": before, "ends_at": session.EndsAt}
+		return s.recordFloorChange(ctx, tx, actor, "TABLE_TIMER_EXTEND", "table.timer_extended",
+			fmt.Sprintf("Waktu meja ditambah %d menit", minutes), session.ID, meta)
+	})
+	return session, mapTableError(err)
+}
+
+// ProcessTimers publishes table.timer_expired and table.timer_warning once per session for every
+// store with a due timer. Safe to run on several instances at once.
+func (s *TableService) ProcessTimers(ctx context.Context) error {
+	storeIDs, err := s.repo.ListStoresWithDueTableTimers(ctx, s.db)
+	if err != nil {
+		return err
+	}
+	for _, storeID := range storeIDs {
+		err := database.WithTenantTx(ctx, s.db, storeID, func(tx *sqlx.Tx) error {
+			settings, err := s.settings.GetStoreSettings(ctx, tx, storeID)
+			if err != nil {
+				return err
+			}
+			now := s.nowFunc().UTC()
+			expired, warned, err := s.repo.MarkTimers(ctx, tx, storeID, settings.TableTimerWarningMinutes, now)
+			if err != nil {
+				return err
+			}
+			publish := func(event string, rows []postgres.TimerEvent) error {
+				for _, row := range rows {
+					payload, _ := json.Marshal(map[string]any{"session_id": row.SessionID, "table_id": row.TableID,
+						"table_number": row.TableNumber, "ends_at": row.EndsAt})
+					if err := s.orders.InsertOutboxEvent(ctx, tx, &domain.OutboxEvent{
+						ID: uuid.New(), StoreID: storeID, EventType: event, AggregateType: "table_session",
+						AggregateID: row.SessionID.String(), Payload: string(payload), CreatedAt: now,
+					}); err != nil {
+						return err
+					}
+				}
+				return nil
+			}
+			if err := publish("table.timer_expired", expired); err != nil {
+				return err
+			}
+			return publish("table.timer_warning", warned)
+		})
+		if err != nil {
+			log.Printf("[TABLE TIMER] store_id=%s error: %v", storeID, err)
+		}
+	}
+	return nil
+}
+
+// StartTimerWorker runs ProcessTimers until ctx is cancelled.
+func (s *TableService) StartTimerWorker(ctx context.Context, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := s.ProcessTimers(ctx); err != nil {
+				if !errors.Is(err, context.Canceled) {
+					log.Printf("[TABLE TIMER] cycle error: %v", err)
+				}
+			} else {
+				metrics.WorkerSucceeded("table_timer")
+			}
+		}
+	}
 }

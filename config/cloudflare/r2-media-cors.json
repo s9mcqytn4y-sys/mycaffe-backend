@@ -6,6 +6,10 @@
           "http://localhost:3000",
           "http://127.0.0.1:3000",
           "http://localhost:8088",
+          "https://abbdullaziz.online",
+          "https://demo.abbdullaziz.online",
+          "https://pos.abbdullaziz.online",
+          "https://*.abbdullaziz.online",
           "https://*.trycloudflare.com"
         ],
         "methods": [

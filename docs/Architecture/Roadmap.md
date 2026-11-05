@@ -25,7 +25,19 @@ prospective-client demo waits for v0.8. Benchmark: [CompetitorAnalysisMajoo.md](
 | 8.7 | Staff QR badges (revocable token) + PIN login | V14 | **Done** (migration 000032): `POST /staff/:id/badge`, `/badge/revoke`, login with `badge` + `pin` |
 | 8.8 | P0-07 configuration (real client IP, Named Tunnel template, firewall runbook) and P0-09 provisioning/incident runbook | V8 | **Done**: prod Named Tunnel ingress (no published ports, Certbot removed), [OperationsRunbook.md](../Setup/OperationsRunbook.md) |
 
-Blocked by dependency: Web Push (no domain), WhatsApp sending (Meta business verification).
+Blocked by dependency: Web Push, WhatsApp sending (Meta business verification).
+
+## v0.9 plan: cafe floor ([PrdV09CafeFloor.md](../Product/PrdV09CafeFloor.md), decisions W5–W10)
+
+| PR | Scope | Decisions | Notes |
+|----|-------|-----------|-------|
+| 9.1 | Move, merge, split tables; area filter on `tables.section` | W5 | **Done** (migration 000033 `table_session_links`) |
+| 9.2 | Table timer, warnings only, extend with audit | W6 | **Done** (migration 000034: timer columns on `table_sessions`, `list_stores_with_due_table_timers`) |
+| 9.3 | Queue TV with a per-store display token, WS channel `queue` | W7 | **Done** (migration 000035 `display_tokens`; the token carries the store id, so no new `SECURITY DEFINER`) |
+| 9.4 | Print job queue per station, checker, TSPL labels, print agent API | W8 | **Done** (migration 000036 `printers`, `print_jobs`; purge after 30 days) |
+| 9.5 | Digital receipts: e-mail, WhatsApp Cloud API driver, SMS link | W9 | **Done** (migration 000037 `receipt_deliveries`; WhatsApp waits for the Meta token) |
+
+Analytics for these events: [AnalyticsPlan.md](../Product/AnalyticsPlan.md). Demo host: WSL Ubuntu behind the `mycaffe-demo` Named Tunnel at `demo.abbdullaziz.online` (W2).
 
 **Schema (37 tables, 24 migrations):** approval_requests (v0.7); receipt_tokens, media_uploads, payment_refunds (v0.6.0); stores, users, auth_sessions, account_tokens, email_outbox,
 store_settings, audit_logs; categories, products, product_variants, modifier_groups, modifier_options,

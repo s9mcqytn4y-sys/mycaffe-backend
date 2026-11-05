@@ -1,0 +1,6 @@
+{{define "subject"}}Struk {{.StoreName}} – {{.OrderNumber}}{{end}}
+{{define "preheader"}}Struk digital pesanan {{.OrderNumber}}, total {{.TotalLabel}}.{{end}}
+{{define "html_body"}}<h1 style="margin:0 0 16px 0;font-size:22px;line-height:30px;color:#2C1810;">Terima kasih sudah mampir ke {{.StoreName}}</h1>
+<p style="margin:0 0 16px 0;">Struk pesanan <strong>{{.OrderNumber}}</strong> dengan total <strong>{{.TotalLabel}}</strong> bisa dilihat kapan saja lewat tombol di bawah.</p>
+{{template "button" .}}
+<p style="margin:0;font-size:14px;line-height:22px;color:#6B5B52;">Tautan berlaku sampai {{.ExpiresAt}}. Tidak merasa memesan? Abaikan email ini.</p>{{end}}

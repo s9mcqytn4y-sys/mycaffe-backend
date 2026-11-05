@@ -27,6 +27,7 @@ const (
 	ChannelKDSBar      = "kds.bar"
 	ChannelKDSKitchen  = "kds.kitchen"
 	ChannelOwner       = "owner" // ADR-007 approval requests, staff with approval.decide
+	ChannelQueue       = "queue" // queue TV displays: queue number and status only (W7)
 	ChannelGuestPrefix = "guest."
 )
 

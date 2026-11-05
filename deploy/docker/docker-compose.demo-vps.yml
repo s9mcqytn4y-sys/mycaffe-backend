@@ -13,5 +13,10 @@ services:
       MIDTRANS_IS_PRODUCTION: "false"
       SENTRY_ENVIRONMENT: "staging"
 
+  tunnel:
+    environment:
+      # QUIC (UDP 7844) drops behind the WSL NAT and Cloudflare WARP; HTTP/2 over TCP 443 holds.
+      TUNNEL_TRANSPORT_PROTOCOL: "http2"
+
   alloy:
     profiles: ["monitoring"]

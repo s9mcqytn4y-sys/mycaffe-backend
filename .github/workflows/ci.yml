@@ -67,7 +67,11 @@ jobs:
         run: go test -v -race -timeout 5m ./...
 
       - name: Compile Application & Migration CLI (Go Build)
-        run: go build -v ./...
+        run: |
+          go build -v ./...
+          # The print agent also ships as a Windows service (decision W13).
+          GOOS=windows go vet ./cmd/print-agent/
+          GOOS=windows go build -o /dev/null ./cmd/print-agent/
 
       # wa-bridge is its own module (decision W12) so whatsmeow never enters the API module.
       - name: wa-bridge module (tidy, vet, govulncheck, test)

@@ -1,4 +1,4 @@
-package service
+package printfmt
 
 import (
 	"bytes"
@@ -6,20 +6,20 @@ import (
 	"testing"
 )
 
-func sampleTicket() *PrintTicket {
-	return &PrintTicket{
+func sampleTicket() *Ticket {
+	return &Ticket{
 		Title: "BAR", QueueNumber: "A012", OrderNumber: "ORD-20261106-0012", LocalTime: "06/11/2026 09:15",
 		CustomerName: `Dina "Kopi"`,
-		Lines: []ReceiptLine{
-			{Name: "Caffe Latte", Variant: "Large", Quantity: 2, UnitPrice: 32000, Amount: 64000,
+		Lines: []Line{
+			{Name: "Caffe Latte", Variant: "Large", Quantity: 2,
 				Options: []string{"Oat Milk", "- Whipped Oat Cold Foam", "Extra Shot", "Less Ice", "Hazelnut"}, Notes: "tanpa gula"},
-			{Name: "Americano", Quantity: 1, UnitPrice: 20000, Amount: 20000},
+			{Name: "Americano", Quantity: 1},
 		},
 	}
 }
 
-func TestRenderStationTicket(t *testing.T) {
-	out, err := RenderStationTicket(sampleTicket(), 58, 2, "Terima kasih")
+func TestStationTicket(t *testing.T) {
+	out, err := StationTicket(sampleTicket(), 58, 2, "Terima kasih")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,7 +32,7 @@ func TestRenderStationTicket(t *testing.T) {
 	if strings.Contains(s, "Rp") || strings.Contains(s, "32000") {
 		t.Error("tickets never show prices")
 	}
-	if n := bytes.Count(out, escFeedCut); n != 2 {
+	if n := bytes.Count(out, FeedCut); n != 2 {
 		t.Errorf("two copies must cut twice, got %d", n)
 	}
 	for _, line := range strings.Split(s, "\n") {
@@ -45,21 +45,23 @@ func TestRenderStationTicket(t *testing.T) {
 			t.Errorf("line wider than 58 mm paper: %q", clean)
 		}
 	}
-	if _, err := RenderStationTicket(sampleTicket(), 70, 1, ""); err == nil {
+	if _, err := StationTicket(sampleTicket(), 70, 1, ""); err == nil {
 		t.Error("70 mm paper must be rejected")
 	}
 	tbl := sampleTicket()
 	tbl.TableNumber, tbl.RoundNumber, tbl.Reprint = "7", 2, true
-	out, _ = RenderStationTicket(tbl, 80, 1, "")
-	for _, want := range []string{"MEJA 7", "Ronde", "CETAK ULANG", "Antrean"} {
+	out, _ = StationTicket(tbl, 80, 1, "")
+	tbl.Offline = true
+	out, _ = StationTicket(tbl, 80, 1, "")
+	for _, want := range []string{"MEJA 7", "Ronde", "CETAK ULANG", "Antrean", "OFFLINE"} {
 		if !strings.Contains(string(out), want) {
 			t.Errorf("dine-in reprint misses %q", want)
 		}
 	}
 }
 
-func TestRenderLabels(t *testing.T) {
-	out, err := RenderLabels(sampleTicket(), 40, 30, 1)
+func TestLabels(t *testing.T) {
+	out, err := Labels(sampleTicket(), 40, 30, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +88,7 @@ func TestRenderLabels(t *testing.T) {
 			}
 		}
 	}
-	if _, err := RenderLabels(sampleTicket(), 20, 30, 1); err == nil {
+	if _, err := Labels(sampleTicket(), 20, 30, 1); err == nil {
 		t.Error("20 mm labels must be rejected")
 	}
 }

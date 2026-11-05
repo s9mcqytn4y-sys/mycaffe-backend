@@ -289,6 +289,32 @@ func TestValidateConfigStagingRequiresStrongJWTSecret(t *testing.T) {
 
 // V4/V5: the log driver prints OTP codes, so only development and test may use it.
 // email and webhook drivers are allowed in staging/production when properly configured.
+func TestValidateConfigWhatsAppDriver(t *testing.T) {
+	strong := strings.Repeat("strong", 6)
+	token := strings.Repeat("t", 32)
+	base := func(env string) *config.Config {
+		return &config.Config{AppEnv: env, JWTSecret: strong, EmailDriver: "log"}
+	}
+	c := base("staging")
+	c.WhatsAppDriver, c.WhatsAppBridgeURL, c.WhatsAppBridgeToken = "bridge", "http://wa-bridge:8090", token
+	if err := config.ValidateConfig(c); err != nil {
+		t.Errorf("staging with the bridge should pass: %v", err)
+	}
+	c.WhatsAppBridgeToken = "short"
+	if err := config.ValidateConfig(c); err == nil {
+		t.Error("a short bridge token must be refused")
+	}
+	c = base("staging")
+	c.WhatsAppDriver = "cloud"
+	if err := config.ValidateConfig(c); err == nil {
+		t.Error("cloud without token must be refused")
+	}
+	c.WhatsAppDriver = "carrier-pigeon"
+	if err := config.ValidateConfig(c); err == nil {
+		t.Error("unknown driver must be refused")
+	}
+}
+
 func TestValidateConfigSMSDriver(t *testing.T) {
 	strong := strings.Repeat("strong", 6)
 	if err := config.ValidateConfig(&config.Config{AppEnv: "staging", JWTSecret: strong, EmailDriver: "log", SMSDriver: "log"}); err == nil {

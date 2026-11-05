@@ -103,7 +103,10 @@ func wireHandlers(workerCtx context.Context, cfg *config.Config, db *sqlx.DB, hu
 	h.shift = handler.NewShiftHandler(shiftService)
 
 	h.tab = handler.NewTabHandler(service.NewTabService(db, postgres.NewTabRepository(), orderRepo))
-	h.table = handler.NewTableHandler(service.NewTableService(db))
+	tableService := service.NewTableService(db)
+	h.table = handler.NewTableHandler(tableService)
+	// Table timer warnings (v0.9 PR 9.2, W6).
+	go tableService.StartTimerWorker(workerCtx, 30*time.Second)
 	h.guest = handler.NewGuestHandler(service.NewGuestService(db, orderService, paymentService))
 	h.kds = handler.NewKDSHandler(service.NewKDSService(db))
 	h.receipt = handler.NewReceiptHandler(service.NewReceiptService(db, cfg.AppPublicURL))
@@ -270,6 +273,7 @@ func registerTableAndGuestRoutes(v1 *gin.RouterGroup, h *handlerSet) {
 	pos.POST("/table-sessions/:id/move", h.auth.RequirePermission(rbac.TabManage), h.table.MoveSession)
 	pos.POST("/table-sessions/:id/merge", h.auth.RequirePermission(rbac.TabManage), h.table.MergeSession)
 	pos.POST("/table-sessions/:id/split", h.auth.RequirePermission(rbac.TabManage), h.table.SplitTable)
+	pos.POST("/table-sessions/:id/extend", h.auth.RequirePermission(rbac.TabManage), h.table.ExtendTimer)
 	v1.GET("/public/qr/:token", h.table.ResolveQR)
 
 	// QR guest ordering (iteration 5b): pay-first per device (T2), own orders only (Q6).

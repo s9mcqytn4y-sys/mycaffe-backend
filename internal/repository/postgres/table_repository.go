@@ -30,7 +30,7 @@ const tableColumns = `id, store_id, table_number, label, section, capacity, qr_t
 	is_active, archived_at, created_at, updated_at`
 
 const tableSessionColumns = `id, store_id, table_id, status, opened_at, opened_via, opened_by_user_id,
-	settled_at, closed_at, closed_by_user_id, close_reason`
+	settled_at, closed_at, closed_by_user_id, close_reason, ends_at, warned_at, expired_at, extended_minutes`
 
 // ResolveTableQR calls the SECURITY DEFINER resolver (decision QR2); it runs before a tenant context
 // exists and returns only (store_id, table_id, is_active).
@@ -112,6 +112,10 @@ func (r *TableRepository) ListBoard(ctx context.Context, tx *sqlx.Tx, storeID uu
 		OpenedByUserID *uuid.UUID `db:"session_opened_by"`
 		SettledAt      *time.Time `db:"session_settled_at"`
 		SessionTableID *uuid.UUID `db:"session_table_id"`
+		EndsAt         *time.Time `db:"session_ends_at"`
+		WarnedAt       *time.Time `db:"session_warned_at"`
+		ExpiredAt      *time.Time `db:"session_expired_at"`
+		Extended       *int       `db:"session_extended_minutes"`
 		UnpaidOrders   int        `db:"unpaid_orders"`
 		UnpaidAmount   int64      `db:"unpaid_amount"`
 	}
@@ -120,6 +124,8 @@ func (r *TableRepository) ListBoard(ctx context.Context, tx *sqlx.Tx, storeID uu
 			t.is_active, t.archived_at, t.created_at, t.updated_at,
 			s.id AS session_id, s.opened_at AS session_opened_at, s.opened_via AS session_opened_via,
 			s.opened_by_user_id AS session_opened_by, s.settled_at AS session_settled_at, s.table_id AS session_table_id,
+			s.ends_at AS session_ends_at, s.warned_at AS session_warned_at, s.expired_at AS session_expired_at,
+			s.extended_minutes AS session_extended_minutes,
 			COUNT(o.id) AS unpaid_orders, COALESCE(SUM(o.total_amount - o.paid_amount), 0) AS unpaid_amount
 		FROM tables t
 		LEFT JOIN table_session_links l ON l.store_id = t.store_id AND l.table_id = t.id AND l.unlinked_at IS NULL
@@ -144,6 +150,7 @@ func (r *TableRepository) ListBoard(ctx context.Context, tx *sqlx.Tx, storeID uu
 			e.Session = &domain.TableSession{
 				ID: *row.SessionID, TableID: *row.SessionTableID, Status: domain.TableSessionOpen, OpenedAt: *row.OpenedAt,
 				OpenedVia: *row.OpenedVia, OpenedByUserID: row.OpenedByUserID, SettledAt: row.SettledAt,
+				EndsAt: row.EndsAt, WarnedAt: row.WarnedAt, ExpiredAt: row.ExpiredAt, ExtendedMinutes: *row.Extended,
 			}
 			if *row.SessionTableID != row.ID {
 				e.MergedIntoTableID = row.SessionTableID
@@ -184,10 +191,14 @@ func (r *TableRepository) GetSessionForUpdate(ctx context.Context, tx *sqlx.Tx, 
 	return &s, nil
 }
 
+// InsertSession opens a session; under a store time limit it starts the table timer (W6).
 func (r *TableRepository) InsertSession(ctx context.Context, tx *sqlx.Tx, s *domain.TableSession) error {
-	_, err := tx.ExecContext(ctx, `
-		INSERT INTO table_sessions (id, store_id, table_id, status, opened_at, opened_via, opened_by_user_id)
-		VALUES ($1, $2, $3, 'open', $4, $5, $6)
+	err := tx.GetContext(ctx, &s.EndsAt, `
+		INSERT INTO table_sessions (id, store_id, table_id, status, opened_at, opened_via, opened_by_user_id, ends_at)
+		SELECT $1::uuid, $2::uuid, $3::uuid, 'open', $4::timestamptz, $5::varchar, $6::uuid,
+			CASE WHEN ss.table_time_limit_minutes > 0 THEN $4 + make_interval(mins => ss.table_time_limit_minutes) END
+		FROM (SELECT 1) one LEFT JOIN store_settings ss ON ss.store_id = $2
+		RETURNING ends_at
 	`, s.ID, s.StoreID, s.TableID, s.OpenedAt, s.OpenedVia, s.OpenedByUserID)
 	if err != nil {
 		return fmt.Errorf("failed to open table session: %w", err)
@@ -290,4 +301,58 @@ func (r *TableRepository) UnlinkTable(ctx context.Context, tx *sqlx.Tx, storeID,
 	}
 	n, err := res.RowsAffected()
 	return n == 1, err
+}
+
+// TimerEvent is one session whose table timer crossed its warning or end (W6).
+type TimerEvent struct {
+	SessionID   uuid.UUID `db:"id"`
+	TableID     uuid.UUID `db:"table_id"`
+	TableNumber string    `db:"table_number"`
+	EndsAt      time.Time `db:"ends_at"`
+}
+
+// ListStoresWithDueTableTimers calls the narrow SECURITY DEFINER discovery function.
+func (r *TableRepository) ListStoresWithDueTableTimers(ctx context.Context, db *sqlx.DB) ([]uuid.UUID, error) {
+	var ids []uuid.UUID
+	if err := db.SelectContext(ctx, &ids, `SELECT store_id FROM list_stores_with_due_table_timers()`); err != nil {
+		return nil, fmt.Errorf("failed to list stores with due table timers: %w", err)
+	}
+	return ids, nil
+}
+
+// MarkTimers stamps expired sessions first, then sessions entering the warning window. Each row is
+// stamped once: the WHERE re-checks after a concurrent worker's lock, so only one worker returns it.
+func (r *TableRepository) MarkTimers(ctx context.Context, tx *sqlx.Tx, storeID uuid.UUID, warningMinutes int, now time.Time) (expired, warned []TimerEvent, err error) {
+	if err = tx.SelectContext(ctx, &expired, `
+		WITH stamped AS (
+			UPDATE table_sessions SET expired_at = $2, warned_at = COALESCE(warned_at, $2)
+			WHERE store_id = $1 AND status = 'open' AND ends_at IS NOT NULL AND expired_at IS NULL AND ends_at <= $2
+			RETURNING id, table_id, ends_at
+		)
+		SELECT s.id, s.table_id, t.table_number, s.ends_at FROM stamped s JOIN tables t ON t.store_id = $1 AND t.id = s.table_id
+	`, storeID, now); err != nil {
+		return nil, nil, fmt.Errorf("failed to mark expired table timers: %w", err)
+	}
+	if err = tx.SelectContext(ctx, &warned, `
+		WITH stamped AS (
+			UPDATE table_sessions SET warned_at = $2
+			WHERE store_id = $1 AND status = 'open' AND ends_at IS NOT NULL AND warned_at IS NULL
+			  AND ends_at > $2 AND ends_at - make_interval(mins => $3) <= $2
+			RETURNING id, table_id, ends_at
+		)
+		SELECT s.id, s.table_id, t.table_number, s.ends_at FROM stamped s JOIN tables t ON t.store_id = $1 AND t.id = s.table_id
+	`, storeID, now, warningMinutes); err != nil {
+		return nil, nil, fmt.Errorf("failed to mark warned table timers: %w", err)
+	}
+	return expired, warned, nil
+}
+
+// ExtendTimer moves ends_at to max(ends_at, now) + minutes and re-arms the warning and expiry.
+func (r *TableRepository) ExtendTimer(ctx context.Context, tx *sqlx.Tx, s *domain.TableSession, minutes int, now time.Time) error {
+	return tx.QueryRowxContext(ctx, `
+		UPDATE table_sessions SET ends_at = GREATEST(ends_at, $3) + make_interval(mins => $4),
+			warned_at = NULL, expired_at = NULL, extended_minutes = extended_minutes + $4
+		WHERE store_id = $1 AND id = $2
+		RETURNING ends_at, warned_at, expired_at, extended_minutes
+	`, s.StoreID, s.ID, now, minutes).Scan(&s.EndsAt, &s.WarnedAt, &s.ExpiredAt, &s.ExtendedMinutes)
 }

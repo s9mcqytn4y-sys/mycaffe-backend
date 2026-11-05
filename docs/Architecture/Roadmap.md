@@ -32,7 +32,7 @@ Blocked by dependency: Web Push, WhatsApp sending (Meta business verification).
 | PR | Scope | Decisions | Notes |
 |----|-------|-----------|-------|
 | 9.1 | Move, merge, split tables; area filter on `tables.section` | W5 | **Done** (migration 000033 `table_session_links`) |
-| 9.2 | Table timer, warnings only, extend with audit | W6 | Migration 000034 `table_timers` |
+| 9.2 | Table timer, warnings only, extend with audit | W6 | **Done** (migration 000034: timer columns on `table_sessions`, `list_stores_with_due_table_timers`) |
 | 9.3 | Queue TV with a per-store display token, WS channel `queue` | W7 | Migration 000035 `display_tokens`, new `SECURITY DEFINER` `resolve_display_token` |
 | 9.4 | Print job queue per station, checker, TSPL labels, print agent API | W8 | Migration 000036 `printers`, `print_jobs` |
 | 9.5 | Digital receipts: e-mail, WhatsApp Cloud API driver, SMS link | W9 | Migration 000037 `receipt_deliveries` |

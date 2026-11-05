@@ -455,6 +455,16 @@ BEGIN
     ) THEN
         RAISE EXCEPTION 'SECURITY FAILURE: list_stores_with_due_email is executable by PUBLIC!';
     END IF;
+    -- Table timer worker discovery (migration 000034): app role only, never PUBLIC.
+    IF NOT has_function_privilege('mycaffe_app', 'public.list_stores_with_due_table_timers()', 'EXECUTE') THEN
+        RAISE EXCEPTION 'list_stores_with_due_table_timers is not executable by mycaffe_app';
+    END IF;
+    IF EXISTS (
+        SELECT 1 FROM pg_proc p, aclexplode(p.proacl) a
+        WHERE p.proname = 'list_stores_with_due_table_timers' AND a.grantee = 0 AND a.privilege_type = 'EXECUTE'
+    ) THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: list_stores_with_due_table_timers is executable by PUBLIC!';
+    END IF;
 
     RAISE NOTICE 'SUCCESS: Row-Level Security (RLS) on stores/orders/payments/notifications and DELETE privilege revocation verified.';
     RAISE NOTICE 'ALL CONSTRAINTS, RLS POLICIES, AND BEHAVIORAL VERIFICATIONS PASSED SUCCESSFULLY.';

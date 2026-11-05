@@ -32,7 +32,7 @@ docker compose --env-file .env.demo -f deploy/docker/docker-compose.demo.yml up 
 1. **PostgreSQL 18 Row-Level Security (RLS) & Triple-Role Separation**:
    - Runtime queries execute as `mycaffe_app` (`NOBYPASSRLS`) inside `database.WithTenantTx(ctx, db, storeID, func(tx *sqlx.Tx) error { ... })`.
    - Schema migrations and seeds execute as `mycaffe_migrator` via `cmd/migrate`.
-   - Only approved, narrowly-scoped `SECURITY DEFINER` functions owned by `mycaffe_migrator` (`resolve_store_for_login`, `resolve_payment_webhook_context`, `resolve_table_qr`, `track_order_by_token`, `list_stores_with_pending_reconciliation`, `list_stores_with_open_gateway_refunds`, `list_stores_with_due_email`, `list_stores_with_due_message`, `list_stores_with_pending_outbox`) may resolve tenant context before `database.WithTenantTx`.
+   - Only approved, narrowly-scoped `SECURITY DEFINER` functions owned by `mycaffe_migrator` (`resolve_store_for_login`, `resolve_payment_webhook_context`, `resolve_table_qr`, `track_order_by_token`, `list_stores_with_pending_reconciliation`, `list_stores_with_open_gateway_refunds`, `list_stores_with_due_email`, `list_stores_with_due_message`, `list_stores_with_pending_outbox`, `list_stores_with_due_table_timers`) may resolve tenant context before `database.WithTenantTx`.
 2. **Money & Pricing Integrity**:
    - All money values use whole integer Indonesian Rupiah (`int64` in Go, `BIGINT` in PostgreSQL). Never use `float32`/`float64` for currency.
    - Calculate all prices, variants, modifier groups (and 1-level child modifier groups), discounts, service charges, and PB1 taxes server-side from catalog snapshots.
@@ -56,6 +56,6 @@ docker compose --env-file .env.demo -f deploy/docker/docker-compose.demo.yml up 
 - `internal/repository/postgres/` — `sqlx` PostgreSQL repositories executed inside `database.WithTenantTx`.
 - `internal/realtime/` — Tenant-isolated WebSocket hub (`hub.go`, `client.go`).
 - `internal/pkg/` — Focused infrastructure adapters (`database`, `jwt`, `mailer`, `metrics`, `midtrans`, `money`, `pin`, `rbac`, `receipt`, `sms`, `storage`).
-- `db/migrations/` — 33 sequential PostgreSQL 18 migrations (`000001`–`000033`); never edit a merged one.
+- `db/migrations/` — 34 sequential PostgreSQL 18 migrations (`000001`–`000034`); never edit a merged one.
 - `docs/` — Product (`docs/Product/`), Architecture & ADRs (`docs/Architecture/`), Setup (`docs/Setup/`), and Engineering (`docs/Engineering/`) documentation.
 

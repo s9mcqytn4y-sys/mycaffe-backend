@@ -219,6 +219,9 @@ type StoreSettings struct {
 	CashierSeesExpectedCash bool  `json:"cashier_sees_expected_cash" db:"cashier_sees_expected_cash"`
 	// GatewayPartialRefunds allows partial Midtrans refunds once proven in the sandbox (RF1-b).
 	GatewayPartialRefunds bool `json:"gateway_partial_refunds" db:"gateway_partial_refunds"`
+	// Table timer (decision W6): 0 turns it off; warnings only, orders are never refused.
+	TableTimeLimitMinutes    int `json:"table_time_limit_minutes" db:"table_time_limit_minutes"`
+	TableTimerWarningMinutes int `json:"table_timer_warning_minutes" db:"table_timer_warning_minutes"`
 }
 
 // DefaultStoreSettings mirrors the column defaults of migration 000007.
@@ -226,7 +229,7 @@ func DefaultStoreSettings(storeID uuid.UUID) StoreSettings {
 	return StoreSettings{
 		StoreID: storeID, VoidRefundOwnerThreshold: 100000, CashierMaxDiscountBPS: 1000, CashVarianceTolerance: 5000,
 		TableIdleCloseMinutes: 30, StaticQRISFallbackMode: StaticQRISFallbackAuto,
-		RefundWindowCashierDays: 0, RefundWindowOwnerDays: 7,
+		RefundWindowCashierDays: 0, RefundWindowOwnerDays: 7, TableTimerWarningMinutes: 10,
 	}
 }
 

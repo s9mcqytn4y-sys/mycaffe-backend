@@ -38,6 +38,7 @@ type handlerSet struct {
 	outletCash *handler.OutletCashHandler
 	approval   *handler.ApprovalHandler
 	display    *handler.DisplayHandler
+	print      *handler.PrintHandler
 	media      *handler.MediaHandler
 }
 
@@ -130,6 +131,7 @@ func wireHandlers(workerCtx context.Context, cfg *config.Config, db *sqlx.DB, hu
 	realtimeService := service.NewRealtimeService(db)
 	h.realtime = handler.NewRealtimeHandler(hub, realtimeService)
 	h.display = handler.NewDisplayHandler(service.NewDisplayService(db), realtimeService)
+	h.print = handler.NewPrintHandler(service.NewPrintService(db))
 
 	// Outbox relay (iteration 5c): LISTEN outbox + 2 s polling, at-least-once, ordered per store.
 	go realtimeService.RunRelay(workerCtx, hub)
@@ -238,6 +240,7 @@ func registerStoreAndPOSRoutes(v1 *gin.RouterGroup, h *handlerSet) {
 	approvals.POST("/:id/approve", h.approval.Approve)
 	approvals.POST("/:id/reject", h.approval.Reject)
 	pos.POST("/orders/:id/discount", h.auth.RequirePermission(rbac.OrderDiscountApply), h.pos.ApplyDiscount)
+	pos.POST("/orders/:id/reprint", h.auth.RequirePermission(rbac.OrderPOSCreate), h.print.Reprint)
 	pos.POST("/orders/:id/void", h.auth.RequirePermission(rbac.OrderVoid), h.pos.VoidOrder)
 	pos.POST("/orders/:id/payments/:payment_id/refund", h.auth.RequirePermission(rbac.PaymentRefund), h.pos.RefundPayment)
 	pos.POST("/products/:id/stock-override", h.auth.RequirePermission(rbac.StockOverride), h.pos.OverrideStock)
@@ -255,6 +258,15 @@ func registerStoreAndPOSRoutes(v1 *gin.RouterGroup, h *handlerSet) {
 	displays.GET("", h.display.ListTokens)
 	displays.POST("", h.display.CreateToken)
 	displays.POST("/:id/revoke", h.display.RevokeToken)
+	// Print queue (v0.9 PR 9.4, W8): owner configures printers; agents use "Authorization: Printer <token>".
+	printers := v1.Group("/store/printers", h.auth.RequirePermission(rbac.StoreSettingsManage))
+	printers.GET("", h.print.ListPrinters)
+	printers.POST("", h.print.CreatePrinter)
+	printers.PATCH("/:id", h.print.UpdatePrinter)
+	printers.POST("/:id/rotate-token", h.print.RotateToken)
+	agent := v1.Group("/print-agent", handler.LimitBody(4<<10))
+	agent.POST("/jobs/claim", h.print.Claim)
+	agent.POST("/jobs/:id/ack", h.print.Ack)
 	v1.GET("/public/queue", h.display.Queue)
 	v1.POST("/public/queue/ws-ticket", h.display.IssueTicket)
 

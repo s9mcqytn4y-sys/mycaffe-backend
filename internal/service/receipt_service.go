@@ -67,13 +67,15 @@ type ReceiptStore struct {
 
 type ReceiptLine struct {
 	itemID    uuid.UUID
-	Name      string   `json:"name"`
-	Variant   string   `json:"variant,omitempty"`
-	Options   []string `json:"options,omitempty"`
-	Notes     string   `json:"notes,omitempty"`
-	Quantity  int      `json:"quantity"`
-	UnitPrice int64    `json:"unit_price"`
-	Amount    int64    `json:"amount"`
+	station   string     // prep station snapshot, used by print routing
+	roundID   *uuid.UUID // open-tab round of the line, used by print routing
+	Name      string     `json:"name"`
+	Variant   string     `json:"variant,omitempty"`
+	Options   []string   `json:"options,omitempty"`
+	Notes     string     `json:"notes,omitempty"`
+	Quantity  int        `json:"quantity"`
+	UnitPrice int64      `json:"unit_price"`
+	Amount    int64      `json:"amount"`
 }
 
 type ReceiptPayment struct {
@@ -347,17 +349,19 @@ func splitLines(lines []ReceiptLine, qty map[uuid.UUID]int) []ReceiptLine {
 
 func receiptLinesTx(ctx context.Context, tx *sqlx.Tx, storeID, orderID uuid.UUID) ([]ReceiptLine, error) {
 	var items []struct {
-		ID        uuid.UUID `db:"id"`
-		Name      string    `db:"snapshot_name"`
-		Variant   string    `db:"snapshot_variant_name"`
-		Notes     string    `db:"notes"`
-		Quantity  int       `db:"quantity"`
-		UnitPrice int64     `db:"snapshot_price"`
-		Amount    int64     `db:"subtotal_amount"`
+		ID        uuid.UUID  `db:"id"`
+		Name      string     `db:"snapshot_name"`
+		Variant   string     `db:"snapshot_variant_name"`
+		Notes     string     `db:"notes"`
+		Quantity  int        `db:"quantity"`
+		UnitPrice int64      `db:"snapshot_price"`
+		Amount    int64      `db:"subtotal_amount"`
+		Station   string     `db:"station"`
+		RoundID   *uuid.UUID `db:"round_id"`
 	}
 	if err := tx.SelectContext(ctx, &items, `
 		SELECT id, snapshot_name, COALESCE(snapshot_variant_name, '') AS snapshot_variant_name, COALESCE(notes, '') AS notes,
-			quantity, snapshot_price, subtotal_amount
+			quantity, snapshot_price, subtotal_amount, COALESCE(snapshot_prep_station, 'none') AS station, round_id
 		FROM order_items WHERE store_id = $1 AND order_id = $2 ORDER BY created_at, id`, storeID, orderID); err != nil {
 		return nil, fmt.Errorf("failed to load receipt lines: %w", err)
 	}
@@ -387,7 +391,7 @@ func receiptLinesTx(ctx context.Context, tx *sqlx.Tx, storeID, orderID uuid.UUID
 	}
 	lines := make([]ReceiptLine, len(items))
 	for i, it := range items {
-		lines[i] = ReceiptLine{itemID: it.ID, Name: it.Name, Variant: it.Variant, Options: byItem[it.ID], Notes: it.Notes,
+		lines[i] = ReceiptLine{itemID: it.ID, station: it.Station, roundID: it.RoundID, Name: it.Name, Variant: it.Variant, Options: byItem[it.ID], Notes: it.Notes,
 			Quantity: it.Quantity, UnitPrice: it.UnitPrice, Amount: it.Amount}
 	}
 	return lines, nil

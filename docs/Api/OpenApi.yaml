@@ -33,6 +33,8 @@ tags:
     description: Tables, derived table occupancy, table sessions and public QR resolution (iteration 5a)
   - name: Guest
     description: QR guest sessions, pay-first guest orders and the public order tracker (iteration 5b)
+  - name: Printing
+    description: Print queue, printers per station and the print agent API (v0.9 PR 9.4, W8)
   - name: Display
     description: Queue TV displays with per-store display tokens (v0.9 PR 9.3, W7)
   - name: Realtime
@@ -3212,6 +3214,229 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+  /api/v1/store/printers:
+    get:
+      tags: [Printing]
+      operationId: listPrinters
+      summary: Printers of the store, without agent tokens (store.settings.manage)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: Printers
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [printers]
+                properties:
+                  printers:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Printer"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      tags: [Printing]
+      operationId: createPrinter
+      summary: Register a printer for a station; the agent token is returned once (audited, W8)
+      description: >-
+        Stations bar and kitchen print their lines, checker prints the whole order or round, label prints
+        one TSPL label per bar cup. Format follows the station (label = tspl, else escpos). Defaults: 58 mm
+        paper, 40x30 mm labels, 1 copy.
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PrinterInput"
+      responses:
+        "201":
+          description: Printer with its one-time agent_token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Printer"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          description: Invalid printer settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationErrorResponse"
+  /api/v1/store/printers/{id}:
+    patch:
+      tags: [Printing]
+      operationId: updatePrinter
+      summary: Change a printer (name, station, size, copies, footer, active) (audited)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - $ref: "#/components/parameters/ResourceID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PrinterInput"
+      responses:
+        "200":
+          description: Updated printer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Printer"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          description: Invalid printer settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationErrorResponse"
+  /api/v1/store/printers/{id}/rotate-token:
+    post:
+      tags: [Printing]
+      operationId: rotatePrinterToken
+      summary: Replace the agent token; the old one stops at once (audited)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - $ref: "#/components/parameters/ResourceID"
+      responses:
+        "200":
+          description: Printer with its new one-time agent_token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Printer"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/v1/print-agent/jobs/claim:
+    post:
+      security:
+        - PrinterToken: []
+      tags: [Printing]
+      operationId: claimPrintJob
+      summary: Claim the oldest due job of this printer (print agent)
+      description: >-
+        Due means pending and past next_attempt_at, or claimed but not acknowledged within 60 s. A job
+        handed out 5 times without an ack goes dead (print_job.failed). Poll every 2-5 s.
+      x-implementation-status: implemented
+      responses:
+        "200":
+          description: A job to print
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentJob"
+        "204":
+          description: Nothing to print
+        "401":
+          description: PRINTER_TOKEN_INVALID (unknown, rotated, inactive printer or store)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/print-agent/jobs/{id}/ack:
+    post:
+      security:
+        - PrinterToken: []
+      tags: [Printing]
+      operationId: ackPrintJob
+      summary: Report the print result (print agent)
+      description: printed is final (print_job.printed); failed retries after attempts x 10 s and goes dead after 5 attempts. A repeated printed ack is a no-op.
+      x-implementation-status: implemented
+      parameters:
+        - $ref: "#/components/parameters/ResourceID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  enum: [printed, failed]
+                error:
+                  type: string
+                  maxLength: 500
+      responses:
+        "204":
+          description: Recorded
+        "401":
+          description: PRINTER_TOKEN_INVALID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: PRINT_JOB_NOT_FOUND (not claimed by this printer)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/pos/orders/{id}/reprint:
+    post:
+      tags: [Printing]
+      operationId: reprintOrder
+      summary: Queue a reprint of an order's tickets, checker slip or labels, marked CETAK ULANG (audited)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - $ref: "#/components/parameters/ResourceID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind]
+              properties:
+                kind:
+                  type: string
+                  enum: [ticket, checker, label]
+      responses:
+        "202":
+          description: Jobs queued
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [jobs]
+                properties:
+                  jobs:
+                    type: integer
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: PRINTER_NOT_CONFIGURED (no active printer for this kind)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Unknown kind
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationErrorResponse"
   /api/v1/public/queue:
     get:
       security:
@@ -4258,6 +4483,11 @@ paths:
 
 components:
   securitySchemes:
+    PrinterToken:
+      type: apiKey
+      in: header
+      name: Authorization
+      description: 'Print agent token sent as "Printer <token>" (W8). One per printer, rotated by the owner; grants claim and ack for that printer only.'
     DisplayToken:
       type: apiKey
       in: header
@@ -4420,6 +4650,87 @@ components:
                 description: JSON snapshot of the selected modifiers
               notes:
                 type: string
+    Printer:
+      type: object
+      required: [id, name, station, format, paper_width_mm, copies, footer, is_active, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        station:
+          type: string
+          enum: [bar, kitchen, checker, label]
+        format:
+          type: string
+          enum: [escpos, tspl]
+        paper_width_mm:
+          type: integer
+          description: 58 or 80 for escpos; 25-110 for tspl labels
+        label_height_mm:
+          type: integer
+          description: 15-100, tspl labels only
+        copies:
+          type: integer
+          minimum: 1
+          maximum: 5
+        footer:
+          type: string
+          maxLength: 100
+        is_active:
+          type: boolean
+        last_seen_at:
+          type: string
+          format: date-time
+          description: Last agent contact, updated at most once a minute
+        created_at:
+          type: string
+          format: date-time
+        agent_token:
+          type: string
+          description: Only when created or rotated; "<store_id>.<printer_id>.<secret>", only its hash is stored
+    PrinterInput:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 50
+        station:
+          type: string
+          enum: [bar, kitchen, checker, label]
+          description: Required on create
+        paper_width_mm:
+          type: integer
+        label_height_mm:
+          type: integer
+        copies:
+          type: integer
+          minimum: 1
+          maximum: 5
+        footer:
+          type: string
+          maxLength: 100
+        is_active:
+          type: boolean
+    AgentJob:
+      type: object
+      required: [id, kind, format, payload_base64, attempts]
+      properties:
+        id:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum: [ticket, checker, label]
+        format:
+          type: string
+          enum: [escpos, tspl]
+        payload_base64:
+          type: string
+          description: Raw printer bytes rendered on the server; copies are already included
+        attempts:
+          type: integer
     DisplayToken:
       type: object
       required: [id, name, created_at]

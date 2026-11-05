@@ -24,7 +24,7 @@ Kode aplikasi MyCaffe dibangun di atas fondasi isolasi `store_id` (UUID) dan Pos
 
 | Model Deployment | Target Pelanggan | Topologi Infrastruktur | Isolasi Data & Kredensial |
 | :--- | :--- | :--- | :--- |
-| **Model A: Dedicated Single-VPS per Merchant (Target MVP)** | Kafe independen tunggal yang menginginkan kendali penuh dan biaya bulanan tetap tanpa langganan database PaaS. | 1 VPS Hostinger KVM 2 (`2 vCPU`, `8 GB RAM`, `100 GB NVMe`) milik merchant yang menjalankan Docker Compose (`postgres:18-alpine`, `api`, `web`, `nginx`, `certbot`). | 1 toko utama (`store_id`) di dalam database VPS tersebut, dengan cadangan terenkripsi ke bucket Cloudflare R2 terisolasi. |
+| **Model A: Dedicated Single-VPS per Merchant (Target MVP)** | Kafe independen tunggal yang menginginkan kendali penuh dan biaya bulanan tetap tanpa langganan database PaaS. | 1 VPS Hostinger KVM 2 (`2 vCPU`, `8 GB RAM`, `100 GB NVMe`) milik merchant yang menjalankan Docker Compose (`postgres:18-alpine`, `api`, `nginx`, `tunnel` Cloudflare Named Tunnel; `web` opsional). | 1 toko utama (`store_id`) di dalam database VPS tersebut, dengan cadangan terenkripsi ke bucket Cloudflare R2 terisolasi. |
 | **Model B: Multi-Outlet Single-Merchant** | Jaringan kafe/restoran dengan 2 hingga 20 cabang di bawah satu pemilik merek yang sama. | 1 VPS terpusat milik grup merchant (dapat ditingkatkan kapasitas CPU/RAM sesuai jumlah cabang). | Setiap cabang memiliki `store_id` terpisah dengan konfigurasi pajak, service charge, prefix nomor pesanan, dan laporan per cabang maupun konsolidasi pemilik. |
 | **Model C: Managed Multi-Tenant SaaS** | Banyak merchant berbeda yang berlangganan bulanan pada infrastruktur yang dikelola penyedia platform MyCaffe. | Cluster VPS terkelola dengan pemisahan beban kerja, monitoring terpusat, dan manajemen kredensial pembayaran per tenant (`store_id`). | Isolasi ketat antar-merchant menggunakan PostgreSQL 18 RLS (`app.current_store_id`), kunci API per tenant, serta kuota penyimpanan media per `store_id`. |
 
@@ -151,3 +151,39 @@ MyCaffe memisahkan siklus hidup persiapan dapur (`orders.status`), siklus hidup 
 
 - **Barang Habis Pakai (Consumables / Tracked Stock):** Biji kopi, susu, sirup, pastry, dan cup dikelola melalui reservasi stok transaksional (`track_stock = true`, `stock_quantity`) yang dikunci secara atomik (`SELECT ... FOR UPDATE`) dalam urutan UUID deterministik saat pesanan dibuat.
 - **Aset Operasional Tidak Habis Pakai (Non-Consumable Assets):** Mesin espresso, grinder, tablet POS, printer thermal, dan perangkat jaringan dicatat sebagai inventaris aset toko untuk pemantauan kondisi/perawatan (maintenance log) tanpa tercampur dengan stok bahan baku penjualan.
+
+---
+
+## 5. Permukaan Baru v0.9 (Layar TV, Cetak, Struk Digital)
+
+Aturan di bawah melengkapi §1.2 dan §2 untuk fitur [PRD v0.9](PrdV09CafeFloor.md).
+
+### 5.1 Layar Antrean TV
+
+- Latar `#12100E` (*Roasted Charcoal*), teks `#FAF7F2`. Nomor antrean memakai `JetBrains Mono`
+  `tabular-nums`, minimal `96px` pada TV 43" (terbaca dari ±5 meter).
+- Dua kolom saja: **Disiapkan** (`queued` dan `preparing`) dan **Siap diambil** (`ready`). Status
+  `ready` memakai ikon ✓ dan label teks, bukan warna saja (§2.1).
+- Tidak menampilkan nama tamu, nomor HP, item, atau nominal (keputusan W7). Layar ini publik.
+- Teks contoh: *"A012 siap diambil di bar."* Hindari: *"Order A012 status READY."*
+
+### 5.2 Tiket Cetak dan Label
+
+- Printer thermal hitam-putih: tidak ada warna. Penekanan memakai huruf tebal dan ukuran ganda ESC/POS.
+- Lebar karakter: 32 kolom (58 mm) dan 48 kolom (80 mm). Nama produk dipotong di batas kolom, tidak
+  dibungkus ke baris yang membingungkan.
+- Tiket dapur/bar diawali nomor antrean atau meja dalam ukuran ganda, lalu item, opsi (diindentasi
+  dengan `- `), dan catatan tamu dengan awalan `Catatan:`. Tanpa harga.
+- Label cup (TSPL): nomor antrean, nama item, maksimal 3 opsi terpenting, nama tamu (opsional, diisi
+  kasir). Tanpa harga.
+- Footer struk diatur owner per printer (`printers.footer`), maksimal 2 baris.
+
+### 5.3 Struk Digital (Email, WhatsApp, SMS)
+
+- Isi pesan hanya tautan struk; rincian ada di halaman struk publik.
+- Email, subjek: *"Struk {nama toko} – {nomor pesanan}"*. Badan: satu kalimat terima kasih, total,
+  tombol **Lihat struk**.
+- WhatsApp / SMS: *"Terima kasih sudah mampir ke {nama toko}. Struk {nomor pesanan}: {tautan}"*.
+  Tanpa emoji di SMS (karakter GSM-7).
+- Nama toko dan logo mengikuti kustomisasi tenant; palet Espresso & Crema hanya bila tenant belum
+  mengatur sendiri.

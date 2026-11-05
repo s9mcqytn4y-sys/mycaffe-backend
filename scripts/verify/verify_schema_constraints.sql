@@ -355,6 +355,14 @@ BEGIN
     IF has_table_privilege('mycaffe_app', 'public.kds_tickets', 'DELETE') THEN
         RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may DELETE kds_tickets!';
     END IF;
+    -- 10F-18. Receipt deliveries (migration 000037): RLS on, append-only for the app role.
+    IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.receipt_deliveries'::regclass) THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: receipt_deliveries does not have row-level security enabled!';
+    END IF;
+    IF has_table_privilege('mycaffe_app', 'public.receipt_deliveries', 'DELETE')
+       OR has_table_privilege('mycaffe_app', 'public.receipt_deliveries', 'UPDATE') THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may change receipt_deliveries!';
+    END IF;
     -- 10F-17. Printers and print jobs (migration 000036): RLS on, never deleted by the app role.
     IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.printers'::regclass)
        OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.print_jobs'::regclass) THEN

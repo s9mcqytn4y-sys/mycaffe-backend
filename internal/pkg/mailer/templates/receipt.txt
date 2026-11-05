@@ -1,0 +1,10 @@
+Terima kasih sudah mampir ke {{.StoreName}}.
+
+Struk pesanan {{.OrderNumber}} (total {{.TotalLabel}}):
+{{.ActionURL}}
+
+Tautan berlaku sampai {{.ExpiresAt}}.
+Tidak merasa memesan? Abaikan email ini.
+
+--
+{{.StoreName}} (MyCaffe). Email otomatis, mohon tidak dibalas.

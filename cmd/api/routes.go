@@ -39,6 +39,7 @@ type handlerSet struct {
 	approval   *handler.ApprovalHandler
 	display    *handler.DisplayHandler
 	print      *handler.PrintHandler
+	receiptOut *handler.ReceiptDeliveryHandler
 	media      *handler.MediaHandler
 }
 
@@ -111,7 +112,9 @@ func wireHandlers(workerCtx context.Context, cfg *config.Config, db *sqlx.DB, hu
 	go tableService.StartTimerWorker(workerCtx, 30*time.Second)
 	h.guest = handler.NewGuestHandler(service.NewGuestService(db, orderService, paymentService))
 	h.kds = handler.NewKDSHandler(service.NewKDSService(db))
-	h.receipt = handler.NewReceiptHandler(service.NewReceiptService(db, cfg.AppPublicURL))
+	receiptService := service.NewReceiptService(db, cfg.AppPublicURL)
+	h.receipt = handler.NewReceiptHandler(receiptService)
+	h.receiptOut = handler.NewReceiptDeliveryHandler(service.NewReceiptDeliveryService(db, receiptService, emailService, messageService))
 	h.report = handler.NewReportHandler(service.NewReportService(db))
 	h.orderRead = handler.NewOrderReadHandler(service.NewOrderReadService(db))
 	h.outletCash = handler.NewOutletCashHandler(service.NewOutletCashService(db))
@@ -241,6 +244,7 @@ func registerStoreAndPOSRoutes(v1 *gin.RouterGroup, h *handlerSet) {
 	approvals.POST("/:id/reject", h.approval.Reject)
 	pos.POST("/orders/:id/discount", h.auth.RequirePermission(rbac.OrderDiscountApply), h.pos.ApplyDiscount)
 	pos.POST("/orders/:id/reprint", h.auth.RequirePermission(rbac.OrderPOSCreate), h.print.Reprint)
+	pos.POST("/orders/:id/receipt/send", h.auth.RequirePermission(rbac.OrderPOSCreate), h.receiptOut.SendByStaff)
 	pos.POST("/orders/:id/void", h.auth.RequirePermission(rbac.OrderVoid), h.pos.VoidOrder)
 	pos.POST("/orders/:id/payments/:payment_id/refund", h.auth.RequirePermission(rbac.PaymentRefund), h.pos.RefundPayment)
 	pos.POST("/products/:id/stock-override", h.auth.RequirePermission(rbac.StockOverride), h.pos.OverrideStock)
@@ -305,6 +309,7 @@ func registerTableAndGuestRoutes(v1 *gin.RouterGroup, h *handlerSet) {
 	guest.GET("/orders", h.guest.ListOrders)
 	guest.POST("/orders", h.guest.CreateOrder)
 	guest.POST("/orders/:id/payments", h.guest.InitiatePayment)
+	guest.POST("/orders/:id/receipt/send", h.receiptOut.SendByGuest)
 	guest.POST("/ws-ticket", h.realtime.IssueGuestTicket)
 	pos.POST("/ws-ticket", h.auth.RequireStaff(), h.realtime.IssueStaffTicket)
 }

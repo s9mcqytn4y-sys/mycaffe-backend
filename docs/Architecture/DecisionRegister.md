@@ -249,6 +249,22 @@ Status: decided. Context: GitHub-hosted runners stopped on a billing failure rig
 | W20 | Catalog snapshots (ADR-005 OF3) | Stored **when the catalog is served** to a device: version = SHA-256 of the pricing content, insert-once; `stale_catalog` measured from first serve |
 | W21 | Order of work | (1) runner + v0.9.0 build, (2) wa-bridge, (3) printfmt + print-agent → v0.9.1, (4) ADR-005 update, (5–9) PRs 10.1 devices/verifiers/snapshots, 10.2 offline sync + owner review, 10.3 negative stock, 10.4 agent LAN printing, 10.5 pending-sync shifts and amended Z-reports → v0.10.0 |
 
+## v0.11 promotions and inventory (recorded 2026-11-06, fifteenth interview)
+
+| ID | Decision | Approved option |
+|----|----------|-----------------|
+| X1 | v0.11 scope | **Two releases.** v0.11.0 = promotions & bundles (K7), then ingredient inventory with recipes and COGS (K2). v0.11.1 = per-channel (ojol) prices, stamp card (K6), invoices. Deposit, points and coupons (V12) last: customer money, needs verified phones and refunds |
+| X2 | Promo and cashier discount | Line promos apply first; the cashier order discount (O4) may still be added and is computed on, and limited by `cashier_max_discount_bps` of, the subtotal **after** promos. Receipts show both |
+| X3 | Promos offline | Active promo rules are part of the catalog snapshot (W20, version changes with them). Sync re-evaluates promos from the snapshot at `offline_created_at` (happy hour follows the order time). A quota already used up at sync still keeps the promo price and flags `promo_over_quota` for the owner |
+| X4 | Bundles | A bundle is **its own catalog item** with components (a component may offer choices); component stock and recipes are deducted and each component prints at its own station/KDS. For per-menu sales and COGS the bundle price is allocated to components in proportion to their normal prices. Automatic mix & match in the cart comes later |
+| X5 | Short ingredient stock | **Never blocks a sale**: recipe quantities are estimates, ingredient balances may go negative, low/negative alerts go to the owner and the stock count corrects them. Unit stock of ready-to-serve products and the manual sold-out switch keep blocking online sales |
+| X6 | Recipes | Defined **per variant and per modifier option** (incl. sub-addons); an option may add or substitute ingredients (e.g. oat milk: -150 ml milk, +150 ml oat). An option without a recipe uses none |
+| X7 | Purchasing | **Full module**: suppliers (name, contact, payment terms in days), purchase orders draft → sent → partly/fully received → closed, staged goods receipts that add stock and update the moving-average cost at the PO price (correctable on receipt), accounts payable per receipt with due date from the terms, paid from outlet cash (V13 limits and ADR-007 apply), transfer or cash, in instalments. A direct purchase without a PO stays as the quick path. No supplier returns, input tax or multiple warehouses |
+| X8 | Inventory permissions | Two new permissions: `inventory.count` (cashier, barista, kitchen: stock counts and waste) and `inventory.manage` (owner: ingredients, recipes, suppliers, POs, purchases, payables). A count variance or waste above a store rupiah limit per session (default Rp50.000) posts only after owner approval (own PIN or ADR-007); below it posts at once, audited |
+| X9 | Ready-to-serve stock | Stays in `products.stock_quantity` (online blocking, offline negative stock and stock override unchanged). Purchasing, counts, waste and moving-average cost serve both kinds of stock item: ingredients and ready-to-serve products |
+| X10 | COGS capture | Default recorded without a question: the cost of goods sold is stored **per order line when the order is paid**, so margin reports do not move when ingredient prices change later |
+| X11 | Order of work | 11.1 promo engine (rules, happy hour, quota, per line, quote and guest QR, offline snapshot) → 11.2 bundles → 11.3 ingredients, recipes, deduction on payment, alerts, COGS per line → 11.4 suppliers, POs, staged receipts, direct purchases, moving average → 11.5 payables and payments → 11.6 stock counts and waste with approval, COGS and gross-profit report per menu → v0.11.0 |
+
 ## Awaiting owner approval
 
 None. The G-1/G-2 contract (PR #55) and ADR-007 (G-5) were approved on 2026-11-04.

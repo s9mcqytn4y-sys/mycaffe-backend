@@ -51,6 +51,11 @@ const (
 
 	// DeviceManage registers, renames and revokes offline-capable POS devices (ADR-005 OF2), owner only.
 	DeviceManage Permission = "device.manage"
+
+	// InventoryManage: ingredients, recipes, suppliers, purchases, payables (owner, X8).
+	InventoryManage Permission = "inventory.manage"
+	// InventoryCount: stock counts and waste (cashier, barista, kitchen; X8, PR 11.6).
+	InventoryCount Permission = "inventory.count"
 )
 
 // Options are per-store settings that widen a role (owner decision C3).
@@ -66,6 +71,7 @@ var all = []Permission{
 	OrderVoid, PaymentRefund, OrderDiscountApply, StockOverride,
 	KDSBaristaRead, KDSBaristaUpdate, KDSKitchenRead, KDSKitchenUpdate,
 	AvailabilityToggleBeverage, AvailabilityToggleFood, TableManage, TableQRManage, ApprovalDecide, DeviceManage,
+	InventoryManage, InventoryCount,
 }
 
 var cashierBase = []Permission{
@@ -75,13 +81,14 @@ var cashierBase = []Permission{
 	// thresholds of O1/O4 (stock override always needs the owner PIN).
 	OrderVoid, PaymentRefund, OrderDiscountApply, StockOverride,
 	KDSBaristaRead, KDSKitchenRead,
+	InventoryCount,
 }
 
 var roleMatrix = map[domain.UserRole][]Permission{
 	domain.RoleOwner:   all,
 	domain.RoleCashier: cashierBase,
-	domain.RoleBarista: {KDSBaristaRead, KDSBaristaUpdate, AvailabilityToggleBeverage},
-	domain.RoleKitchen: {KDSKitchenRead, KDSKitchenUpdate, AvailabilityToggleFood},
+	domain.RoleBarista: {KDSBaristaRead, KDSBaristaUpdate, AvailabilityToggleBeverage, InventoryCount},
+	domain.RoleKitchen: {KDSKitchenRead, KDSKitchenUpdate, AvailabilityToggleFood, InventoryCount},
 }
 
 // Permissions returns the effective, sorted permission set of a role. Unknown roles get none.

@@ -40,6 +40,7 @@ type handlerSet struct {
 	display    *handler.DisplayHandler
 	print      *handler.PrintHandler
 	device     *handler.DeviceHandler
+	inventory  *handler.InventoryHandler
 	offline    *handler.OfflineHandler
 	receiptOut *handler.ReceiptDeliveryHandler
 	media      *handler.MediaHandler
@@ -104,6 +105,7 @@ func wireHandlers(workerCtx context.Context, cfg *config.Config, db *sqlx.DB, hu
 	h.approval = handler.NewApprovalHandler(service.NewApprovalService(db, operationalService))
 	catalogService := service.NewCatalogService(db)
 	h.catalog = handler.NewCatalogHandler(catalogService)
+	h.inventory = handler.NewInventoryHandler(service.NewInventoryService(db))
 	h.device = handler.NewDeviceHandler(service.NewDeviceService(db, catalogService))
 
 	shiftService := service.NewShiftService(db)
@@ -356,6 +358,14 @@ func registerKDSAndCatalogRoutes(v1 *gin.RouterGroup, h *handlerSet) {
 	cat.POST("/products/:id/variants", manage, h.catalog.CreateVariant)
 	cat.PATCH("/variants/:id", manage, h.catalog.UpdateVariant)
 	cat.DELETE("/variants/:id", manage, h.catalog.ArchiveVariant)
+	// Ingredients and recipes (v0.11 PR 11.3, K2): deducted when an order is paid, COGS per line (X10).
+	inv := v1.Group("/inventory", h.auth.RequirePermission(rbac.InventoryManage))
+	inv.GET("/ingredients", h.inventory.ListIngredients)
+	inv.POST("/ingredients", h.inventory.CreateIngredient)
+	inv.PATCH("/ingredients/:id", h.inventory.UpdateIngredient)
+	inv.GET("/recipes/:kind/:id", h.inventory.GetRecipe)
+	inv.PUT("/recipes/:kind/:id", h.inventory.SetRecipe)
+	inv.PUT("/products/:id/unit-cost", h.inventory.SetProductUnitCost)
 	// Promotions (v0.11 PR 11.1, K7): one best promotion per line, taken off the line subtotal.
 	cat.GET("/promotions", manage, h.catalog.ListPromotions)
 	cat.POST("/promotions", manage, h.catalog.CreatePromotion)

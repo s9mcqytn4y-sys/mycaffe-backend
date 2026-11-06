@@ -152,6 +152,8 @@ The design review flagged a conflict between Module 3 ("cashier must not void/re
 | `table.manage`, `table.qr.manage` | ✓ | | | | 02.01-D |
 | `approval.decide` | ✓ | | | | ADR-007 |
 | `device.manage` | ✓ | | | | ADR-005 (v0.10) |
+| `inventory.manage` | ✓ | | | | X8 (v0.11) |
+| `inventory.count` | ✓ | ✓ | ✓ | ✓ | X8 (v0.11) |
 
 Cross-tenant access is impossible for every role by construction (RLS + trusted `store_id`), not by a permission.
 

@@ -131,10 +131,7 @@ func TestPromotionIntegration(t *testing.T) {
 		if res.Code != http.StatusCreated {
 			t.Fatalf("create promotion failed: %d: %s", res.Code, res.Body.String())
 		}
-		_ = json.Unmarshal(res.Body.Bytes(), &promo)
-		t.Cleanup(func() {
-			call("PATCH", "/catalog/promotions/"+promo.ID.String(), owner, map[string]any{"is_active": false})
-		})
+		_ = json.Unmarshal(res.Body.Bytes(), &promo) // it only targets this test's product, archived at the end
 		if list := call("GET", "/catalog/promotions", owner, nil); !strings.Contains(list.Body.String(), promo.ID.String()) {
 			t.Fatal("the owner list must show the promotion")
 		}

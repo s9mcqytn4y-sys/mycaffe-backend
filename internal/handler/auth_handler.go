@@ -43,6 +43,8 @@ type StaffLoginRequest struct {
 	// Badge is the scanned staff ID card QR (V14), used instead of store_slug + email.
 	Badge string `json:"badge"`
 	PIN   string `json:"pin" binding:"required"`
+	// DeviceCredential (optional): a registered POS device also receives an offline PIN verifier.
+	DeviceCredential string `json:"device_credential"`
 }
 
 var pinFormat = regexp.MustCompile(`^[0-9]{6}$`)
@@ -56,6 +58,8 @@ type StaffSessionResponse struct {
 	Staff                service.StaffIdentity `json:"staff"`
 	// PINChangeRequired: the staff member signed in with a temporary PIN and must change it.
 	PINChangeRequired bool `json:"pin_change_required"`
+	// OfflinePINVerifier is present only for a login from a registered device (ADR-005 OF2).
+	OfflinePINVerifier *service.OfflinePINVerifier `json:"offline_pin_verifier,omitempty"`
 }
 
 // StaffMeResponse matches the OpenAPI StaffMeResponse schema.
@@ -102,15 +106,19 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	}
 
 	tokens, err := h.authService.Login(c.Request.Context(), service.LoginInput{
-		StoreSlug: req.StoreSlug,
-		Email:     req.Email,
-		Badge:     req.Badge,
-		PIN:       req.PIN,
-		UserAgent: c.Request.UserAgent(),
-		ClientIP:  ip,
+		StoreSlug:        req.StoreSlug,
+		Email:            req.Email,
+		Badge:            req.Badge,
+		PIN:              req.PIN,
+		DeviceCredential: strings.TrimSpace(req.DeviceCredential),
+		UserAgent:        c.Request.UserAgent(),
+		ClientIP:         ip,
 	})
 	switch {
 	case err == nil:
+	case errors.Is(err, service.ErrDeviceInvalid):
+		authError(c, http.StatusUnauthorized, "DEVICE_INVALID", "Perangkat ini tidak terdaftar atau sudah dicabut.")
+		return
 	case errors.Is(err, service.ErrInvalidCredentials):
 		h.limiter.RecordFailure(ip)
 		log.Printf("[AUTH] staff login failed request_ip=%s store_slug=%q outcome=invalid_credentials", ip, strings.ToLower(strings.TrimSpace(req.StoreSlug)))
@@ -241,6 +249,7 @@ func (h *AuthHandler) writeSession(c *gin.Context, tokens *service.SessionTokens
 		SessionExpiresAt:     tokens.RefreshExpiresAt,
 		Staff:                tokens.Staff,
 		PINChangeRequired:    tokens.PINChangeRequired,
+		OfflinePINVerifier:   tokens.OfflineVerifier,
 	})
 }
 

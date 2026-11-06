@@ -422,8 +422,6 @@ type printScope struct {
 	reprintBy *uuid.UUID
 }
 
-var stationTitles = map[string]string{"bar": "BAR", "kitchen": "DAPUR", "checker": "CHECKER"}
-
 // enqueuePrintJobsTx renders and queues one job per active printer that has lines to print. Stores
 // without printers pay one indexed query.
 func enqueuePrintJobsTx(ctx context.Context, tx *sqlx.Tx, orders *postgres.OrderRepository, order *domain.Order, sc printScope, now time.Time) (int, error) {
@@ -433,6 +431,16 @@ func enqueuePrintJobsTx(ctx context.Context, tx *sqlx.Tx, orders *postgres.Order
 	}
 	if len(printers) == 0 {
 		return 0, nil
+	}
+	if sc.reprintBy == nil {
+		// An offline order the device already printed on the LAN agent is not printed twice (W18).
+		var printedLocally bool
+		if err := tx.GetContext(ctx, &printedLocally, `SELECT printed_locally FROM orders WHERE store_id = $1 AND id = $2`, order.StoreID, order.ID); err != nil {
+			return 0, err
+		}
+		if printedLocally {
+			return 0, nil
+		}
 	}
 	all, err := receiptLinesTx(ctx, tx, order.StoreID, order.ID)
 	if err != nil {
@@ -455,41 +463,24 @@ func enqueuePrintJobsTx(ctx context.Context, tx *sqlx.Tx, orders *postgres.Order
 			return 0, fmt.Errorf("failed to load round number: %w", err)
 		}
 	}
-	pick := func(station string) []ReceiptLine {
-		var out []ReceiptLine
-		for _, l := range lines {
-			if l.station == station {
-				out = append(out, l)
-			}
-		}
-		return out
-	}
+	plines := printLines(lines)
 	n := 0
 	for _, p := range printers {
-		kind, sel := "ticket", []ReceiptLine(nil)
-		switch p.Station {
-		case "bar", "kitchen":
-			if sc.stations == nil || sc.stations[p.Station] {
-				sel = pick(p.Station)
-			}
-		case "checker":
-			kind, sel = "checker", lines
-		case "label":
-			if sc.stations == nil || sc.stations["bar"] {
-				kind, sel = "label", pick("bar")
-			}
+		// Only the KDS stations just created print; labels follow the bar, the checker always prints.
+		source := p.Station
+		if source == "label" {
+			source = "bar"
 		}
+		if sc.stations != nil && p.Station != "checker" && !sc.stations[source] {
+			continue
+		}
+		kind, sel := printfmt.Select(p.Station, plines)
 		if len(sel) == 0 || (sc.kind != "" && sc.kind != kind) {
 			continue
 		}
 		t := base
-		t.Title, t.Lines = stationTitles[p.Station], printLines(sel)
-		var payload []byte
-		if p.Format == "tspl" {
-			payload, err = printfmt.Labels(&t, p.PaperWidthMM, *p.LabelHeightMM, p.Copies)
-		} else {
-			payload, err = printfmt.StationTicket(&t, p.PaperWidthMM, p.Copies, p.Footer)
-		}
+		t.Lines = sel
+		payload, err := printfmt.Render(p.config(), t)
 		if err != nil {
 			// A bad printer setting must never block a payment or a round: skip it and say why.
 			log.Printf("[PRINT] store_id=%s printer_id=%s render error: %v", order.StoreID, p.ID, err)
@@ -526,7 +517,26 @@ func (s *PrintService) audit(ctx context.Context, tx *sqlx.Tx, actor *Authentica
 func printLines(lines []ReceiptLine) []printfmt.Line {
 	out := make([]printfmt.Line, len(lines))
 	for i, l := range lines {
-		out[i] = printfmt.Line{Name: l.Name, Variant: l.Variant, Options: l.Options, Notes: l.Notes, Quantity: l.Quantity}
+		out[i] = printfmt.Line{Name: l.Name, Variant: l.Variant, Options: l.Options, Notes: l.Notes, Quantity: l.Quantity, Station: l.station}
 	}
 	return out
+}
+
+// config is the printer as the agent renders it (shared with the LAN fallback, W18).
+func (p Printer) config() printfmt.Printer {
+	return printfmt.Printer{Station: p.Station, Format: p.Format, PaperWidthMM: p.PaperWidthMM, LabelHeightMM: p.LabelHeightMM, Copies: p.Copies, Footer: p.Footer}
+}
+
+// AgentPrinter returns the printer's own settings so the agent can cache them for LAN printing during an
+// outage (W18).
+func (s *PrintService) AgentPrinter(ctx context.Context, token string) (*printfmt.Printer, error) {
+	var out printfmt.Printer
+	err := s.agentTx(ctx, token, func(_ *sqlx.Tx, _ uuid.UUID, p *Printer, _ time.Time) error {
+		out = p.config()
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
 }

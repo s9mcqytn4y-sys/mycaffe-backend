@@ -67,15 +67,32 @@ func isBirthYearLike(pin string) bool {
 	return len(pin) == 6 && (pin[:2] == "19" || pin[:2] == "20") && pin[4:] == pin[:2]
 }
 
+// Offline PIN verifier parameters (ADR-005 W19): heavier than the server hash because a copied tablet
+// can be attacked offline for the verifier's 72 h lifetime.
+const (
+	offlineMemoryKiB  = 64 * 1024
+	offlineIterations = 3
+)
+
 // HashPIN derives an argon2id PHC string: $argon2id$v=19$m=19456,t=2,p=1$<salt>$<hash>.
 func HashPIN(pin string) (string, error) {
+	return hashPINWith(pin, argonMemoryKiB, argonIterations)
+}
+
+// OfflinePINVerifier derives the device-held verifier (fresh salt per issue) in the same PHC format,
+// so a POS device checks the PIN offline with any argon2id implementation.
+func OfflinePINVerifier(pin string) (string, error) {
+	return hashPINWith(pin, offlineMemoryKiB, offlineIterations)
+}
+
+func hashPINWith(pin string, memoryKiB, iterations uint32) (string, error) {
 	salt := make([]byte, argonSaltLen)
 	if _, err := rand.Read(salt); err != nil {
 		return "", fmt.Errorf("failed to generate PIN salt: %w", err)
 	}
-	key := argon2.IDKey([]byte(pin), salt, argonIterations, argonMemoryKiB, argonThreads, argonKeyLen)
+	key := argon2.IDKey([]byte(pin), salt, iterations, memoryKiB, argonThreads, argonKeyLen)
 	return fmt.Sprintf("$argon2id$v=%d$m=%d,t=%d,p=%d$%s$%s",
-		argon2.Version, argonMemoryKiB, argonIterations, argonThreads,
+		argon2.Version, memoryKiB, iterations, argonThreads,
 		base64.RawStdEncoding.EncodeToString(salt),
 		base64.RawStdEncoding.EncodeToString(key),
 	), nil

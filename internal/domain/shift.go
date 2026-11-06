@@ -137,4 +137,10 @@ type ZReport struct {
 	UnsettledOpenTabsCount       int                   `json:"unsettled_open_tabs_count"`
 	UnsettledOpenTabsTotalAmount int64                 `json:"unsettled_open_tabs_total_amount"`
 	UnsettledOpenTabs            []UnsettledTabSummary `json:"unsettled_open_tabs,omitempty"`
+	// Amended: offline orders were paid into this shift after it closed (ADR-005 OF4). The close figures
+	// above stay as counted; Summary already includes the late cash.
+	Amended           bool       `json:"amended"`
+	AmendedAt         *time.Time `json:"amended_at,omitempty"`
+	LateOfflineOrders int        `json:"late_offline_orders"`
+	LateOfflineAmount int64      `json:"late_offline_amount"`
 }

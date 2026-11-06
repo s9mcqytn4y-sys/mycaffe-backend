@@ -33,6 +33,8 @@ tags:
     description: Tables, derived table occupancy, table sessions and public QR resolution (iteration 5a)
   - name: Guest
     description: QR guest sessions, pay-first guest orders and the public order tracker (iteration 5b)
+  - name: Devices
+    description: Registered POS devices, offline PIN verifiers and catalog snapshots (v0.10 PR 10.1, ADR-005)
   - name: Printing
     description: Print queue, printers per station and the print agent API (v0.9 PR 9.4, W8)
   - name: Display
@@ -2168,6 +2170,8 @@ paths:
                     example: true
         "422":
           description: Variance exceeds tolerance and owner PIN / reason missing
+        "409":
+          description: SHIFT_PENDING_OFFLINE_ORDERS (a registered POS device still holds offline orders of this shift; sync it or let the owner force-close) or SHIFT_CONFLICT
 
   /api/v1/pos/shifts/{shift_id}/force-close:
     post:
@@ -3264,6 +3268,349 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+  /api/v1/store/devices:
+    get:
+      tags: [Devices]
+      operationId: listDevices
+      summary: POS devices of the store, active first, without credentials (device.manage)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: Devices
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [devices]
+                properties:
+                  devices:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Device"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      tags: [Devices]
+      operationId: registerDevice
+      summary: Register a POS device that may sell offline; the credential is returned once (audited, ADR-005 OF2)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, prefix]
+              properties:
+                name:
+                  type: string
+                  maxLength: 50
+                prefix:
+                  type: string
+                  pattern: "^[A-Za-z][A-Za-z0-9]{0,3}$"
+                  description: Upper-cased; printed on offline queue numbers (e.g. X1-007); fixed after registration.
+      responses:
+        "201":
+          description: Registered; credential shown once
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Device"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+  /api/v1/store/devices/{id}:
+    patch:
+      tags: [Devices]
+      operationId: renameDevice
+      summary: Rename a device; the prefix cannot change (device.manage, audited)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  maxLength: 50
+      responses:
+        "200":
+          description: Renamed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Device"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+  /api/v1/store/devices/{id}/revoke:
+    post:
+      tags: [Devices]
+      operationId: revokeDevice
+      summary: Revoke a device at once and drop its PIN verifier records (device.manage, audited, idempotent)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Revoked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Device"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/v1/device/catalog:
+    get:
+      security:
+        - DeviceCredential: []
+      tags: [Devices]
+      operationId: getDeviceCatalog
+      summary: POS catalog for a registered device plus the catalog_version to send with offline orders
+      description: >-
+        Serving stores a snapshot of the pricing content (prices, modifier rules, tax, service, cash rounding,
+        cashier discount limit) under version = SHA-256 of that content, once (W20). Stock and availability do
+        not change the version. Offline orders older than 24 h after first_served_at are flagged stale_catalog.
+      x-implementation-status: implemented
+      responses:
+        "200":
+          description: Catalog and version
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [catalog_version, first_served_at, catalog]
+                properties:
+                  catalog_version:
+                    type: string
+                    pattern: "^[0-9a-f]{64}$"
+                  first_served_at:
+                    type: string
+                    format: date-time
+                  catalog:
+                    type: object
+                    description: Same shape as GET /api/v1/pos/catalog.
+        "401":
+          description: DEVICE_INVALID (unknown, revoked, or credential of another store)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/device/offline-orders/sync:
+    post:
+      security:
+        - DeviceCredential: []
+      tags: [Devices]
+      operationId: syncOfflineOrders
+      summary: Upload orders taken offline (max 50) and offline PIN failures; one result per order
+      description: >-
+        Each order is processed in its own transaction and is idempotent per client_order_id (a re-sync returns
+        the first result). Prices come from the catalog snapshot of catalog_version, never from the device; a
+        version first served more than 24 h before the order is accepted and flagged stale_catalog. Accepted
+        orders get the official order and queue number, are paid (cash or static QRIS with a reference) into
+        shift_id, which must be the open shift of its drawer, and keep offline_queue_number. Orders the server
+        cannot accept (wrong prefix, limits of 12 h / 300 orders since the last sync, no valid PIN verifier,
+        discount above the cashier limit, unknown product or version, closed shift) are stored as
+        rejected with a reason for the owner (ADR-005 OF9). Stock never refuses an offline order: tracked stock may go
+        below zero and the lines are flagged oversold (W17). Late orders into a closed shift arrive with PR 10.5.
+      x-implementation-status: implemented
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                orders:
+                  type: array
+                  maxItems: 50
+                  items:
+                    $ref: "#/components/schemas/OfflineOrder"
+                pending_shift_ids:
+                  type: array
+                  description: Shifts that still have orders waiting on the device after this batch; a cashier cannot close them (OF4). Omit to keep the last report, [] to clear it.
+                  items:
+                    type: string
+                    format: uuid
+                pin_failures:
+                  type: array
+                  maxItems: 50
+                  items:
+                    type: object
+                    required: [user_id, at, attempts]
+                    properties:
+                      user_id:
+                        type: string
+                        format: uuid
+                      at:
+                        type: string
+                        format: date-time
+                      attempts:
+                        type: integer
+                      locked:
+                        type: boolean
+      responses:
+        "200":
+          description: One result per order, in request order
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [results]
+                properties:
+                  results:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/OfflineSyncResult"
+        "401":
+          description: DEVICE_INVALID (unknown, revoked, or credential of another store); nothing is stored
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+  /api/v1/store/offline-submissions:
+    get:
+      tags: [Devices]
+      operationId: listOfflineSubmissions
+      summary: Offline submissions by status, newest first (device.manage); default rejected = waiting for the owner
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [accepted, rejected, resolved_accepted, resolved_rejected]
+      responses:
+        "200":
+          description: Submissions (max 200)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [submissions]
+                properties:
+                  submissions:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, device_prefix, client_order_id, status, created_at, payload]
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                        device_prefix:
+                          type: string
+                        client_order_id:
+                          type: string
+                          format: uuid
+                        status:
+                          type: string
+                        reason:
+                          type: string
+                        order_id:
+                          type: string
+                          format: uuid
+                        resolved_at:
+                          type: string
+                          format: date-time
+                        resolution_note:
+                          type: string
+                        created_at:
+                          type: string
+                          format: date-time
+                        payload:
+                          $ref: "#/components/schemas/OfflineOrder"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+  /api/v1/store/offline-submissions/{id}/resolve:
+    post:
+      tags: [Devices]
+      operationId: resolveOfflineSubmission
+      summary: Accept or reject a rejected offline submission (device.manage, audited)
+      description: >-
+        Accept re-processes the stored order with the device-side checks waived (verifier, limits, revoked
+        device); pricing and the shift still apply, and a failure answers 422 with the reason while the
+        submission keeps waiting. Reject needs a note.
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision]
+              properties:
+                decision:
+                  type: string
+                  enum: [accept, reject]
+                note:
+                  type: string
+                  maxLength: 500
+      responses:
+        "200":
+          description: Resolved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OfflineSyncResult"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: SUBMISSION_ALREADY_RESOLVED
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
   /api/v1/store/printers:
     get:
       tags: [Printing]
@@ -3373,6 +3720,43 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+  /api/v1/print-agent/printer:
+    get:
+      security:
+        - PrinterToken: []
+      tags: [Printing]
+      operationId: getAgentPrinter
+      summary: This printer's settings, cached by the agent for LAN printing during an outage (W18)
+      x-implementation-status: implemented
+      responses:
+        "200":
+          description: Printer settings
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [station, format, paper_width_mm, copies, footer]
+                properties:
+                  station:
+                    type: string
+                    enum: [bar, kitchen, checker, label]
+                  format:
+                    type: string
+                    enum: [escpos, tspl]
+                  paper_width_mm:
+                    type: integer
+                  label_height_mm:
+                    type: integer
+                  copies:
+                    type: integer
+                  footer:
+                    type: string
+        "401":
+          description: PRINTER_TOKEN_INVALID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /api/v1/print-agent/jobs/claim:
     post:
       security:
@@ -3983,7 +4367,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "401":
-          description: Generic authentication failure (`code=INVALID_CREDENTIALS`)
+          description: Generic authentication failure (`code=INVALID_CREDENTIALS`), or `code=DEVICE_INVALID` when a correct login carried a device_credential that is unknown, revoked or of another store
           content:
             application/json:
               schema:
@@ -4588,6 +4972,11 @@ paths:
 
 components:
   securitySchemes:
+    DeviceCredential:
+      type: apiKey
+      in: header
+      name: Authorization
+      description: 'Registered POS device credential sent as "Device <credential>" (ADR-005 OF2). Shown once at registration; revoked by the owner.'
     PrinterToken:
       type: apiKey
       in: header
@@ -4779,6 +5168,111 @@ components:
           type: string
           format: date-time
           description: Expiry of the receipt link
+    OfflineOrder:
+      type: object
+      required: [client_order_id, offline_queue_number, offline_created_at, cashier_id, shift_id, catalog_version, order_type, items, payment]
+      description: An order as the device recorded it (ADR-005 OF1). Prices are never taken from the device.
+      properties:
+        client_order_id:
+          type: string
+          format: uuid
+        offline_queue_number:
+          type: string
+          maxLength: 20
+          description: Starts with the device prefix, e.g. X1-007.
+        offline_created_at:
+          type: string
+          format: date-time
+        cashier_id:
+          type: string
+          format: uuid
+          description: Must hold an unexpired PIN verifier for this device at offline_created_at.
+        shift_id:
+          type: string
+          format: uuid
+        catalog_version:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+        order_type:
+          type: string
+          enum: [takeaway, dine_in]
+        customer_name:
+          type: string
+        notes:
+          type: string
+        items:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/OrderItemInput"
+        discount_bps:
+          type: integer
+          minimum: 0
+          description: Up to the store's cashier_max_discount_bps in the snapshot; no owner approval or compliment offline (W16).
+        discount_reason:
+          type: string
+        payment:
+          type: object
+          required: [method]
+          properties:
+            method:
+              type: string
+              enum: [cash, static_qris]
+            cash_tendered_amount:
+              type: integer
+              format: int64
+            reference:
+              type: string
+              description: Required for static_qris (OF8).
+        printed_locally:
+          type: boolean
+          description: The kitchen tickets were printed on the LAN print agent during the outage; the server queues no print job (W18).
+    OfflineSyncResult:
+      type: object
+      required: [client_order_id, status]
+      properties:
+        client_order_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [accepted, rejected, resolved_accepted, resolved_rejected]
+        reason:
+          type: string
+        order_id:
+          type: string
+          format: uuid
+        order_number:
+          type: string
+        queue_number:
+          type: string
+    Device:
+      type: object
+      required: [id, name, prefix, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        prefix:
+          type: string
+          description: Printed on offline queue numbers (e.g. X1-007).
+        revoked_at:
+          type: string
+          format: date-time
+        last_seen_at:
+          type: string
+          format: date-time
+        last_sync_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        credential:
+          type: string
+          description: 'Only in the registration response; send as "Authorization: Device <credential>". Keep it secret.'
     Printer:
       type: object
       required: [id, name, station, format, paper_width_mm, copies, footer, is_active, created_at]
@@ -5340,6 +5834,17 @@ components:
           type: string
         notes:
           type: string
+        amended:
+          type: boolean
+          description: Offline orders were paid into this shift after it closed (ADR-005 OF4). The close figures stay as counted; summary includes the late cash.
+        amended_at:
+          type: string
+          format: date-time
+        late_offline_orders:
+          type: integer
+        late_offline_amount:
+          type: integer
+          format: int64
     OrderSummary:
       type: object
       required: [id, order_number, queue_number, order_type, billing_mode, status, payment_status, total_amount, paid_amount, refunded_amount, item_count, created_at]
@@ -5647,7 +6152,7 @@ components:
                 type: ["string", "null"]
               stock_quantity:
                 type: integer
-                description: Staff view only.
+                description: Staff view only. Can be negative after offline sales (W17); the item is then sold out.
               variants:
                 type: array
                 items:
@@ -5867,6 +6372,12 @@ components:
           pattern: "^[0-9]{6}$"
           writeOnly: true
           description: Exactly 6 digits (owner decision E1). Never logged.
+        device_credential:
+          type: string
+          writeOnly: true
+          description: >-
+            Optional credential of a registered POS device (ADR-005 OF2). A successful login then also returns
+            offline_pin_verifier for this staff member on this device.
 
     StaffProfile:
       type: object
@@ -5940,6 +6451,20 @@ components:
           description: Absolute session end (login time + 12 h); refresh cannot extend it.
         staff:
           $ref: "#/components/schemas/StaffProfile"
+        offline_pin_verifier:
+          type: object
+          description: Only on a login with device_credential (ADR-005 OF2, W19). Store it on the device only.
+          required: [verifier, expires_at]
+          properties:
+            verifier:
+              type: string
+              description: >-
+                argon2id PHC string ($argon2id$v=19$m=65536,t=3,p=1$salt$hash) with a fresh salt; the device
+                checks the PIN offline against it and locks the staff member after 5 wrong PINs.
+            expires_at:
+              type: string
+              format: date-time
+              description: Issue time + 72 h.
 
     StaffMeResponse:
       type: object

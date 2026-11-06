@@ -133,23 +133,30 @@ func (s *CatalogService) PublicCatalog(ctx context.Context, slug string) (*Catal
 func (s *CatalogService) catalog(ctx context.Context, storeID uuid.UUID, staff bool) (*CatalogView, error) {
 	var view *CatalogView
 	err := database.WithTenantTx(ctx, s.db, storeID, func(tx *sqlx.Tx) error {
-		store, err := s.order.GetStoreForOrder(ctx, tx, storeID)
-		if err != nil {
-			return err
-		}
 		settings, err := postgres.NewSettingsRepository().GetStoreSettings(ctx, tx, storeID)
 		if err != nil {
 			return err
 		}
-		rows, err := s.repo.LoadCatalog(ctx, tx, storeID)
-		if err != nil {
+		if view, err = s.catalogTx(ctx, tx, storeID, settings, staff); err != nil {
 			return err
 		}
-		view = buildCatalogView(store, settings, rows, staff)
 		view.GeneratedAt = s.nowFunc().UTC()
 		return nil
 	})
 	return view, err
+}
+
+// catalogTx builds the catalog view inside an open tenant transaction.
+func (s *CatalogService) catalogTx(ctx context.Context, tx *sqlx.Tx, storeID uuid.UUID, settings domain.StoreSettings, staff bool) (*CatalogView, error) {
+	store, err := s.order.GetStoreForOrder(ctx, tx, storeID)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.repo.LoadCatalog(ctx, tx, storeID)
+	if err != nil {
+		return nil, err
+	}
+	return buildCatalogView(store, settings, rows, staff), nil
 }
 
 func buildCatalogView(store *domain.Store, settings domain.StoreSettings, rows *postgres.CatalogRows, staff bool) *CatalogView {

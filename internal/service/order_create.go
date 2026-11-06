@@ -67,8 +67,21 @@ func (s *OrderService) CreateOrder(ctx context.Context, trustedStoreID uuid.UUID
 
 func (s *OrderService) executeCreateOrderTx(ctx context.Context, trustedStoreID uuid.UUID, input OrderCreationInput) (*CreateOrderResult, error) {
 	var result *CreateOrderResult
-
 	err := database.WithTenantTx(ctx, s.db, trustedStoreID, func(tx *sqlx.Tx) error {
+		var err error
+		result, err = s.createOrderTx(ctx, tx, trustedStoreID, input)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// createOrderTx creates an order inside an open tenant transaction (also used by offline sync).
+func (s *OrderService) createOrderTx(ctx context.Context, tx *sqlx.Tx, trustedStoreID uuid.UUID, input OrderCreationInput) (*CreateOrderResult, error) {
+	var result *CreateOrderResult
+	err := func() error {
 		store, err := s.repo.GetStoreForOrder(ctx, tx, trustedStoreID)
 		if err != nil {
 			if errors.Is(err, postgres.ErrStoreNotFound) {
@@ -156,6 +169,12 @@ func (s *OrderService) executeCreateOrderTx(ctx context.Context, trustedStoreID 
 			OptionChildGroups: catalogData.OptionModifierGroups,
 			Variants:          catalogData.Variants,
 		}
+		if normalizedInput.Offline != nil {
+			// Offline sync (ADR-005 OF3): price from the served snapshot, not from today's catalog.
+			if err := normalizedInput.Offline.apply(&catalogData.Store, &snapshot, normalizedInput); err != nil {
+				return err
+			}
+		}
 
 		priced, err := ValidateAndPriceOrder(catalogData.Store, normalizedInput, snapshot)
 		if err != nil {
@@ -180,8 +199,17 @@ func (s *OrderService) executeCreateOrderTx(ctx context.Context, trustedStoreID 
 			}
 		}
 
+		guardedProducts, guardedOptions := priced.ProductStockDeducts, priced.OptionStockDeducts
+		if normalizedInput.Offline != nil {
+			// Offline sync never rejects for stock (OF5, W17): deduct unguarded and note what went negative.
+			if err := normalizedInput.Offline.deductStock(ctx, tx, s.repo, trustedStoreID, priced); err != nil {
+				return err
+			}
+			guardedProducts, guardedOptions = nil, nil
+		}
+
 		// Deduct product stock in deterministic sorted UUID order.
-		for _, prodID := range sortedUUIDKeysFromIntMap(priced.ProductStockDeducts) {
+		for _, prodID := range sortedUUIDKeysFromIntMap(guardedProducts) {
 			qty := priced.ProductStockDeducts[prodID]
 			if err := s.repo.DeductProductStock(ctx, tx, trustedStoreID, prodID, qty); err != nil {
 				if errors.Is(err, postgres.ErrStockUpdateFailed) {
@@ -192,7 +220,7 @@ func (s *OrderService) executeCreateOrderTx(ctx context.Context, trustedStoreID 
 		}
 
 		// Deduct modifier option stock in deterministic sorted UUID order.
-		for _, optID := range sortedUUIDKeysFromIntMap(priced.OptionStockDeducts) {
+		for _, optID := range sortedUUIDKeysFromIntMap(guardedOptions) {
 			qty := priced.OptionStockDeducts[optID]
 			if err := s.repo.DeductModifierOptionStock(ctx, tx, trustedStoreID, optID, qty); err != nil {
 				if errors.Is(err, postgres.ErrStockUpdateFailed) {
@@ -271,6 +299,11 @@ func (s *OrderService) executeCreateOrderTx(ctx context.Context, trustedStoreID 
 			return err
 		}
 		order.Items = persistedItems
+		if normalizedInput.Offline != nil {
+			if err := normalizedInput.Offline.flagOversold(ctx, tx, trustedStoreID, order.ID); err != nil {
+				return err
+			}
+		}
 
 		initialSplit := domain.PaymentSplit{
 			ID:                  uuid.New(),
@@ -331,7 +364,7 @@ func (s *OrderService) executeCreateOrderTx(ctx context.Context, trustedStoreID 
 			IsIdempotentReplay: false,
 		}
 		return nil
-	})
+	}()
 	if err != nil {
 		return nil, err
 	}

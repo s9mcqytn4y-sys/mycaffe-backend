@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
@@ -44,6 +45,20 @@ func orderTotals(subtotal, discount int64, store *domain.Store) (service, tax, t
 		return
 	}
 	return service, tax, net + service + tax, nil
+}
+
+// persistDiscountTx writes a discount and the re-computed totals on the order and its single split.
+func persistDiscountTx(ctx context.Context, tx *sqlx.Tx, order *domain.Order, splitID uuid.UUID, discount, service, tax, total int64, reason string, now time.Time) error {
+	order.DiscountAmount, order.ServiceChargeAmount, order.TaxAmount, order.TotalAmount = discount, service, tax, total
+	if _, err := tx.ExecContext(ctx, `UPDATE orders SET discount_amount = $3, service_charge_amount = $4, tax_amount = $5, total_amount = $6,
+		discount_reason = $7, updated_at = $8 WHERE store_id = $1 AND id = $2`, order.StoreID, order.ID, discount, service, tax, total, reason, now); err != nil {
+		return fmt.Errorf("failed to apply discount: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE payment_splits SET subtotal_amount = $3, service_charge_amount = $4, tax_amount = $5, total_amount = $6, updated_at = $7
+		WHERE store_id = $1 AND id = $2`, order.StoreID, splitID, order.SubtotalAmount-discount, service, tax, total, now); err != nil {
+		return fmt.Errorf("failed to re-total the split: %w", err)
+	}
+	return nil
 }
 
 // discountNeedsOwner reports whether a discount is above the cashier limit of the store.
@@ -141,14 +156,8 @@ func (s *OperationalService) ApplyDiscount(ctx context.Context, actor *Authentic
 		if err != nil {
 			return err
 		}
-		order.DiscountAmount, order.ServiceChargeAmount, order.TaxAmount, order.TotalAmount = discount, service, tax, total
-		if _, err := tx.ExecContext(ctx, `UPDATE orders SET discount_amount = $3, service_charge_amount = $4, tax_amount = $5, total_amount = $6,
-			discount_reason = $7, updated_at = $8 WHERE store_id = $1 AND id = $2`, storeID, order.ID, discount, service, tax, total, reason, now); err != nil {
-			return fmt.Errorf("failed to apply discount: %w", err)
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE payment_splits SET subtotal_amount = $3, service_charge_amount = $4, tax_amount = $5, total_amount = $6, updated_at = $7
-			WHERE store_id = $1 AND id = $2`, storeID, splits[0].ID, order.SubtotalAmount-discount, service, tax, total, now); err != nil {
-			return fmt.Errorf("failed to re-total the split: %w", err)
+		if err := persistDiscountTx(ctx, tx, order, splits[0].ID, discount, service, tax, total, reason, now); err != nil {
+			return err
 		}
 
 		compliment := total == 0

@@ -40,6 +40,7 @@ type handlerSet struct {
 	display    *handler.DisplayHandler
 	print      *handler.PrintHandler
 	device     *handler.DeviceHandler
+	offline    *handler.OfflineHandler
 	receiptOut *handler.ReceiptDeliveryHandler
 	media      *handler.MediaHandler
 }
@@ -84,6 +85,7 @@ func wireHandlers(workerCtx context.Context, cfg *config.Config, db *sqlx.DB, hu
 
 	paymentRepo := postgres.NewPaymentRepository()
 	paymentService := service.NewPaymentService(db, paymentRepo, orderRepo, midtransClient)
+	h.offline = handler.NewOfflineHandler(service.NewOfflineSyncService(db, orderService, paymentService))
 	h.midtrans.SetPaymentService(paymentService)
 
 	h.pos = handler.NewPOSHandler(orderService, paymentService, service.NewSettingsService(db))
@@ -281,6 +283,11 @@ func registerStoreAndPOSRoutes(v1 *gin.RouterGroup, h *handlerSet) {
 	devices.PATCH("/:id", h.device.RenameDevice)
 	devices.POST("/:id/revoke", h.device.RevokeDevice)
 	v1.GET("/device/catalog", h.device.Catalog)
+	// Offline order sync (v0.10 PR 10.2): one result per order; rejected orders wait in the owner review queue.
+	v1.POST("/device/offline-orders/sync", handler.LimitBody(512<<10), h.offline.Sync)
+	offline := v1.Group("/store/offline-submissions", h.auth.RequirePermission(rbac.DeviceManage))
+	offline.GET("", h.offline.ListSubmissions)
+	offline.POST("/:id/resolve", h.offline.ResolveSubmission)
 	v1.GET("/public/queue", h.display.Queue)
 	v1.POST("/public/queue/ws-ticket", h.display.IssueTicket)
 

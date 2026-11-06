@@ -1,0 +1,56 @@
+-- 20261106000039_offline_order_sync.down.sql
+-- Refuses while offline orders, submissions or their audit history exist.
+
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM orders WHERE origin = 'offline') OR EXISTS (SELECT 1 FROM offline_order_submissions)
+       OR EXISTS (SELECT 1 FROM payments WHERE offline_unreconciled)
+       OR EXISTS (SELECT 1 FROM audit_logs WHERE action IN ('OFFLINE_ORDER_SYNCED', 'OFFLINE_ORDER_REJECTED', 'OFFLINE_ORDER_RESOLVED', 'DEVICE_PIN_FAILED')) THEN
+        RAISE EXCEPTION 'Offline order history exists; cannot roll back 000039.';
+    END IF;
+END $$;
+
+ALTER TABLE audit_logs DROP CONSTRAINT IF EXISTS chk_audit_logs_action;
+ALTER TABLE audit_logs ADD CONSTRAINT chk_audit_logs_action CHECK (
+    action IN (
+        'VOID_ORDER', 'REFUND', 'STOCK_OVERRIDE', 'PRICE_CHANGE',
+        'SHIFT_OPEN', 'SHIFT_CLOSE', 'SHIFT_FORCE_CLOSE',
+        'ROLE_CHANGE', 'STATIC_QRIS_RECONCILE', 'CASH_PAYMENT_RECORDED', 'EDC_RECONCILE',
+        'ORDER_CREATE', 'ORDER_CANCEL', 'PAYMENT_SETTLED',
+        'STAFF_LOGIN_LOCKED', 'STAFF_UNLOCK', 'STAFF_PIN_RESET', 'STAFF_DEACTIVATED',
+        'STAFF_SESSION_REVOKED', 'STAFF_INVITED', 'STAFF_PIN_SET', 'STAFF_TEMP_PIN_ISSUED',
+        'STORE_BOOTSTRAP', 'STORE_SETTINGS_CHANGED',
+        'CASH_MOVEMENT', 'DRAWER_CREATE', 'DRAWER_UPDATE',
+        'TAB_OPEN', 'ROUND_SUBMIT', 'TAB_CLOSE', 'TAB_REOPEN',
+        'OWNER_PIN_FAILED',
+        'TABLE_CREATE', 'TABLE_UPDATE', 'TABLE_QR_ROTATE', 'TABLE_SESSION_CLOSE',
+        'PRODUCT_IMAGE_CHANGED',
+        'APPROVAL_REQUESTED', 'APPROVAL_APPROVED', 'APPROVAL_REJECTED',
+        'STAFF_PHONE_SET', 'CUSTOMER_PHONE_VERIFIED',
+        'OUTLET_CASH_MOVEMENT',
+        'ORDER_DISCOUNT',
+        'STAFF_BADGE_ISSUED', 'STAFF_BADGE_REVOKED',
+        'TABLE_MOVE', 'TABLE_MERGE', 'TABLE_SPLIT',
+        'TABLE_TIMER_EXTEND',
+        'DISPLAY_TOKEN_CREATED', 'DISPLAY_TOKEN_REVOKED',
+        'PRINTER_CREATED', 'PRINTER_UPDATED', 'PRINTER_TOKEN_ROTATED', 'PRINT_REPRINT',
+        'RECEIPT_SENT',
+        'DEVICE_REGISTERED', 'DEVICE_RENAMED', 'DEVICE_REVOKED', 'DEVICE_PIN_VERIFIER_ISSUED'
+    )
+);
+
+DROP TABLE IF EXISTS offline_order_submissions;
+ALTER TABLE payments DROP COLUMN IF EXISTS offline_unreconciled;
+DROP INDEX IF EXISTS idx_orders_offline_number;
+DROP INDEX IF EXISTS uq_orders_store_client_order;
+ALTER TABLE orders DROP CONSTRAINT IF EXISTS fk_orders_device;
+ALTER TABLE orders DROP CONSTRAINT IF EXISTS chk_orders_origin;
+ALTER TABLE orders
+    DROP COLUMN IF EXISTS price_delta,
+    DROP COLUMN IF EXISTS stale_catalog,
+    DROP COLUMN IF EXISTS catalog_version,
+    DROP COLUMN IF EXISTS offline_queue_number,
+    DROP COLUMN IF EXISTS offline_created_at,
+    DROP COLUMN IF EXISTS device_id,
+    DROP COLUMN IF EXISTS client_order_id,
+    DROP COLUMN IF EXISTS origin;

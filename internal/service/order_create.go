@@ -67,8 +67,21 @@ func (s *OrderService) CreateOrder(ctx context.Context, trustedStoreID uuid.UUID
 
 func (s *OrderService) executeCreateOrderTx(ctx context.Context, trustedStoreID uuid.UUID, input OrderCreationInput) (*CreateOrderResult, error) {
 	var result *CreateOrderResult
-
 	err := database.WithTenantTx(ctx, s.db, trustedStoreID, func(tx *sqlx.Tx) error {
+		var err error
+		result, err = s.createOrderTx(ctx, tx, trustedStoreID, input)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// createOrderTx creates an order inside an open tenant transaction (also used by offline sync).
+func (s *OrderService) createOrderTx(ctx context.Context, tx *sqlx.Tx, trustedStoreID uuid.UUID, input OrderCreationInput) (*CreateOrderResult, error) {
+	var result *CreateOrderResult
+	err := func() error {
 		store, err := s.repo.GetStoreForOrder(ctx, tx, trustedStoreID)
 		if err != nil {
 			if errors.Is(err, postgres.ErrStoreNotFound) {
@@ -155,6 +168,12 @@ func (s *OrderService) executeCreateOrderTx(ctx context.Context, trustedStoreID 
 			ProductGroups:     catalogData.ProductModifierGroups,
 			OptionChildGroups: catalogData.OptionModifierGroups,
 			Variants:          catalogData.Variants,
+		}
+		if normalizedInput.Offline != nil {
+			// Offline sync (ADR-005 OF3): price from the served snapshot, not from today's catalog.
+			if err := normalizedInput.Offline.apply(&catalogData.Store, &snapshot, normalizedInput); err != nil {
+				return err
+			}
 		}
 
 		priced, err := ValidateAndPriceOrder(catalogData.Store, normalizedInput, snapshot)
@@ -331,7 +350,7 @@ func (s *OrderService) executeCreateOrderTx(ctx context.Context, trustedStoreID 
 			IsIdempotentReplay: false,
 		}
 		return nil
-	})
+	}()
 	if err != nil {
 		return nil, err
 	}

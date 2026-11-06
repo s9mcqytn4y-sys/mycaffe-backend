@@ -73,3 +73,14 @@ func (l UUIDList) Contains(id uuid.UUID) bool {
 	}
 	return false
 }
+
+// BundleSlot is one part of a bundle ("Kopi", "Pastry"): Quantity units of one of ProductIDs (X4, PR 11.2).
+type BundleSlot struct {
+	ID              uuid.UUID `json:"id" db:"id"`
+	StoreID         uuid.UUID `json:"-" db:"store_id"`
+	BundleProductID uuid.UUID `json:"-" db:"bundle_product_id"`
+	Name            string    `json:"name" db:"name"`
+	Quantity        int       `json:"quantity" db:"quantity"`
+	DisplayOrder    int       `json:"display_order" db:"display_order"`
+	ProductIDs      UUIDList  `json:"product_ids" db:"product_ids"`
+}

@@ -498,10 +498,7 @@ func (s *TabService) submitRoundInternal(
 	in SubmitRoundInput,
 	roundNumber int,
 ) (*domain.OrderRound, error) {
-	productIDs := make([]uuid.UUID, 0, len(in.Items))
-	for _, it := range in.Items {
-		productIDs = append(productIDs, it.ProductID)
-	}
+	productIDs := orderProductIDs(in.Items)
 
 	catalogData, err := s.orderRep.LockAndLoadCatalogForOrder(ctx, tx, store.ID, productIDs)
 	if err != nil {

@@ -87,6 +87,7 @@ func catalogSnapshotOf(cd *postgres.CatalogData, now time.Time) CatalogSnapshot 
 		ProductGroups:     cd.ProductModifierGroups,
 		OptionChildGroups: cd.OptionModifierGroups,
 		Variants:          cd.Variants,
+		BundleSlots:       cd.BundleSlots,
 		Promotions:        cd.Promotions,
 		PromoAt:           now,
 	}
@@ -117,4 +118,16 @@ func consumePromotionsTx(ctx context.Context, tx *sqlx.Tx, storeID, orderID uuid
 	}
 	_, err := tx.ExecContext(ctx, `UPDATE orders SET promo_over_quota = true WHERE store_id = $1 AND id = $2`, storeID, orderID)
 	return err
+}
+
+// orderProductIDs lists the products an order needs loaded: its lines and the components chosen for bundles.
+func orderProductIDs(items []OrderItemInput) []uuid.UUID {
+	ids := make([]uuid.UUID, 0, len(items))
+	for _, it := range items {
+		ids = append(ids, it.ProductID)
+		for _, bc := range it.BundleItems {
+			ids = append(ids, bc.ProductID)
+		}
+	}
+	return ids
 }

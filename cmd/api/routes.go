@@ -351,6 +351,7 @@ func registerKDSAndCatalogRoutes(v1 *gin.RouterGroup, h *handlerSet) {
 	cat.POST("/products", manage, h.catalog.CreateProduct)
 	cat.PATCH("/products/:id", manage, h.catalog.UpdateProduct)
 	cat.DELETE("/products/:id", manage, h.catalog.ArchiveProduct)
+	cat.PUT("/products/:id/bundle-slots", manage, h.catalog.SetBundleSlots)
 	cat.PATCH("/products/:id/availability", h.auth.RequireStaff(), h.catalog.SetAvailability)
 	cat.POST("/products/:id/variants", manage, h.catalog.CreateVariant)
 	cat.PATCH("/variants/:id", manage, h.catalog.UpdateVariant)

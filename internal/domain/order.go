@@ -148,9 +148,14 @@ type OrderItem struct {
 	Quantity           int        `json:"quantity" db:"quantity"`
 	SubtotalAmount     int64      `json:"subtotal_amount" db:"subtotal_amount"`
 	// PromotionID took PromoDiscountAmount off SubtotalAmount (K7, PR 11.1).
-	PromotionID         *uuid.UUID        `json:"promotion_id,omitempty" db:"promotion_id"`
-	PromoDiscountAmount int64             `json:"promo_discount_amount,omitempty" db:"promo_discount_amount"`
-	SnapshotPromoName   *string           `json:"promo_name,omitempty" db:"snapshot_promo_name"`
+	PromotionID         *uuid.UUID `json:"promotion_id,omitempty" db:"promotion_id"`
+	PromoDiscountAmount int64      `json:"promo_discount_amount,omitempty" db:"promo_discount_amount"`
+	SnapshotPromoName   *string    `json:"promo_name,omitempty" db:"snapshot_promo_name"`
+	// Bundle lines (X4): every component of one sold bundle shares BundleGroupID; the bundle price is
+	// allocated over them in proportion to their normal prices.
+	BundleProductID     *uuid.UUID        `json:"bundle_product_id,omitempty" db:"bundle_product_id"`
+	BundleGroupID       *uuid.UUID        `json:"bundle_group_id,omitempty" db:"bundle_group_id"`
+	SnapshotBundleName  *string           `json:"bundle_name,omitempty" db:"snapshot_bundle_name"`
 	RoundID             *uuid.UUID        `json:"round_id,omitempty" db:"round_id"`
 	SnapshotPrepStation string            `json:"snapshot_prep_station,omitempty" db:"snapshot_prep_station"`
 	SelectedOptions     string            `json:"selected_options" db:"selected_options"`

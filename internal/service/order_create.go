@@ -151,10 +151,7 @@ func (s *OrderService) createOrderTx(ctx context.Context, tx *sqlx.Tx, trustedSt
 			}
 		}
 
-		productIDs := make([]uuid.UUID, 0, len(normalizedInput.Items))
-		for _, item := range normalizedInput.Items {
-			productIDs = append(productIDs, item.ProductID)
-		}
+		productIDs := orderProductIDs(normalizedInput.Items)
 
 		catalogData, err := s.repo.LockAndLoadCatalogForOrder(ctx, tx, trustedStoreID, productIDs)
 		if err != nil {

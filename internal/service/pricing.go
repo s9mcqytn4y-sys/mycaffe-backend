@@ -49,6 +49,17 @@ type OrderItemInput struct {
 	Quantity  int                     `json:"quantity"`
 	Modifiers []SelectedModifierInput `json:"modifiers,omitempty"`
 	Notes     string                  `json:"notes,omitempty"`
+	// BundleItems choose one product per slot when ProductID is a bundle (X4, PR 11.2).
+	BundleItems []BundleChoiceInput `json:"bundle_items,omitempty"`
+}
+
+// BundleChoiceInput is the product chosen for one bundle slot, with its own variant, add-ons and notes.
+type BundleChoiceInput struct {
+	SlotID    uuid.UUID               `json:"slot_id"`
+	ProductID uuid.UUID               `json:"product_id"`
+	VariantID *uuid.UUID              `json:"variant_id,omitempty"`
+	Modifiers []SelectedModifierInput `json:"modifiers,omitempty"`
+	Notes     string                  `json:"notes,omitempty"`
 }
 
 type OrderCreationInput struct {
@@ -77,6 +88,7 @@ type CatalogSnapshot struct {
 	OptionChildGroups map[uuid.UUID][]domain.OptionModifierGroup
 	Variants          map[uuid.UUID]domain.ProductVariant
 	// Promotions run at PromoAt (K7, PR 11.1); IgnorePromoQuota replays an offline order at its own price (X3).
+	BundleSlots      map[uuid.UUID][]domain.BundleSlot
 	Promotions       []domain.Promotion
 	PromoAt          time.Time
 	IgnorePromoQuota bool
@@ -191,6 +203,22 @@ func ValidateAndPriceOrder(store domain.Store, input OrderCreationInput, catalog
 		}
 		if !product.IsAvailable {
 			return nil, fmt.Errorf("%w: product %q is unavailable", ErrProductUnavailable, product.Name)
+		}
+		if product.ProductType == domain.ProductTypeBundle {
+			lines, err := priceBundleLine(store.ID, product, reqItem, catalog, productDeducts, optionDeducts)
+			if err != nil {
+				return nil, err
+			}
+			for _, l := range lines {
+				if orderSubtotal, err = safeAddInt64(orderSubtotal, l.Item.SubtotalAmount); err != nil {
+					return nil, err
+				}
+			}
+			pricedItems = append(pricedItems, lines...)
+			continue
+		}
+		if len(reqItem.BundleItems) > 0 {
+			return nil, fmt.Errorf("%w: bundle_items are only for bundle products", ErrInvalidOrderInput)
 		}
 		if product.TrackStock {
 			productDeducts[product.ID] += reqItem.Quantity
@@ -663,6 +691,12 @@ func ComputeInputRequestHash(
 		cfgHash := computeItemConfigHashFromModifiers(item.ProductID, item.Modifiers)
 		if item.VariantID != nil && *item.VariantID != uuid.Nil {
 			cfgHash += ":v=" + item.VariantID.String()
+		}
+		for _, bc := range item.BundleItems {
+			cfgHash += "|b=" + bc.SlotID.String() + ":" + computeItemConfigHashFromModifiers(bc.ProductID, bc.Modifiers) + ":" + strings.TrimSpace(bc.Notes)
+			if bc.VariantID != nil {
+				cfgHash += ":v=" + bc.VariantID.String()
+			}
 		}
 		fmt.Fprintf(&b, "|item=%s:%d:%s:%s",
 			item.ProductID.String(),

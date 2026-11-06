@@ -237,6 +237,8 @@ func DefaultStoreSettings(storeID uuid.UUID) StoreSettings {
 const (
 	ProductTypePrepared     = "prepared"
 	ProductTypeReadyToServe = "ready_to_serve"
+	// ProductTypeBundle is a fixed-price bundle of components (X4, PR 11.2); it is never stocked or prepared itself.
+	ProductTypeBundle = "bundle"
 
 	PrepStationBar     = "bar"
 	PrepStationKitchen = "kitchen"

@@ -272,6 +272,66 @@ paths:
         "422":
           $ref: "#/components/responses/ValidationFailed"
 
+  /api/v1/catalog/products/{id}/bundle-slots:
+    put:
+      tags: [Catalog]
+      operationId: setBundleSlots
+      summary: Replace the parts of a bundle product (catalog.manage, audited, X4)
+      description: >-
+        A bundle is a product with product_type bundle whose default variant carries the bundle price; it is never
+        stocked or prepared itself. When sold, each chosen component becomes its own order line (stock, KDS
+        station, refunds and reports per component) and the bundle price is allocated over the components in
+        proportion to their normal prices; paid add-ons are charged on top. Promotions never apply to bundles.
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [slots]
+              properties:
+                slots:
+                  type: array
+                  minItems: 1
+                  maxItems: 10
+                  items:
+                    type: object
+                    required: [name, quantity, product_ids]
+                    properties:
+                      name: {type: string, maxLength: 50}
+                      quantity: {type: integer, minimum: 1, maximum: 10}
+                      product_ids:
+                        type: array
+                        minItems: 1
+                        maxItems: 50
+                        items: {type: string, format: uuid}
+      responses:
+        "200":
+          description: The new slots
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [slots]
+                properties:
+                  slots:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/BundleSlot"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
   /api/v1/catalog/products/{id}:
     parameters:
       - $ref: "#/components/parameters/ResourceID"
@@ -5331,6 +5391,18 @@ components:
           type: string
         queue_number:
           type: string
+    BundleSlot:
+      type: object
+      required: [id, name, quantity, display_order, product_ids]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        quantity: {type: integer, minimum: 1, maximum: 10}
+        display_order: {type: integer}
+        product_ids:
+          type: array
+          description: Products the customer may choose for this part
+          items: {type: string, format: uuid}
     CatalogPromotion:
       type: object
       required: [id, name, kind, value, product_ids, category_ids, days_mask]
@@ -6229,7 +6301,7 @@ components:
           maxLength: 1000
         product_type:
           type: string
-          enum: [prepared, ready_to_serve]
+          enum: [prepared, ready_to_serve, bundle]
         prep_station:
           type: string
           enum: [bar, kitchen, none]
@@ -6304,7 +6376,7 @@ components:
                 type: string
               type:
                 type: string
-                enum: [prepared, ready_to_serve]
+                enum: [prepared, ready_to_serve, bundle]
               prep_station:
                 type: string
                 enum: [bar, kitchen, none]
@@ -6725,6 +6797,21 @@ components:
           type: string
           maxLength: 250
           example: Less ice
+        bundle_items:
+          type: array
+          description: For a bundle product, exactly one choice per slot (X4). Each becomes its own order line.
+          items:
+            type: object
+            required: [slot_id, product_id]
+            properties:
+              slot_id: {type: string, format: uuid}
+              product_id: {type: string, format: uuid}
+              variant_id: {type: string, format: uuid}
+              modifiers:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SelectedModifierInput"
+              notes: {type: string}
 
     CreateOrderRequest:
       type: object
@@ -6856,6 +6943,12 @@ components:
           format: int64
         promo_name:
           type: string
+        bundle_name:
+          type: string
+          description: The bundle this component line was sold in (X4); lines of one bundle share bundle_group_id.
+        bundle_group_id:
+          type: string
+          format: uuid
         options:
           type: array
           items:

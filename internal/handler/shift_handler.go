@@ -40,6 +40,8 @@ func writeShiftServiceError(c *gin.Context, err error) {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"code": "INSUFFICIENT_DRAWER_CASH", "error": "Saldo kas di laci tidak mencukupi untuk mutasi pengeluaran ini."})
 	case errors.Is(err, service.ErrDrawerConflict):
 		c.JSON(http.StatusConflict, gin.H{"code": "DRAWER_CONFLICT", "error": "Laci kas masih memiliki sesi shift aktif."})
+	case errors.Is(err, service.ErrShiftPendingOffline):
+		c.JSON(http.StatusConflict, gin.H{"code": "SHIFT_PENDING_OFFLINE_ORDERS", "error": "Masih ada pesanan offline di perangkat POS untuk shift ini. Sinkronkan perangkat dulu, atau minta owner menutup paksa."})
 	case errors.Is(err, service.ErrShiftConflict):
 		c.JSON(http.StatusConflict, gin.H{"code": "SHIFT_CONFLICT", "error": "Sesi shift tidak dalam status terbuka atau data tidak valid."})
 	case errors.Is(err, service.ErrForbidden):

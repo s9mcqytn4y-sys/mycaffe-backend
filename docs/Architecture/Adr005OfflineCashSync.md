@@ -1,6 +1,6 @@
 # ADR-005: Offline Cash & Static QRIS Ordering with Server Sync
 
-- **Status**: Accepted (owner, 2026-11-02): decisions OF1–OF9 below. **Amended 2026-11-06** by decisions W16–W20 (§2.1). Implementation in progress for v0.10 (§7): PR 10.1 (devices, verifiers, catalog snapshots) PR 10.2 (offline sync, owner review), PR 10.3 (negative stock through sync) and PR 10.4 (LAN printing) built.
+- **Status**: Accepted (owner, 2026-11-02): decisions OF1–OF9 below. **Amended 2026-11-06** by decisions W16–W20 (§2.1). Implemented for v0.10 (§7): PRs 10.1–10.5 built.
 - **Deciders**: Product owner, backend
 - **Amends**: ADR-003 (adds registered POS devices as a second credential type); keeps the AGENTS.md rule that offline UI caching does not make online payments or cross-device sync work.
 - **Related**: decision register K8 (static QRIS fallback), QR5 (anti-abuse), HF2 (shared stock helper); audit report Tahap 1, ticket P0-10.
@@ -96,7 +96,7 @@ owner as final until the server has accepted it.
 | PR | Scope |
 |----|-------|
 | 10.1 | Devices (register/rename/revoke, credential), PIN verifiers (W19), catalog snapshot on serve (W20), `device.manage` permission |
-| 10.2 | `POST /device/offline-orders/sync` (idempotent, re-pricing from the snapshot with W16 rules, official numbering, payment into the open shift of its drawer), owner review queue (`/store/offline-submissions`, accept re-processes with device-side checks waived, reject needs a note). Until 10.5 lands, a closed shift rejects into the review queue; accept "at a stated price" is not offered (accept uses the snapshot price) |
+| 10.2 | `POST /device/offline-orders/sync` (idempotent, re-pricing from the snapshot with W16 rules, official numbering, payment into the open shift of its drawer), owner review queue (`/store/offline-submissions`, accept re-processes with device-side checks waived, reject needs a note). accept "at a stated price" is not offered (accept uses the snapshot price) |
 | 10.3 | Negative stock through sync only, `oversold` flag (W17). Built: migration 000040 drops the two stock CHECKs (keeps `max_quantity >= 1`); online deduction keeps its `>= qty` guard; offline sync deducts unguarded and flags lines that drove a balance below zero (count in the `OFFLINE_ORDER_SYNCED` audit). Reader audit (15 places) reported to the owner 2026-11-06 before merge |
 | 10.4 | Print agent LAN endpoint `:8787/print` with local key, OFFLINE tickets, `printed_locally` (W18). Built: routing and rendering moved to `printfmt.Select/Render` (one code path for server and agent), the agent caches printer settings from `GET /print-agent/printer`, migration 000041 adds `orders.printed_locally`. A POS web app on HTTPS reaches the agent only on localhost or from a native wrapper (mixed content) |
-| 10.5 | Pending-sync guard on shift close, late orders into the original shift, `amended` Z-reports (OF4) → v0.10.0 |
+| 10.5 | Pending-sync guard on shift close, late orders into the original shift, `amended` Z-reports (OF4) → v0.10.0. Built: each sync reports `pending_shift_ids` (migration 000042 `devices.pending_shift_ids`); a cashier close of such a shift answers 409 `SHIFT_PENDING_OFFLINE_ORDERS`, the owner can still force-close; an order taken while its shift was open is paid into it even after close (5 min clock skew); the Z-report derives `amended` from offline payments after `closed_at` and keeps the original close figures |

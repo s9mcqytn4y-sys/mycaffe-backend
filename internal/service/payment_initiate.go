@@ -143,7 +143,16 @@ func (s *PaymentService) directCashierPaymentTx(ctx context.Context, tx *sqlx.Tx
 		}
 
 		// 1. Verify that cashier has an open shift (Strict Fail-Closed for direct cashier tender)
-		activeShift, err := s.shiftRepo.GetActiveShiftForStaff(ctx, tx, trustedStoreID, actor.ID, input.DrawerID)
+		var activeShift *domain.Shift
+		if input.ShiftID != nil {
+			// Offline sync pays into the shift the order was taken in, open or already closed (ADR-005 OF4).
+			activeShift, err = s.shiftRepo.GetShiftByID(ctx, tx, trustedStoreID, *input.ShiftID)
+			if errors.Is(err, postgres.ErrShiftNotFound) {
+				return ErrNoOpenShift
+			}
+		} else {
+			activeShift, err = s.shiftRepo.GetActiveShiftForStaff(ctx, tx, trustedStoreID, actor.ID, input.DrawerID)
+		}
 		if err != nil {
 			if errors.Is(err, postgres.ErrNoOpenShift) || errors.Is(err, postgres.ErrDrawerNotFound) {
 				return ErrNoOpenShift

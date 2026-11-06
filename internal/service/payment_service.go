@@ -90,6 +90,8 @@ type InitiatePaymentInput struct {
 	CallbackURL       string
 	ActorUserID       *uuid.UUID
 	DrawerID          *uuid.UUID
+	// ShiftID pins the tender to that shift even when closed; set only by offline sync, never from a request.
+	ShiftID *uuid.UUID
 }
 
 type InitiatePaymentResult struct {

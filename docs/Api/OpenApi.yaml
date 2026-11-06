@@ -2170,6 +2170,8 @@ paths:
                     example: true
         "422":
           description: Variance exceeds tolerance and owner PIN / reason missing
+        "409":
+          description: SHIFT_PENDING_OFFLINE_ORDERS (a registered POS device still holds offline orders of this shift; sync it or let the owner force-close) or SHIFT_CONFLICT
 
   /api/v1/pos/shifts/{shift_id}/force-close:
     post:
@@ -3455,6 +3457,12 @@ paths:
                   maxItems: 50
                   items:
                     $ref: "#/components/schemas/OfflineOrder"
+                pending_shift_ids:
+                  type: array
+                  description: Shifts that still have orders waiting on the device after this batch; a cashier cannot close them (OF4). Omit to keep the last report, [] to clear it.
+                  items:
+                    type: string
+                    format: uuid
                 pin_failures:
                   type: array
                   maxItems: 50
@@ -5826,6 +5834,17 @@ components:
           type: string
         notes:
           type: string
+        amended:
+          type: boolean
+          description: Offline orders were paid into this shift after it closed (ADR-005 OF4). The close figures stay as counted; summary includes the late cash.
+        amended_at:
+          type: string
+          format: date-time
+        late_offline_orders:
+          type: integer
+        late_offline_amount:
+          type: integer
+          format: int64
     OrderSummary:
       type: object
       required: [id, order_number, queue_number, order_type, billing_mode, status, payment_status, total_amount, paid_amount, refunded_amount, item_count, created_at]

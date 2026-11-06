@@ -76,6 +76,9 @@ type PINFailureInput struct {
 type OfflineSyncInput struct {
 	Orders      []OfflineOrderInput `json:"orders"`
 	PINFailures []PINFailureInput   `json:"pin_failures"`
+	// PendingShiftIDs are the shifts that still have orders waiting on the device after this batch; a
+	// cashier cannot close them (OF4). Omitted keeps the last report; [] clears it.
+	PendingShiftIDs *[]uuid.UUID `json:"pending_shift_ids"`
 }
 
 // OfflineSyncResult is the outcome per client_order_id; Status is accepted, rejected, resolved_accepted
@@ -125,7 +128,17 @@ func (s *OfflineSyncService) Sync(ctx context.Context, credential string, in Off
 		if _, err := authenticateDeviceTx(ctx, tx, storeID, deviceID, secret, now); err != nil {
 			return err
 		}
-		_, err := tx.ExecContext(ctx, `UPDATE devices SET last_sync_at = $3 WHERE store_id = $1 AND id = $2`, storeID, deviceID, now)
+		if _, err := tx.ExecContext(ctx, `UPDATE devices SET last_sync_at = $3 WHERE store_id = $1 AND id = $2`, storeID, deviceID, now); err != nil {
+			return err
+		}
+		if in.PendingShiftIDs == nil {
+			return nil
+		}
+		pending := make([]string, 0, len(*in.PendingShiftIDs))
+		for _, id := range *in.PendingShiftIDs {
+			pending = append(pending, id.String())
+		}
+		_, err := tx.ExecContext(ctx, `UPDATE devices SET pending_shift_ids = $3::uuid[] WHERE store_id = $1 AND id = $2`, storeID, deviceID, pending)
 		return err
 	})
 	if err != nil {
@@ -284,13 +297,14 @@ func (s *OfflineSyncService) place(ctx context.Context, tx *sqlx.Tx, storeID, de
 		return nil, &ValidationError{Fields: map[string]string{"discount_bps": "melebihi batas diskon kasir; diskon offline tidak bisa disetujui owner"}}
 	}
 	var shift struct {
-		DrawerID uuid.UUID `db:"drawer_id"`
-		Status   string    `db:"status"`
-		OpenedAt time.Time `db:"opened_at"`
+		OpenedAt time.Time  `db:"opened_at"`
+		ClosedAt *time.Time `db:"closed_at"`
 	}
-	err = tx.GetContext(ctx, &shift, `SELECT drawer_id, status, opened_at FROM shifts WHERE store_id = $1 AND id = $2`, storeID, o.ShiftID)
-	if errors.Is(err, sql.ErrNoRows) || (err == nil && (shift.Status != "open" || shift.OpenedAt.After(o.OfflineCreatedAt.Add(offlineClockSkew)))) {
-		// Late orders into a closed shift and amended Z-reports arrive with PR 10.5 (OF4).
+	err = tx.GetContext(ctx, &shift, `SELECT opened_at, closed_at FROM shifts WHERE store_id = $1 AND id = $2`, storeID, o.ShiftID)
+	// The order must have been taken while its shift was open; a shift closed since then still takes it and
+	// its Z-report shows as amended (OF4).
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && (shift.OpenedAt.After(o.OfflineCreatedAt.Add(offlineClockSkew)) ||
+		(shift.ClosedAt != nil && o.OfflineCreatedAt.After(shift.ClosedAt.Add(offlineClockSkew))))) {
 		return nil, ErrNoOpenShift
 	}
 	if err != nil {
@@ -358,7 +372,7 @@ func (s *OfflineSyncService) place(ctx context.Context, tx *sqlx.Tx, storeID, de
 		CashTenderedAmount: o.Payment.CashTenderedAmount,
 		ReconciliationRef:  strings.TrimSpace(o.Payment.Reference),
 		ActorUserID:        &cashier,
-		DrawerID:           &shift.DrawerID,
+		ShiftID:            &o.ShiftID,
 	})
 	if err != nil {
 		return nil, err

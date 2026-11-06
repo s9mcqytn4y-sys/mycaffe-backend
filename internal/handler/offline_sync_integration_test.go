@@ -62,6 +62,8 @@ func TestOfflineSyncIntegration(t *testing.T) {
 	r.POST("/pos/drawers", ah.RequirePermission(rbac.CashDrawerManage), sh.CreateDrawer)
 	r.POST("/pos/shifts", ah.RequireStaff(), sh.OpenShift)
 	r.POST("/pos/shifts/:id/force-close", ah.RequireStaff(), sh.ForceCloseShift)
+	r.POST("/pos/shifts/:id/close", ah.RequirePermission(rbac.ShiftClose), sh.CloseShift)
+	r.GET("/pos/shifts/:id/z-report", ah.RequireStaff(), sh.GetZReport)
 	r.POST("/store/devices", ah.RequirePermission(rbac.DeviceManage), dh.RegisterDevice)
 	r.POST("/store/devices/:id/revoke", ah.RequirePermission(rbac.DeviceManage), dh.RevokeDevice)
 	r.GET("/device/catalog", dh.Catalog)
@@ -432,6 +434,59 @@ func TestOfflineSyncIntegration(t *testing.T) {
 		})
 		if local != 0 || server != 1 {
 			t.Fatalf("printed_locally skips the server print job (W18): got %d for the local order, %d for the other", local, server)
+		}
+	})
+
+	t.Run("LateOrderAmendsTheClosedShift", func(t *testing.T) {
+		var drawer2 domain.CashDrawer
+		_ = json.Unmarshal(call("POST", "/pos/drawers", owner, map[string]any{"name": "Laci Telat " + prefix}).Body.Bytes(), &drawer2)
+		var shift2 struct {
+			Shift domain.Shift `json:"shift"`
+		}
+		if res := call("POST", "/pos/shifts", owner, map[string]any{"drawer_id": drawer2.ID, "opening_float": 0}); res.Code != http.StatusCreated {
+			t.Fatalf("open shift failed: %d: %s", res.Code, res.Body.String())
+		} else {
+			_ = json.Unmarshal(res.Body.Bytes(), &shift2)
+		}
+		closeShift := func() *httptest.ResponseRecorder {
+			return call("POST", fmt.Sprintf("/pos/shifts/%s/close", shift2.Shift.ID), owner, map[string]any{"counted_cash": 0})
+		}
+		takenAt := time.Now() // taken while the shift is open, synced after it closed
+
+		sync(map[string]any{"orders": []any{}, "pending_shift_ids": []uuid.UUID{shift2.Shift.ID}})
+		if res := closeShift(); res.Code != http.StatusConflict || !strings.Contains(res.Body.String(), "SHIFT_PENDING_OFFLINE_ORDERS") {
+			t.Fatalf("a shift with orders waiting on a device must not close (OF4): %d %s", res.Code, res.Body.String())
+		}
+		sync(map[string]any{"orders": []any{}, "pending_shift_ids": []uuid.UUID{}})
+		if res := closeShift(); res.Code != http.StatusOK {
+			t.Fatalf("close after the device cleared its pending report failed: %d: %s", res.Code, res.Body.String())
+		}
+
+		results := sync(map[string]any{"orders": []any{order(func(o map[string]any) {
+			o["shift_id"] = shift2.Shift.ID
+			o["offline_created_at"] = takenAt
+		})}})
+		if len(results) != 1 || results[0].Status != "accepted" {
+			t.Fatalf("a late order still goes to its original shift: %+v", results)
+		}
+		var payShift string
+		inStore(func(tx *sqlx.Tx) error {
+			return tx.GetContext(ctx, &payShift, `SELECT shift_id FROM payments WHERE store_id = $1 AND order_id = $2`, storeID, *results[0].OrderID)
+		})
+		if payShift != shift2.Shift.ID.String() {
+			t.Fatalf("the late payment must land in the closed shift, got %s", payShift)
+		}
+		var z struct {
+			Amended           bool  `json:"amended"`
+			LateOfflineOrders int   `json:"late_offline_orders"`
+			LateOfflineAmount int64 `json:"late_offline_amount"`
+			ExpectedCash      int64 `json:"expected_cash"`
+			CountedCash       int64 `json:"counted_cash"`
+		}
+		res := call("GET", fmt.Sprintf("/pos/shifts/%s/z-report", shift2.Shift.ID), owner, nil)
+		_ = json.Unmarshal(res.Body.Bytes(), &z)
+		if res.Code != http.StatusOK || !z.Amended || z.LateOfflineOrders != 1 || z.LateOfflineAmount <= 0 || z.ExpectedCash != 0 || z.CountedCash != 0 {
+			t.Fatalf("the Z-report must show amended and keep the original close figures: %d %+v", res.Code, z)
 		}
 	})
 

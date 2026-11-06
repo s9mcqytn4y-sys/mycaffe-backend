@@ -22,6 +22,8 @@ var (
 	ErrVarianceExceedsTolerance = errors.New("selisih kas melebihi batas toleransi toko")
 	ErrInvalidOwnerPIN          = errors.New("PIN Owner tidak valid")
 	ErrInsufficientDrawerCash   = errors.New("saldo kas di laci tidak mencukupi untuk mutasi pengeluaran ini")
+	// ErrShiftPendingOffline: a device still holds offline orders of this shift (ADR-005 OF4).
+	ErrShiftPendingOffline = errors.New("perangkat POS masih menyimpan pesanan offline untuk shift ini")
 )
 
 type ShiftService struct {
@@ -487,6 +489,15 @@ func (s *ShiftService) CloseShift(ctx context.Context, actor *AuthenticatedStaff
 		if shift.Status != domain.ShiftStatusOpen {
 			return ErrShiftConflict
 		}
+		// OF4: the drawer's cash includes orders still waiting on a device; the owner can force-close.
+		var pendingOffline bool
+		if err := tx.GetContext(ctx, &pendingOffline, `SELECT EXISTS (SELECT 1 FROM devices WHERE store_id = $1 AND revoked_at IS NULL
+			AND $2 = ANY(pending_shift_ids))`, actor.Staff.Store.ID, shift.ID); err != nil {
+			return err
+		}
+		if pendingOffline {
+			return ErrShiftPendingOffline
+		}
 
 		summary, err := s.repo.AggregateCashTotalsByShift(ctx, tx, actor.Staff.Store.ID, shift.ID)
 		if err != nil {
@@ -891,6 +902,21 @@ func (s *ShiftService) GetZReport(ctx context.Context, actor *AuthenticatedStaff
 			UnsettledOpenTabsCount:       unsettledCount,
 			UnsettledOpenTabsTotalAmount: unsettledTotal,
 			UnsettledOpenTabs:            unsettledList,
+		}
+		if shift.ClosedAt != nil {
+			var late struct {
+				Count  int        `db:"n"`
+				Amount int64      `db:"amount"`
+				Last   *time.Time `db:"last_paid_at"`
+			}
+			if err := tx.GetContext(ctx, &late, `SELECT COUNT(*) AS n, COALESCE(SUM(p.amount), 0) AS amount, MAX(p.paid_at) AS last_paid_at
+				FROM payments p JOIN orders o ON o.store_id = p.store_id AND o.id = p.order_id
+				WHERE p.store_id = $1 AND p.shift_id = $2 AND o.origin = 'offline' AND p.paid_at > $3`,
+				actor.Staff.Store.ID, shift.ID, *shift.ClosedAt); err != nil {
+				return err
+			}
+			report.Amended, report.AmendedAt = late.Count > 0, late.Last
+			report.LateOfflineOrders, report.LateOfflineAmount = late.Count, late.Amount
 		}
 		return nil
 	})

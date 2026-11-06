@@ -27,6 +27,7 @@ func newWASender(ctx context.Context, dbPath string) (*waSender, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open session store: %w", err)
 	}
+	db.SetMaxOpenConns(1) // SQLite allows one writer; a pool makes whatsmeow's app-state sync hit SQLITE_BUSY
 	container := sqlstore.NewWithDB(db, "sqlite3", waLog.Stdout("Store", "WARN", false))
 	if err := container.Upgrade(ctx); err != nil {
 		return nil, fmt.Errorf("upgrade session store: %w", err)

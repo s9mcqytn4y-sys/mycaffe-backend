@@ -355,6 +355,18 @@ BEGIN
     IF has_table_privilege('mycaffe_app', 'public.kds_tickets', 'DELETE') THEN
         RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may DELETE kds_tickets!';
     END IF;
+    -- 10F-19. Devices, PIN verifier records, catalog snapshots (migration 000038): RLS on; devices are
+    -- revoked, never deleted; snapshots are immutable.
+    IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.devices'::regclass)
+       OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.device_pin_verifiers'::regclass)
+       OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.catalog_versions'::regclass) THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: devices/device_pin_verifiers/catalog_versions do not have row-level security enabled!';
+    END IF;
+    IF has_table_privilege('mycaffe_app', 'public.devices', 'DELETE')
+       OR has_table_privilege('mycaffe_app', 'public.catalog_versions', 'UPDATE')
+       OR has_table_privilege('mycaffe_app', 'public.catalog_versions', 'DELETE') THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may delete devices or change catalog snapshots!';
+    END IF;
     -- 10F-18. Receipt deliveries (migration 000037): RLS on, append-only for the app role.
     IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.receipt_deliveries'::regclass) THEN
         RAISE EXCEPTION 'SECURITY FAILURE: receipt_deliveries does not have row-level security enabled!';

@@ -105,10 +105,13 @@ type LoginInput struct {
 	StoreSlug string
 	Email     string
 	// Badge is a scanned staff ID card QR (V14); it replaces StoreSlug and Email, never the PIN.
-	Badge     string
-	PIN       string
-	UserAgent string
-	ClientIP  string
+	Badge string
+	PIN   string
+	// DeviceCredential (optional) is a registered POS device's credential: a successful login then also
+	// issues that device an offline PIN verifier (ADR-005 OF2, W19). A revoked device fails the login.
+	DeviceCredential string
+	UserAgent        string
+	ClientIP         string
 }
 
 type StaffStore struct {
@@ -144,6 +147,14 @@ type SessionTokens struct {
 	Staff            StaffIdentity
 	// PINChangeRequired is true after an owner-issued temporary PIN (owner decision E2).
 	PINChangeRequired bool
+	// OfflineVerifier is set when the login came from a registered device.
+	OfflineVerifier *OfflinePINVerifier
+}
+
+// OfflinePINVerifier is an argon2id PHC string the device checks the PIN against while offline.
+type OfflinePINVerifier struct {
+	Verifier  string    `json:"verifier"`
+	ExpiresAt time.Time `json:"expires_at"`
 }
 
 // Login verifies store_slug + email + PIN (ADR-003 D1) and opens a persisted session.
@@ -206,6 +217,14 @@ func (s *AuthService) Login(ctx context.Context, in LoginInput) (*SessionTokens,
 			return s.recordFailedPIN(ctx, tx, user, now, in.ClientIP)
 		}
 
+		if in.DeviceCredential != "" {
+			ok, err := s.recordVerifierIssueTx(ctx, tx, user, in.DeviceCredential, now)
+			if err != nil || !ok {
+				loginErr = ErrDeviceInvalid
+				return err
+			}
+		}
+
 		if user.FailedPINAttempts != 0 || user.LockedUntil != nil {
 			user.FailedPINAttempts, user.LockedUntil = 0, nil
 			if err := s.repo.UpdateUserLockout(ctx, tx, user); err != nil {
@@ -226,7 +245,44 @@ func (s *AuthService) Login(ctx context.Context, in LoginInput) (*SessionTokens,
 	if loginErr != nil {
 		return nil, loginErr
 	}
+	if in.DeviceCredential != "" {
+		// Derived after commit (no row locks held during the 64 MB argon2id); hashSem still bounds it.
+		verifier, err := auth.OfflinePINVerifier(in.PIN)
+		if err != nil {
+			return nil, err
+		}
+		tokens.OfflineVerifier = &OfflinePINVerifier{Verifier: verifier, ExpiresAt: now.Add(OfflineVerifierTTL)}
+	}
 	return tokens, nil
+}
+
+// recordVerifierIssueTx checks the device credential belongs to the user's store and records the
+// verifier issue (who, which device, until when). false when the credential is invalid or revoked.
+func (s *AuthService) recordVerifierIssueTx(ctx context.Context, tx *sqlx.Tx, user *domain.User, credential string, now time.Time) (bool, error) {
+	storeID, deviceID, secret, ok := parseRefreshToken(credential)
+	if !ok || storeID != user.StoreID {
+		return false, nil
+	}
+	device, err := authenticateDeviceTx(ctx, tx, storeID, deviceID, secret, now)
+	if errors.Is(err, ErrDeviceInvalid) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	expires := now.Add(OfflineVerifierTTL)
+	if _, err := tx.ExecContext(ctx, `INSERT INTO device_pin_verifiers (store_id, device_id, user_id, issued_at, expires_at)
+		VALUES ($1, $2, $3, $4, $5) ON CONFLICT (store_id, device_id, user_id)
+		DO UPDATE SET issued_at = EXCLUDED.issued_at, expires_at = EXCLUDED.expires_at`,
+		storeID, deviceID, user.ID, now, expires); err != nil {
+		return false, err
+	}
+	meta, _ := json.Marshal(map[string]any{"device_id": deviceID, "prefix": device.Prefix, "expires_at": expires})
+	actorID := user.ID
+	return true, s.repo.InsertAuditLog(ctx, tx, &domain.AuditLog{
+		StoreID: storeID, ActorID: &actorID, ActorName: user.FullName, Action: "DEVICE_PIN_VERIFIER_ISSUED",
+		Reason: "Verifier PIN offline diterbitkan ke perangkat " + device.Prefix, ReferenceID: deviceID.String(), Metadata: string(meta),
+	})
 }
 
 func (s *AuthService) recordFailedPIN(ctx context.Context, tx *sqlx.Tx, user *domain.User, now time.Time, clientIP string) error {

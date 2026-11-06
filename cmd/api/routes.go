@@ -39,6 +39,7 @@ type handlerSet struct {
 	approval   *handler.ApprovalHandler
 	display    *handler.DisplayHandler
 	print      *handler.PrintHandler
+	device     *handler.DeviceHandler
 	receiptOut *handler.ReceiptDeliveryHandler
 	media      *handler.MediaHandler
 }
@@ -99,7 +100,9 @@ func wireHandlers(workerCtx context.Context, cfg *config.Config, db *sqlx.DB, hu
 	h.pos.SetOperational(operationalService)
 
 	h.approval = handler.NewApprovalHandler(service.NewApprovalService(db, operationalService))
-	h.catalog = handler.NewCatalogHandler(service.NewCatalogService(db))
+	catalogService := service.NewCatalogService(db)
+	h.catalog = handler.NewCatalogHandler(catalogService)
+	h.device = handler.NewDeviceHandler(service.NewDeviceService(db, catalogService))
 
 	shiftService := service.NewShiftService(db)
 	shiftService.SetPINPolicy(authPolicy, emailService)
@@ -271,6 +274,13 @@ func registerStoreAndPOSRoutes(v1 *gin.RouterGroup, h *handlerSet) {
 	agent := v1.Group("/print-agent", handler.LimitBody(4<<10))
 	agent.POST("/jobs/claim", h.print.Claim)
 	agent.POST("/jobs/:id/ack", h.print.Ack)
+	// POS devices (v0.10 PR 10.1, ADR-005): owner registers/revokes; devices use "Authorization: Device <credential>".
+	devices := v1.Group("/store/devices", h.auth.RequirePermission(rbac.DeviceManage))
+	devices.GET("", h.device.ListDevices)
+	devices.POST("", h.device.RegisterDevice)
+	devices.PATCH("/:id", h.device.RenameDevice)
+	devices.POST("/:id/revoke", h.device.RevokeDevice)
+	v1.GET("/device/catalog", h.device.Catalog)
 	v1.GET("/public/queue", h.display.Queue)
 	v1.POST("/public/queue/ws-ticket", h.display.IssueTicket)
 

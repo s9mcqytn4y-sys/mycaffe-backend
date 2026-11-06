@@ -1,6 +1,6 @@
 # ADR-005: Offline Cash & Static QRIS Ordering with Server Sync
 
-- **Status**: Accepted (owner, 2026-11-02): decisions OF1–OF9 below. **Amended 2026-11-06** by decisions W16–W20 (§2.1). Implementation **Planned** for v0.10 (PRs 10.1–10.5, §7); nothing is built yet.
+- **Status**: Accepted (owner, 2026-11-02): decisions OF1–OF9 below. **Amended 2026-11-06** by decisions W16–W20 (§2.1). Implementation in progress for v0.10 (§7): PR 10.1 (devices, verifiers, catalog snapshots) built.
 - **Deciders**: Product owner, backend
 - **Amends**: ADR-003 (adds registered POS devices as a second credential type); keeps the AGENTS.md rule that offline UI caching does not make online payments or cross-device sync work.
 - **Related**: decision register K8 (static QRIS fallback), QR5 (anti-abuse), HF2 (shared stock helper); audit report Tahap 1, ticket P0-10.
@@ -46,8 +46,7 @@ owner as final until the server has accepted it.
 **Data (additive migrations):**
 
 - `devices`: `store_id`, `id`, `name`, `prefix` (unique per store), credential hash, `registered_by`, `revoked_at`, `last_sync_at`, `last_seen_pending`.
-- `device_pin_verifiers`: per device × staff, verifier material, `expires_at`; deleted on device revoke or staff deactivation.
-- `device_pin_verifiers` holds the Argon2id salt and parameters with the hash (W19); `devices` also keeps a lock state and failed-attempt counter.
+- `device_pin_verifiers`: per device × staff, `issued_at`, `expires_at` only. The verifier itself (argon2id PHC string, fresh salt, W19 parameters) is derived from the PIN at a login carrying the device credential and returned to the device; the server never stores it. Rows are deleted on device revoke. The 5-wrong-PIN lock is enforced on the device; failures are uploaded with the next sync (10.2).
 - `catalog_versions`: per store, keyed by `version` = SHA-256 of the canonical pricing content, with an immutable JSONB snapshot of sellable prices (variants, modifier options, tax/service/rounding settings) and `first_served_at`; inserted once when the catalog is served to a device (W20).
 - `orders`: `origin` (`online`/`offline`), `client_order_id` (UUID from the device, unique per store), `device_id`, `offline_created_at`, `offline_queue_number`, `catalog_version`, flags `stale_catalog`, `price_delta`, `printed_locally` (W18).
 - `order_items`: `oversold` flag.

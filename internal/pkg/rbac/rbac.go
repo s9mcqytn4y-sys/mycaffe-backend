@@ -48,6 +48,9 @@ const (
 
 	// ApprovalDecide approves or rejects a cashier's remote approval request (ADR-007), owner only.
 	ApprovalDecide Permission = "approval.decide"
+
+	// DeviceManage registers, renames and revokes offline-capable POS devices (ADR-005 OF2), owner only.
+	DeviceManage Permission = "device.manage"
 )
 
 // Options are per-store settings that widen a role (owner decision C3).
@@ -62,7 +65,7 @@ var all = []Permission{
 	ShiftOpen, ShiftClose, ShiftForceClose, CashMovementCreate, CashDrawerManage,
 	OrderVoid, PaymentRefund, OrderDiscountApply, StockOverride,
 	KDSBaristaRead, KDSBaristaUpdate, KDSKitchenRead, KDSKitchenUpdate,
-	AvailabilityToggleBeverage, AvailabilityToggleFood, TableManage, TableQRManage, ApprovalDecide,
+	AvailabilityToggleBeverage, AvailabilityToggleFood, TableManage, TableQRManage, ApprovalDecide, DeviceManage,
 }
 
 var cashierBase = []Permission{

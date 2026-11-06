@@ -105,3 +105,22 @@ func TestStaffAccessTokenRoundTrip(t *testing.T) {
 		t.Fatalf("guest-typed token err = %v, want ErrTokenTypeInvalid", err)
 	}
 }
+
+func TestOfflinePINVerifier(t *testing.T) {
+	v1, err := auth.OfflinePINVerifier("482913")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(v1, "$argon2id$v=19$m=65536,t=3,p=1$") {
+		t.Fatalf("verifier must carry the W19 parameters, got %q", v1)
+	}
+	if ok, err := auth.VerifyPIN("482913", v1); err != nil || !ok {
+		t.Fatalf("verifier must verify its PIN: ok=%v err=%v", ok, err)
+	}
+	if ok, _ := auth.VerifyPIN("482914", v1); ok {
+		t.Fatal("verifier must reject another PIN")
+	}
+	if v2, _ := auth.OfflinePINVerifier("482913"); v2 == v1 {
+		t.Fatal("each issue must use a fresh salt")
+	}
+}

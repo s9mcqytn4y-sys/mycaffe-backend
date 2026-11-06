@@ -33,6 +33,8 @@ tags:
     description: Tables, derived table occupancy, table sessions and public QR resolution (iteration 5a)
   - name: Guest
     description: QR guest sessions, pay-first guest orders and the public order tracker (iteration 5b)
+  - name: Devices
+    description: Registered POS devices, offline PIN verifiers and catalog snapshots (v0.10 PR 10.1, ADR-005)
   - name: Printing
     description: Print queue, printers per station and the print agent API (v0.9 PR 9.4, W8)
   - name: Display
@@ -3264,6 +3266,165 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+  /api/v1/store/devices:
+    get:
+      tags: [Devices]
+      operationId: listDevices
+      summary: POS devices of the store, active first, without credentials (device.manage)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: Devices
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [devices]
+                properties:
+                  devices:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Device"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      tags: [Devices]
+      operationId: registerDevice
+      summary: Register a POS device that may sell offline; the credential is returned once (audited, ADR-005 OF2)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, prefix]
+              properties:
+                name:
+                  type: string
+                  maxLength: 50
+                prefix:
+                  type: string
+                  pattern: "^[A-Za-z][A-Za-z0-9]{0,3}$"
+                  description: Upper-cased; printed on offline queue numbers (e.g. X1-007); fixed after registration.
+      responses:
+        "201":
+          description: Registered; credential shown once
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Device"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+  /api/v1/store/devices/{id}:
+    patch:
+      tags: [Devices]
+      operationId: renameDevice
+      summary: Rename a device; the prefix cannot change (device.manage, audited)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  maxLength: 50
+      responses:
+        "200":
+          description: Renamed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Device"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+  /api/v1/store/devices/{id}/revoke:
+    post:
+      tags: [Devices]
+      operationId: revokeDevice
+      summary: Revoke a device at once and drop its PIN verifier records (device.manage, audited, idempotent)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Revoked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Device"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/v1/device/catalog:
+    get:
+      security:
+        - DeviceCredential: []
+      tags: [Devices]
+      operationId: getDeviceCatalog
+      summary: POS catalog for a registered device plus the catalog_version to send with offline orders
+      description: >-
+        Serving stores a snapshot of the pricing content (prices, modifier rules, tax, service, cash rounding,
+        cashier discount limit) under version = SHA-256 of that content, once (W20). Stock and availability do
+        not change the version. Offline orders older than 24 h after first_served_at are flagged stale_catalog.
+      x-implementation-status: implemented
+      responses:
+        "200":
+          description: Catalog and version
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [catalog_version, first_served_at, catalog]
+                properties:
+                  catalog_version:
+                    type: string
+                    pattern: "^[0-9a-f]{64}$"
+                  first_served_at:
+                    type: string
+                    format: date-time
+                  catalog:
+                    type: object
+                    description: Same shape as GET /api/v1/pos/catalog.
+        "401":
+          description: DEVICE_INVALID (unknown, revoked, or credential of another store)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /api/v1/store/printers:
     get:
       tags: [Printing]
@@ -3983,7 +4144,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "401":
-          description: Generic authentication failure (`code=INVALID_CREDENTIALS`)
+          description: Generic authentication failure (`code=INVALID_CREDENTIALS`), or `code=DEVICE_INVALID` when a correct login carried a device_credential that is unknown, revoked or of another store
           content:
             application/json:
               schema:
@@ -4588,6 +4749,11 @@ paths:
 
 components:
   securitySchemes:
+    DeviceCredential:
+      type: apiKey
+      in: header
+      name: Authorization
+      description: 'Registered POS device credential sent as "Device <credential>" (ADR-005 OF2). Shown once at registration; revoked by the owner.'
     PrinterToken:
       type: apiKey
       in: header
@@ -4779,6 +4945,33 @@ components:
           type: string
           format: date-time
           description: Expiry of the receipt link
+    Device:
+      type: object
+      required: [id, name, prefix, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        prefix:
+          type: string
+          description: Printed on offline queue numbers (e.g. X1-007).
+        revoked_at:
+          type: string
+          format: date-time
+        last_seen_at:
+          type: string
+          format: date-time
+        last_sync_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        credential:
+          type: string
+          description: 'Only in the registration response; send as "Authorization: Device <credential>". Keep it secret.'
     Printer:
       type: object
       required: [id, name, station, format, paper_width_mm, copies, footer, is_active, created_at]
@@ -5867,6 +6060,12 @@ components:
           pattern: "^[0-9]{6}$"
           writeOnly: true
           description: Exactly 6 digits (owner decision E1). Never logged.
+        device_credential:
+          type: string
+          writeOnly: true
+          description: >-
+            Optional credential of a registered POS device (ADR-005 OF2). A successful login then also returns
+            offline_pin_verifier for this staff member on this device.
 
     StaffProfile:
       type: object
@@ -5940,6 +6139,20 @@ components:
           description: Absolute session end (login time + 12 h); refresh cannot extend it.
         staff:
           $ref: "#/components/schemas/StaffProfile"
+        offline_pin_verifier:
+          type: object
+          description: Only on a login with device_credential (ADR-005 OF2, W19). Store it on the device only.
+          required: [verifier, expires_at]
+          properties:
+            verifier:
+              type: string
+              description: >-
+                argon2id PHC string ($argon2id$v=19$m=65536,t=3,p=1$salt$hash) with a fresh salt; the device
+                checks the PIN offline against it and locks the staff member after 5 wrong PINs.
+            expires_at:
+              type: string
+              format: date-time
+              description: Issue time + 72 h.
 
     StaffMeResponse:
       type: object

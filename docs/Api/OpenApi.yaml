@@ -405,6 +405,91 @@ paths:
         "409":
           $ref: "#/components/responses/Conflict"
 
+  /api/v1/catalog/promotions:
+    get:
+      tags: [Catalog]
+      operationId: listPromotions
+      summary: Promotions of the store, active first (catalog.manage)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: Promotions
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [promotions]
+                properties:
+                  promotions:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Promotion"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      tags: [Catalog]
+      operationId: createPromotion
+      summary: Create an automatic promotion (catalog.manage, audited, K7)
+      description: >-
+        One best running promotion per line, never stacked, taken off the line subtotal; the cashier discount
+        is computed on the subtotal after promotions (X2). The quota counts paid orders. Offline orders use
+        the promotions of their catalog snapshot at the time the order was taken (X3).
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PromotionInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Promotion"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+  /api/v1/catalog/promotions/{id}:
+    patch:
+      tags: [Catalog]
+      operationId: updatePromotion
+      summary: Update or end (is_active=false) a promotion (catalog.manage, audited)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PromotionInput"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Promotion"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
   /api/v1/catalog/modifier-groups:
     get:
       tags: [Catalog]
@@ -5246,6 +5331,85 @@ components:
           type: string
         queue_number:
           type: string
+    CatalogPromotion:
+      type: object
+      required: [id, name, kind, value, product_ids, category_ids, days_mask]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        kind:
+          type: string
+          enum: [percent, amount]
+        value:
+          type: integer
+          format: int64
+          description: bps for percent (1-10000), rupiah per unit for amount
+        product_ids:
+          type: array
+          items: {type: string, format: uuid}
+        category_ids:
+          type: array
+          items: {type: string, format: uuid}
+        starts_at:
+          type: string
+          format: date-time
+        ends_at:
+          type: string
+          format: date-time
+        days_mask:
+          type: integer
+          description: Weekday bits, bit 0 = Sunday (127 = every day)
+        start_minute:
+          type: integer
+          description: Happy hour start, minutes after midnight in the store time zone
+        end_minute:
+          type: integer
+          description: Happy hour end (exclusive); below start_minute runs past midnight
+        quota:
+          type: integer
+          description: Paid orders allowed; a used-up quota stops the promotion online
+    Promotion:
+      allOf:
+        - $ref: "#/components/schemas/CatalogPromotion"
+        - type: object
+          required: [used_count, is_active, created_at, updated_at]
+          properties:
+            used_count:
+              type: integer
+            is_active:
+              type: boolean
+            created_at:
+              type: string
+              format: date-time
+            updated_at:
+              type: string
+              format: date-time
+    PromotionInput:
+      type: object
+      description: Create (name, kind, value and at least one product or category) or partial update.
+      properties:
+        name: {type: string, maxLength: 80}
+        kind: {type: string, enum: [percent, amount]}
+        value: {type: integer, format: int64}
+        product_ids:
+          type: array
+          items: {type: string, format: uuid}
+        category_ids:
+          type: array
+          items: {type: string, format: uuid}
+        starts_at: {type: string, format: date-time}
+        ends_at: {type: string, format: date-time}
+        clear_period: {type: boolean}
+        days_mask: {type: integer, minimum: 1, maximum: 127}
+        start_minute: {type: integer, minimum: 0, maximum: 1439}
+        end_minute: {type: integer, minimum: 1, maximum: 1440}
+        clear_hours: {type: boolean}
+        quota: {type: integer, minimum: 1}
+        clear_quota: {type: boolean}
+        is_active: {type: boolean}
     Device:
       type: object
       required: [id, name, prefix, created_at]
@@ -6683,6 +6847,15 @@ components:
           type: integer
           format: int64
           example: 72000
+        promotion_id:
+          type: string
+          format: uuid
+          description: The promotion that took promo_discount_amount off subtotal_amount (K7).
+        promo_discount_amount:
+          type: integer
+          format: int64
+        promo_name:
+          type: string
         options:
           type: array
           items:
@@ -7135,6 +7308,11 @@ components:
         service_bps:
           type: integer
           example: 500
+        promotions:
+          type: array
+          description: Active promotions (K7) for badges; the server decides which one prices a line (quote/order).
+          items:
+            $ref: "#/components/schemas/CatalogPromotion"
         categories:
           type: array
           items:

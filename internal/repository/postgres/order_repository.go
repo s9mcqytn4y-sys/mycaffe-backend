@@ -29,6 +29,8 @@ type CatalogData struct {
 	OptionsByGroup        map[uuid.UUID][]domain.ModifierOption
 	OptionModifierGroups  map[uuid.UUID][]domain.OptionModifierGroup
 	Variants              map[uuid.UUID]domain.ProductVariant
+	// Promotions are the store's active promotions (K7); the pricing engine decides which run now.
+	Promotions []domain.Promotion
 }
 
 type OrderRepository struct{}
@@ -280,6 +282,11 @@ func (r *OrderRepository) loadCatalogForOrder(ctx context.Context, tx *sqlx.Tx, 
 		OptionsByGroup:        make(map[uuid.UUID][]domain.ModifierOption),
 		OptionModifierGroups:  make(map[uuid.UUID][]domain.OptionModifierGroup),
 		Variants:              make(map[uuid.UUID]domain.ProductVariant),
+	}
+	if err := tx.SelectContext(ctx, &data.Promotions, `SELECT id, store_id, name, kind, value, product_ids, category_ids, starts_at, ends_at,
+		days_mask, start_minute, end_minute, quota, used_count, is_active, created_at, updated_at
+		FROM promotions WHERE store_id = $1 AND is_active ORDER BY id`, storeID); err != nil {
+		return nil, fmt.Errorf("failed to load promotions: %w", err)
 	}
 
 	if len(uniqueProdIDs) == 0 {
@@ -631,11 +638,11 @@ func (r *OrderRepository) InsertOrderItem(ctx context.Context, tx *sqlx.Tx, item
 			id, store_id, order_id, product_id, config_hash, snapshot_name,
 			unit_base_price, modifier_total_price, snapshot_price, quantity,
 			subtotal_amount, selected_options, notes, variant_id, snapshot_variant_name, snapshot_sku, round_id,
-			snapshot_prep_station, snapshot_category_name
+			snapshot_prep_station, promotion_id, promo_discount_amount, snapshot_promo_name, snapshot_category_name
 		) VALUES (
 			$1, $2, $3, $4, $5, $6,
 			$7, $8, $9, $10,
-			$11, $12::jsonb, $13, $14, $15, $16, $17, $18,
+			$11, $12::jsonb, $13, $14, $15, $16, $17, $18, $19, $20, $21,
 			-- B2: snapshot the product category as it is at sale time.
 			COALESCE((SELECT c.name FROM products p JOIN categories c ON c.store_id = p.store_id AND c.id = p.category_id
 				WHERE p.store_id = $2 AND p.id = $4), '')
@@ -647,6 +654,7 @@ func (r *OrderRepository) InsertOrderItem(ctx context.Context, tx *sqlx.Tx, item
 		item.ID, item.StoreID, item.OrderID, item.ProductID, item.ConfigHash, item.SnapshotName,
 		item.UnitBasePrice, item.ModifierTotalPrice, item.SnapshotPrice, item.Quantity,
 		item.SubtotalAmount, selectedOptsJSON, item.Notes, item.VariantID, item.SnapshotVariant, item.SnapshotSKU, item.RoundID, prepStationValue(item.SnapshotPrepStation),
+		item.PromotionID, item.PromoDiscountAmount, item.SnapshotPromoName,
 	).Scan(&item.CreatedAt)
 }
 

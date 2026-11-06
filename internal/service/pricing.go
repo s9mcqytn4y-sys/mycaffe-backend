@@ -9,6 +9,7 @@ import (
 	"math"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/domain"
@@ -75,6 +76,10 @@ type CatalogSnapshot struct {
 	ProductGroups     map[uuid.UUID][]domain.ProductModifierGroup
 	OptionChildGroups map[uuid.UUID][]domain.OptionModifierGroup
 	Variants          map[uuid.UUID]domain.ProductVariant
+	// Promotions run at PromoAt (K7, PR 11.1); IgnorePromoQuota replays an offline order at its own price (X3).
+	Promotions       []domain.Promotion
+	PromoAt          time.Time
+	IgnorePromoQuota bool
 }
 
 type PricedItemOption struct {
@@ -202,6 +207,13 @@ func ValidateAndPriceOrder(store domain.Store, input OrderCreationInput, catalog
 		pricedItem, err := priceSingleOrderItem(store.ID, product, variant, reqItem, catalog, optionDeducts)
 		if err != nil {
 			return nil, err
+		}
+		// One best promotion per line, taken off the line subtotal (K7, X2).
+		if p, d := bestPromotion(catalog.Promotions, product, pricedItem.Item.SubtotalAmount, reqItem.Quantity,
+			storeLocal(catalog.PromoAt, store.Timezone), catalog.IgnorePromoQuota); p != nil {
+			name := p.Name
+			pricedItem.Item.SubtotalAmount -= d
+			pricedItem.Item.PromotionID, pricedItem.Item.PromoDiscountAmount, pricedItem.Item.SnapshotPromoName = &p.ID, d, &name
 		}
 
 		orderSubtotal, err = safeAddInt64(orderSubtotal, pricedItem.Item.SubtotalAmount)

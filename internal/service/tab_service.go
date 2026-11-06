@@ -508,14 +508,7 @@ func (s *TabService) submitRoundInternal(
 		return nil, err
 	}
 
-	snapshot := CatalogSnapshot{
-		Products:          catalogData.Products,
-		ModifierGroups:    catalogData.ModifierGroups,
-		ModifierOptions:   catalogData.ModifierOptions,
-		ProductGroups:     catalogData.ProductModifierGroups,
-		OptionChildGroups: catalogData.OptionModifierGroups,
-		Variants:          catalogData.Variants,
-	}
+	snapshot := catalogSnapshotOf(catalogData, s.nowFunc())
 
 	actorUserID := actor.Staff.UserID
 	orderInput := OrderCreationInput{

@@ -170,7 +170,7 @@ func TestOfflineSyncIntegration(t *testing.T) {
 		seq++
 		o := map[string]any{
 			"client_order_id": uuid.NewString(), "offline_queue_number": fmt.Sprintf("%s-%03d", prefix, seq),
-			"offline_created_at": time.Now().Add(-10 * time.Minute), "cashier_id": cashierID, "shift_id": opened.Shift.ID,
+			"offline_created_at": time.Now(), // after the shift opened (OF4) "cashier_id": cashierID, "shift_id": opened.Shift.ID,
 			"catalog_version": served.Version, "order_type": "takeaway", "customer_name": "Rina",
 			"items":   []map[string]any{{"product_id": americano, "quantity": 2}},
 			"payment": map[string]any{"method": "cash", "cash_tendered_amount": 1_000_000},

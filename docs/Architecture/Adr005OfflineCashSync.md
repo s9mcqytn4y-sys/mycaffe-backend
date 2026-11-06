@@ -1,6 +1,6 @@
 # ADR-005: Offline Cash & Static QRIS Ordering with Server Sync
 
-- **Status**: Accepted (owner, 2026-11-02): decisions OF1–OF9 below. Implementation **Planned**; nothing is built yet.
+- **Status**: Accepted (owner, 2026-11-02): decisions OF1–OF9 below. **Amended 2026-11-06** by decisions W16–W20 (§2.1). Implementation **Planned** for v0.10 (PRs 10.1–10.5, §7); nothing is built yet.
 - **Deciders**: Product owner, backend
 - **Amends**: ADR-003 (adds registered POS devices as a second credential type); keeps the AGENTS.md rule that offline UI caching does not make online payments or cross-device sync work.
 - **Related**: decision register K8 (static QRIS fallback), QR5 (anti-abuse), HF2 (shared stock helper); audit report Tahap 1, ticket P0-10.
@@ -31,14 +31,25 @@ owner as final until the server has accepted it.
 | OF8 | **Static QRIS offline.** The cashier must enter the amount and the reference/time shown in the merchant app. The server stores the payment as `static_qris` verified by that cashier and flags it `offline_unreconciled` until matched against the bank/settlement record (audit ticket P2-02). | Consistent with K8. The reference makes a false claim traceable; prevention comes with settlement matching. |
 | OF9 | **Failed validation never discards data.** A submission the server cannot accept (unknown product, revoked device, expired verifier, limits exceeded, malformed payload) is stored as received with status `rejected` and a reason, is excluded from revenue and stock, and waits for the owner to **accept** (at a stated price) or **reject** (with a reason); both are audited. A revoked device cannot submit anything new. | Money was taken; losing the record is worse than a review queue. |
 
+### 2.1 Amendments (owner, 2026-11-06, decision register W16–W20)
+
+| ID | Amends | Decision |
+|----|--------|----------|
+| W16 | OF1 | v0.8 features offline: **cash rounding** applies (the server recomputes it); discounts only up to `cashier_max_discount_bps`, with no owner-approved discount or compliment; **no multi-payment** (one tender per order); switching cashier by **badge + PIN** is allowed against the device-held verifier. |
+| W17 | OF5, §5 item 1 | Negative stock **approved**, but only through offline sync. Online reservation keeps refusing when stock is short. Lines that drive stock below zero are flagged `oversold` and audited. Every reader of `stock_quantity` is checked and reported before the migration merges. |
+| W18 | OF6 (kitchen) | During an outage the device prints kitchen tickets through the print agent on the LAN: `POST :8787/print` with a per-agent local key. The agent renders with the shared `internal/pkg/printfmt`, marks tickets **OFFLINE**, and uses its cached printer/station config. Orders synced with `printed_locally=true` get no server print job, so nothing prints twice. |
+| W19 | OF2 | PIN verifier = **Argon2id**(PIN, per-device salt), 64 MB memory, 3 iterations; 72 h expiry; device locks after 5 wrong PINs; revocation from the owner's phone is the main control. Residual risk accepted: GPU brute force of a copied tablet within 72 h. |
+| W20 | OF3, §3 `catalog_versions` | A snapshot is stored **when the catalog is served** to a device, not on every catalog edit. Version = SHA-256 of the canonical pricing content, insert-once, so repeated serves of unchanged prices reuse the row. `stale_catalog` (> 24 h) is measured from the version's **first serve**. |
+
 ## 3. Backend design (to be refined in implementation planning)
 
 **Data (additive migrations):**
 
 - `devices`: `store_id`, `id`, `name`, `prefix` (unique per store), credential hash, `registered_by`, `revoked_at`, `last_sync_at`, `last_seen_pending`.
 - `device_pin_verifiers`: per device × staff, verifier material, `expires_at`; deleted on device revoke or staff deactivation.
-- `catalog_versions`: per store, monotonically increasing version with an immutable JSONB snapshot of sellable prices (variants, modifier options, tax/service settings) written whenever pricing-relevant catalog data changes.
-- `orders`: `origin` (`online`/`offline`), `client_order_id` (UUID from the device, unique per store), `device_id`, `offline_created_at`, `offline_queue_number`, `catalog_version`, flags `stale_catalog`, `price_delta`.
+- `device_pin_verifiers` holds the Argon2id salt and parameters with the hash (W19); `devices` also keeps a lock state and failed-attempt counter.
+- `catalog_versions`: per store, keyed by `version` = SHA-256 of the canonical pricing content, with an immutable JSONB snapshot of sellable prices (variants, modifier options, tax/service/rounding settings) and `first_served_at`; inserted once when the catalog is served to a device (W20).
+- `orders`: `origin` (`online`/`offline`), `client_order_id` (UUID from the device, unique per store), `device_id`, `offline_created_at`, `offline_queue_number`, `catalog_version`, flags `stale_catalog`, `price_delta`, `printed_locally` (W18).
 - `order_items`: `oversold` flag.
 - `payments`: `offline_unreconciled` flag and the cashier-entered static QRIS reference.
 - `offline_order_submissions`: raw payload, `client_order_id`, device, status (`accepted`/`rejected`/`resolved_accepted`/`resolved_rejected`), reason, resolver, timestamps.
@@ -63,7 +74,7 @@ owner as final until the server has accepted it.
 
 ## 5. Items needing separate approval at implementation time
 
-1. **Schema change**: relaxing the two stock CHECK constraints (OF5). It removes a guarantee other code may rely on; all readers of `stock_quantity` must be checked first.
+1. **Schema change**: relaxing the two stock CHECK constraints (OF5). It removes a guarantee other code may rely on; all readers of `stock_quantity` must be checked first. *Approved in principle by W17; the reader audit is reported to the owner before the migration (PR 10.3) merges.*
 2. **Permission**: a new owner-only permission for device management (proposed `device.manage`).
 3. **Public contract**: the sync request/response shapes in `docs/Api/OpenApi.yaml`.
 
@@ -75,3 +86,18 @@ owner as final until the server has accepted it.
 - Stock goes negative and the line is flagged `oversold`.
 - Revoked device, expired verifier, exceeded limits and an unknown product each produce a `rejected` submission; owner accept/reject is audited.
 - Cross-tenant: a device credential of store A cannot submit to store B.
+- W16: an offline order with cash rounding is re-priced to the same rounded total; a discount above `cashier_max_discount_bps` or a second tender is rejected into the review queue.
+- W17: an online reservation still refuses short stock while an offline sync of the same item goes negative.
+- W18: an order synced with `printed_locally=true` creates no print job; without it the late kitchen ticket is queued.
+- W19: the verifier uses the stored Argon2id parameters; the sixth wrong PIN is reported as a lock; a revoked device's verifiers are gone.
+- W20: serving an unchanged catalog twice stores one snapshot; a price change yields a new version; staleness counts from the first serve.
+
+## 7. Implementation plan (W21)
+
+| PR | Scope |
+|----|-------|
+| 10.1 | Devices (register/rename/revoke, credential), PIN verifiers (W19), catalog snapshot on serve (W20), `device.manage` permission |
+| 10.2 | `POST /pos/offline-orders/sync` (idempotent, re-pricing with W16 rules, official numbering, original shift), submissions review queue for the owner |
+| 10.3 | Negative stock through sync only, `oversold` flag (W17); `stock_quantity` reader audit first |
+| 10.4 | Print agent LAN endpoint `:8787/print` with local key, OFFLINE tickets, `printed_locally` (W18) |
+| 10.5 | Pending-sync guard on shift close, late orders into the original shift, `amended` Z-reports (OF4) → v0.10.0 |

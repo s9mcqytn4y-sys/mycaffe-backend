@@ -380,6 +380,9 @@ func registerKDSAndCatalogRoutes(v1 *gin.RouterGroup, h *handlerSet) {
 	inv.POST("/purchase-orders/:id/receipts", h.inventory.ReceivePurchaseOrder)
 	inv.POST("/purchases", h.inventory.DirectPurchase)
 	inv.GET("/receipts", h.inventory.ListReceipts)
+	// Payables (v0.11 PR 11.5, X7): one per receipt, paid at once or in instalments.
+	inv.GET("/payables", h.inventory.ListPayables)
+	inv.POST("/payables/:id/payments", h.inventory.PayPayable)
 	// Promotions (v0.11 PR 11.1, K7): one best promotion per line, taken off the line subtotal.
 	cat.GET("/promotions", manage, h.catalog.ListPromotions)
 	cat.POST("/promotions", manage, h.catalog.CreatePromotion)

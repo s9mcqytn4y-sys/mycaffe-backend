@@ -108,6 +108,9 @@ type DirectPurchaseInput struct {
 	SupplierName string           `json:"supplier_name"`
 	Note         string           `json:"note"`
 	Lines        []StockLineInput `json:"lines"`
+	// PayWith settles the purchase at once (outlet_cash, transfer or cash); empty leaves a payable (PR 11.5).
+	PayWith          string `json:"pay_with"`
+	PaymentReference string `json:"payment_reference"`
 }
 
 // ---------- Suppliers ----------
@@ -305,6 +308,13 @@ func (s *InventoryService) DirectPurchase(ctx context.Context, actor *Authentica
 	if in.SupplierID == nil && name == "" {
 		return nil, &ValidationError{Fields: map[string]string{"supplier_name": "isi pemasok atau nama tempat beli"}}
 	}
+	if in.PayWith != "" {
+		f := fieldErrors{}
+		f.oneOf("pay_with", in.PayWith, PayableOutletCash, PayableTransfer, PayableCash)
+		if err := f.err(); err != nil {
+			return nil, err
+		}
+	}
 	now := s.nowFunc().UTC()
 	r := &GoodsReceipt{ID: uuid.New(), SupplierID: in.SupplierID, SupplierName: truncate(name, 100), Note: truncate(strings.TrimSpace(in.Note), 500), ReceivedAt: now}
 	err := s.tx(ctx, actor, func(tx *sqlx.Tx) error {
@@ -325,12 +335,23 @@ func (s *InventoryService) DirectPurchase(ctx context.Context, actor *Authentica
 		if err := insertReceiptTx(ctx, tx, storeID, r, actor.Staff.UserID); err != nil {
 			return err
 		}
+		payableID, err := createPayableTx(ctx, tx, storeID, r)
+		if err != nil {
+			return err
+		}
 		for _, l := range in.Lines {
 			if _, err := postStockLineTx(ctx, tx, storeID, r.ID, nil, l, actor.Staff.UserID, now); err != nil {
 				return err
 			}
 		}
-		return s.audit(ctx, tx, actor, "GOODS_RECEIVED", "Pembelian langsung dari "+r.SupplierName, r.ID, map[string]any{"total": r.TotalAmount, "lines": in.Lines}, now)
+		if err := s.audit(ctx, tx, actor, "GOODS_RECEIVED", "Pembelian langsung dari "+r.SupplierName, r.ID, map[string]any{"total": r.TotalAmount, "lines": in.Lines}, now); err != nil {
+			return err
+		}
+		if in.PayWith == "" || r.TotalAmount == 0 {
+			return nil
+		}
+		return s.payPayableTx(ctx, tx, actor, payableID, PayPayableInput{Amount: r.TotalAmount, Method: in.PayWith,
+			Reference: in.PaymentReference, Note: "Pembelian langsung"}, now)
 	})
 	if err != nil {
 		return nil, err
@@ -613,6 +634,9 @@ func (s *InventoryService) ReceivePurchaseOrder(ctx context.Context, actor *Auth
 				PurchaseUnit: pl.PurchaseUnit, Conversion: pl.Conversion, Quantity: in.Quantity, UnitPrice: price}})
 		}
 		if err := insertReceiptTx(ctx, tx, storeID, r, actor.Staff.UserID); err != nil {
+			return err
+		}
+		if _, err := createPayableTx(ctx, tx, storeID, r); err != nil {
 			return err
 		}
 		for _, p := range postings {

@@ -162,6 +162,31 @@ func (s *OutletCashService) Record(ctx context.Context, actor *AuthenticatedStaf
 	var out *OutletCashSummary
 	var movementID uuid.UUID
 	err := database.WithTenantTx(ctx, s.db, storeID, func(tx *sqlx.Tx) error {
+		var err error
+		if movementID, err = s.recordTx(ctx, tx, actor, in, now); err != nil {
+			return err
+		}
+		out, err = s.summaryTx(ctx, tx, storeID)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	for i := range out.RecentMovements {
+		if out.RecentMovements[i].ID == movementID {
+			out.RecordedMovement = &out.RecentMovements[i]
+		}
+	}
+	out.OpenDrawer = in.MovementType == OutletToDrawer || in.MovementType == OutletFromDrawer
+	return out, nil
+}
+
+// recordTx writes one validated movement inside an open tenant transaction (also used to pay supplier
+// payables from the fund, PR 11.5) and returns its id.
+func (s *OutletCashService) recordTx(ctx context.Context, tx *sqlx.Tx, actor *AuthenticatedStaff, in OutletMovementInput, now time.Time) (uuid.UUID, error) {
+	storeID := actor.Staff.Store.ID
+	var movementID uuid.UUID
+	err := func() error {
 		// One writer per store at a time: the balance and daily-limit checks below must see every movement.
 		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext('outlet_cash:' || $1::text))`, storeID); err != nil {
 			return err
@@ -216,19 +241,9 @@ func (s *OutletCashService) Record(ctx context.Context, actor *AuthenticatedStaf
 			ReferenceID: movementID.String(), Metadata: string(meta), CreatedAt: now}); err != nil {
 			return err
 		}
-		out, err = s.summaryTx(ctx, tx, storeID)
-		return err
-	})
-	if err != nil {
-		return nil, err
-	}
-	for i := range out.RecentMovements {
-		if out.RecentMovements[i].ID == movementID {
-			out.RecordedMovement = &out.RecentMovements[i]
-		}
-	}
-	out.OpenDrawer = in.MovementType == OutletToDrawer || in.MovementType == OutletFromDrawer
-	return out, nil
+		return nil
+	}()
+	return movementID, err
 }
 
 // moveThroughDrawerTx books the drawer side of a transfer in the drawer's open shift: cash_in when the

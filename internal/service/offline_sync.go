@@ -387,7 +387,14 @@ func (s *OfflineSyncService) storeSubmission(ctx context.Context, tx *sqlx.Tx, s
 		VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''), $7, $8)`, storeID, deviceID, o.ClientOrderID, payload, res.Status, reason, orderID, now); err != nil {
 		return nil, fmt.Errorf("failed to store offline submission: %w", err)
 	}
-	meta, _ := json.Marshal(map[string]any{"client_order_id": o.ClientOrderID, "device_id": deviceID, "offline_queue_number": o.OfflineQueueNumber, "order_id": orderID})
+	var oversold int
+	if orderID != nil {
+		if err := tx.GetContext(ctx, &oversold, `SELECT COUNT(*) FROM order_items WHERE store_id = $1 AND order_id = $2 AND oversold`, storeID, *orderID); err != nil {
+			return nil, err
+		}
+	}
+	meta, _ := json.Marshal(map[string]any{"client_order_id": o.ClientOrderID, "device_id": deviceID, "offline_queue_number": o.OfflineQueueNumber,
+		"order_id": orderID, "oversold_lines": oversold})
 	cashier := o.CashierID
 	var actorName string
 	_ = tx.GetContext(ctx, &actorName, `SELECT full_name FROM users WHERE store_id = $1 AND id = $2`, storeID, cashier)

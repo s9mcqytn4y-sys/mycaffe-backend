@@ -3439,8 +3439,9 @@ paths:
         orders get the official order and queue number, are paid (cash or static QRIS with a reference) into
         shift_id, which must be the open shift of its drawer, and keep offline_queue_number. Orders the server
         cannot accept (wrong prefix, limits of 12 h / 300 orders since the last sync, no valid PIN verifier,
-        discount above the cashier limit, unknown product or version, stock, closed shift) are stored as
-        rejected with a reason for the owner (ADR-005 OF9). Late orders into a closed shift arrive with PR 10.5.
+        discount above the cashier limit, unknown product or version, closed shift) are stored as
+        rejected with a reason for the owner (ADR-005 OF9). Stock never refuses an offline order: tracked stock may go
+        below zero and the lines are flagged oversold (W17). Late orders into a closed shift arrive with PR 10.5.
       x-implementation-status: implemented
       requestBody:
         required: true
@@ -3557,7 +3558,7 @@ paths:
       summary: Accept or reject a rejected offline submission (device.manage, audited)
       description: >-
         Accept re-processes the stored order with the device-side checks waived (verifier, limits, revoked
-        device); pricing, stock and the shift still apply, and a failure answers 422 with the reason while the
+        device); pricing and the shift still apply, and a failure answers 422 with the reason while the
         submission keeps waiting. Reject needs a note.
       x-implementation-status: implemented
       security:
@@ -6092,7 +6093,7 @@ components:
                 type: ["string", "null"]
               stock_quantity:
                 type: integer
-                description: Staff view only.
+                description: Staff view only. Can be negative after offline sales (W17); the item is then sold out.
               variants:
                 type: array
                 items:

@@ -199,8 +199,17 @@ func (s *OrderService) createOrderTx(ctx context.Context, tx *sqlx.Tx, trustedSt
 			}
 		}
 
+		guardedProducts, guardedOptions := priced.ProductStockDeducts, priced.OptionStockDeducts
+		if normalizedInput.Offline != nil {
+			// Offline sync never rejects for stock (OF5, W17): deduct unguarded and note what went negative.
+			if err := normalizedInput.Offline.deductStock(ctx, tx, s.repo, trustedStoreID, priced); err != nil {
+				return err
+			}
+			guardedProducts, guardedOptions = nil, nil
+		}
+
 		// Deduct product stock in deterministic sorted UUID order.
-		for _, prodID := range sortedUUIDKeysFromIntMap(priced.ProductStockDeducts) {
+		for _, prodID := range sortedUUIDKeysFromIntMap(guardedProducts) {
 			qty := priced.ProductStockDeducts[prodID]
 			if err := s.repo.DeductProductStock(ctx, tx, trustedStoreID, prodID, qty); err != nil {
 				if errors.Is(err, postgres.ErrStockUpdateFailed) {
@@ -211,7 +220,7 @@ func (s *OrderService) createOrderTx(ctx context.Context, tx *sqlx.Tx, trustedSt
 		}
 
 		// Deduct modifier option stock in deterministic sorted UUID order.
-		for _, optID := range sortedUUIDKeysFromIntMap(priced.OptionStockDeducts) {
+		for _, optID := range sortedUUIDKeysFromIntMap(guardedOptions) {
 			qty := priced.OptionStockDeducts[optID]
 			if err := s.repo.DeductModifierOptionStock(ctx, tx, trustedStoreID, optID, qty); err != nil {
 				if errors.Is(err, postgres.ErrStockUpdateFailed) {
@@ -290,6 +299,11 @@ func (s *OrderService) createOrderTx(ctx context.Context, tx *sqlx.Tx, trustedSt
 			return err
 		}
 		order.Items = persistedItems
+		if normalizedInput.Offline != nil {
+			if err := normalizedInput.Offline.flagOversold(ctx, tx, trustedStoreID, order.ID); err != nil {
+				return err
+			}
+		}
 
 		initialSplit := domain.PaymentSplit{
 			ID:                  uuid.New(),

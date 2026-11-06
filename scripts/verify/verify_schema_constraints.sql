@@ -355,6 +355,13 @@ BEGIN
     IF has_table_privilege('mycaffe_app', 'public.kds_tickets', 'DELETE') THEN
         RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may DELETE kds_tickets!';
     END IF;
+    -- 10F-20. Offline order submissions (migration 000039): RLS on, never deleted by the app role (OF9).
+    IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.offline_order_submissions'::regclass) THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: offline_order_submissions does not have row-level security enabled!';
+    END IF;
+    IF has_table_privilege('mycaffe_app', 'public.offline_order_submissions', 'DELETE') THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may DELETE offline_order_submissions!';
+    END IF;
     -- 10F-19. Devices, PIN verifier records, catalog snapshots (migration 000038): RLS on; devices are
     -- revoked, never deleted; snapshots are immutable.
     IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.devices'::regclass)

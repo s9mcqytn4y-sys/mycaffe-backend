@@ -64,6 +64,8 @@ type OrderCreationInput struct {
 	Items                    []OrderItemInput   `json:"items"`
 	// Guest binds a QR order to its table, table session and guest session (iteration 5b); never from JSON.
 	Guest *GuestOrderBinding `json:"-"`
+	// Offline re-prices a synced offline order from its catalog snapshot (ADR-005 OF3); never from JSON.
+	Offline *offlinePricing `json:"-"`
 }
 
 type CatalogSnapshot struct {

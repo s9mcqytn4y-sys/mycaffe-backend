@@ -1,6 +1,6 @@
 # ADR-005: Offline Cash & Static QRIS Ordering with Server Sync
 
-- **Status**: Accepted (owner, 2026-11-02): decisions OF1–OF9 below. **Amended 2026-11-06** by decisions W16–W20 (§2.1). Implementation in progress for v0.10 (§7): PR 10.1 (devices, verifiers, catalog snapshots) built.
+- **Status**: Accepted (owner, 2026-11-02): decisions OF1–OF9 below. **Amended 2026-11-06** by decisions W16–W20 (§2.1). Implementation in progress for v0.10 (§7): PR 10.1 (devices, verifiers, catalog snapshots) and PR 10.2 (offline sync, owner review) built.
 - **Deciders**: Product owner, backend
 - **Amends**: ADR-003 (adds registered POS devices as a second credential type); keeps the AGENTS.md rule that offline UI caching does not make online payments or cross-device sync work.
 - **Related**: decision register K8 (static QRIS fallback), QR5 (anti-abuse), HF2 (shared stock helper); audit report Tahap 1, ticket P0-10.
@@ -52,13 +52,13 @@ owner as final until the server has accepted it.
 - `order_items`: `oversold` flag.
 - `payments`: `offline_unreconciled` flag and the cashier-entered static QRIS reference.
 - `offline_order_submissions`: raw payload, `client_order_id`, device, status (`accepted`/`rejected`/`resolved_accepted`/`resolved_rejected`), reason, resolver, timestamps.
-- `store_settings`: `offline_max_hours` (default 12), `offline_max_orders` (default 300).
+- `store_settings`: `offline_max_hours` (default 12), `offline_max_orders` (default 300). *As built in 10.2 these are server constants; they move to `store_settings` when an owner needs to tune them.*
 - Relax `chk_products_stock_quantity` and the stock part of `chk_modifier_options_stock` to allow negative balances (see §5).
 
 **API:**
 
 - Owner: register/rename/revoke devices; list and resolve `offline_order_submissions`.
-- Device: fetch catalog snapshot + version and PIN verifiers while online; `POST /api/v1/pos/offline-orders/sync` with a batch of orders and PIN-failure events; report pending count (used by OF4).
+- Device: fetch catalog snapshot + version and PIN verifiers while online; `POST /api/v1/device/offline-orders/sync` (device credential, max 50 orders) with a batch of orders and PIN-failure events; report pending count (used by OF4).
 - Sync is idempotent per `client_order_id`: a repeated order returns the original result and never creates a second order, payment, stock movement or cash movement.
 
 **Tenant resolution:** the device credential follows the guest-cookie pattern (`<store_id>.<device_id>.<secret>`); the store id only selects the tenant for `database.WithTenantTx`, and the secret is verified against the stored hash inside that transaction. No new SECURITY DEFINER function is needed.
@@ -96,7 +96,7 @@ owner as final until the server has accepted it.
 | PR | Scope |
 |----|-------|
 | 10.1 | Devices (register/rename/revoke, credential), PIN verifiers (W19), catalog snapshot on serve (W20), `device.manage` permission |
-| 10.2 | `POST /pos/offline-orders/sync` (idempotent, re-pricing with W16 rules, official numbering, original shift), submissions review queue for the owner |
+| 10.2 | `POST /device/offline-orders/sync` (idempotent, re-pricing from the snapshot with W16 rules, official numbering, payment into the open shift of its drawer), owner review queue (`/store/offline-submissions`, accept re-processes with device-side checks waived, reject needs a note). Until 10.3 and 10.5 land, short stock and a closed shift reject into the review queue; accept "at a stated price" is not offered (accept uses the snapshot price) |
 | 10.3 | Negative stock through sync only, `oversold` flag (W17); `stock_quantity` reader audit first |
 | 10.4 | Print agent LAN endpoint `:8787/print` with local key, OFFLINE tickets, `printed_locally` (W18) |
 | 10.5 | Pending-sync guard on shift close, late orders into the original shift, `amended` Z-reports (OF4) → v0.10.0 |

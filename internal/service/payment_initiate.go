@@ -79,10 +79,24 @@ func (s *PaymentService) initiateDirectCashierPayment(
 	trustedStoreID uuid.UUID,
 	input InitiatePaymentInput,
 ) (*InitiatePaymentResult, error) {
+	var result *InitiatePaymentResult
+	err := database.WithTenantTx(ctx, s.db, trustedStoreID, func(tx *sqlx.Tx) error {
+		var err error
+		result, err = s.directCashierPaymentTx(ctx, tx, trustedStoreID, input)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// directCashierPaymentTx records a cash/static QRIS/EDC tender inside an open tenant transaction
+// (also used by offline sync).
+func (s *PaymentService) directCashierPaymentTx(ctx context.Context, tx *sqlx.Tx, trustedStoreID uuid.UUID, input InitiatePaymentInput) (*InitiatePaymentResult, error) {
 	requestHash := computePaymentInitiationHash(trustedStoreID, input)
 	var result *InitiatePaymentResult
-
-	err := database.WithTenantTx(ctx, s.db, trustedStoreID, func(tx *sqlx.Tx) error {
+	err := func() error {
 		store, err := s.orderRepo.GetStoreForOrder(ctx, tx, trustedStoreID)
 		if err != nil {
 			return err
@@ -337,7 +351,7 @@ func (s *PaymentService) initiateDirectCashierPayment(
 			OpenDrawer:         input.Method == domain.PaymentMethodCash,
 		}
 		return nil
-	})
+	}()
 	if err != nil {
 		return nil, err
 	}

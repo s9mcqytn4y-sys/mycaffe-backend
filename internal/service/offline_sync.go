@@ -61,6 +61,8 @@ type OfflineOrderInput struct {
 	DiscountBPS        int64               `json:"discount_bps,omitempty"`
 	DiscountReason     string              `json:"discount_reason,omitempty"`
 	Payment            OfflinePaymentInput `json:"payment"`
+	// PrintedLocally: the kitchen tickets were printed on the LAN print agent; the server prints none (W18).
+	PrintedLocally bool `json:"printed_locally,omitempty"`
 }
 
 // PINFailureInput reports wrong offline PINs typed on the device (OF2), audited on sync.
@@ -336,6 +338,19 @@ func (s *OfflineSyncService) place(ctx context.Context, tx *sqlx.Tx, storeID, de
 		}
 	}
 
+	// Marked before the payment: settling it creates the KDS tickets and print jobs, which skip an
+	// order already printed on the LAN agent (W18).
+	stale := o.OfflineCreatedAt.Sub(snap.FirstServedAt) > staleCatalogAge
+	var delta int64
+	if pricing.liveSubtotal != nil {
+		delta = order.SubtotalAmount - *pricing.liveSubtotal
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE orders SET origin = 'offline', client_order_id = $3, device_id = $4, offline_created_at = $5,
+		offline_queue_number = $6, catalog_version = $7, stale_catalog = $8, price_delta = $9, printed_locally = $10 WHERE store_id = $1 AND id = $2`,
+		storeID, order.ID, o.ClientOrderID, deviceID, o.OfflineCreatedAt, o.OfflineQueueNumber, o.CatalogVersion, stale, delta, o.PrintedLocally); err != nil {
+		return nil, fmt.Errorf("failed to mark offline order: %w", err)
+	}
+
 	paid, err := s.payments.directCashierPaymentTx(ctx, tx, storeID, InitiatePaymentInput{
 		OrderID:            order.ID,
 		IdempotencyKey:     "offline-pay:" + o.ClientOrderID.String(),
@@ -350,17 +365,6 @@ func (s *OfflineSyncService) place(ctx context.Context, tx *sqlx.Tx, storeID, de
 	}
 	if paid.Payment.ShiftID == nil || *paid.Payment.ShiftID != o.ShiftID {
 		return nil, errOfflineShiftMismatch
-	}
-
-	stale := o.OfflineCreatedAt.Sub(snap.FirstServedAt) > staleCatalogAge
-	var delta int64
-	if pricing.liveSubtotal != nil {
-		delta = order.SubtotalAmount - *pricing.liveSubtotal
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE orders SET origin = 'offline', client_order_id = $3, device_id = $4, offline_created_at = $5,
-		offline_queue_number = $6, catalog_version = $7, stale_catalog = $8, price_delta = $9 WHERE store_id = $1 AND id = $2`,
-		storeID, order.ID, o.ClientOrderID, deviceID, o.OfflineCreatedAt, o.OfflineQueueNumber, o.CatalogVersion, stale, delta); err != nil {
-		return nil, fmt.Errorf("failed to mark offline order: %w", err)
 	}
 	if o.Payment.Method == domain.PaymentMethodStaticQRIS {
 		if _, err := tx.ExecContext(ctx, `UPDATE payments SET offline_unreconciled = true WHERE store_id = $1 AND id = $2`, storeID, paid.Payment.ID); err != nil {

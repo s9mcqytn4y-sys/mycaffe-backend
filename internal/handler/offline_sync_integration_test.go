@@ -73,6 +73,9 @@ func TestOfflineSyncIntegration(t *testing.T) {
 	r.DELETE("/catalog/products/:id", ah.RequirePermission(rbac.CatalogManage), ch.ArchiveProduct)
 	pos := handler.NewPOSHandler(orders, payments, service.NewSettingsService(db))
 	r.POST("/pos/orders", ah.RequireStaff(), pos.CreateOrder)
+	ph := handler.NewPrintHandler(service.NewPrintService(db))
+	r.POST("/store/printers", ah.RequirePermission(rbac.StoreSettingsManage), ph.CreatePrinter)
+	r.PATCH("/store/printers/:id", ah.RequirePermission(rbac.StoreSettingsManage), ph.UpdatePrinter)
 
 	call := func(method, path, authz string, body any) *httptest.ResponseRecorder {
 		var buf bytes.Buffer
@@ -392,6 +395,43 @@ func TestOfflineSyncIntegration(t *testing.T) {
 		}
 		if res := call("POST", "/pos/orders", cashier, stockOrder(1)); res.Code == http.StatusCreated {
 			t.Fatal("online ordering must refuse while the balance is negative")
+		}
+	})
+
+	t.Run("PrintedLocallyIsNotPrintedAgain", func(t *testing.T) {
+		croissant := uuid.MustParse("d0000005-0000-4000-8000-000000000005") // kitchen
+		res := call("POST", "/store/printers", owner, map[string]any{"name": "Dapur " + prefix, "station": "kitchen"})
+		if res.Code != http.StatusCreated {
+			t.Fatalf("create printer failed: %d: %s", res.Code, res.Body.String())
+		}
+		var printer struct {
+			ID uuid.UUID `json:"id"`
+		}
+		_ = json.Unmarshal(res.Body.Bytes(), &printer)
+		// Other tests pay orders in this store: never leave this printer active.
+		t.Cleanup(func() {
+			call("PATCH", "/store/printers/"+printer.ID.String(), owner, map[string]any{"is_active": false})
+		})
+		kitchen := func(local bool) map[string]any {
+			return order(func(o map[string]any) {
+				o["items"] = []map[string]any{{"product_id": croissant, "quantity": 1}}
+				o["printed_locally"] = local
+			})
+		}
+		results := sync(map[string]any{"orders": []any{kitchen(true), kitchen(false)}})
+		if len(results) != 2 || results[0].OrderID == nil || results[1].OrderID == nil {
+			t.Fatalf("both kitchen orders must be accepted: %+v", results)
+		}
+		var local, server int
+		inStore(func(tx *sqlx.Tx) error {
+			q := `SELECT COUNT(*) FROM print_jobs WHERE store_id = $1 AND order_id = $2 AND printer_id = $3`
+			if err := tx.GetContext(ctx, &local, q, storeID, *results[0].OrderID, printer.ID); err != nil {
+				return err
+			}
+			return tx.GetContext(ctx, &server, q, storeID, *results[1].OrderID, printer.ID)
+		})
+		if local != 0 || server != 1 {
+			t.Fatalf("printed_locally skips the server print job (W18): got %d for the local order, %d for the other", local, server)
 		}
 	})
 

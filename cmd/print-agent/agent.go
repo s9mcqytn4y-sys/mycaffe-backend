@@ -12,7 +12,10 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/printfmt"
 )
 
 // PrinterConfig is one printer the agent serves: its agent token (from the owner's printer settings,
@@ -27,6 +30,8 @@ type Config struct {
 	APIURL      string          `json:"api_url"`
 	PollSeconds int             `json:"poll_seconds"`
 	Printers    []PrinterConfig `json:"printers"`
+	// LAN enables the outage fallback endpoint (W18); nil keeps the agent queue-only.
+	LAN *LANConfig `json:"lan,omitempty"`
 }
 
 func (c *Config) validate() error {
@@ -47,6 +52,12 @@ func (c *Config) validate() error {
 		if _, _, err := net.SplitHostPort(p.Address); err != nil {
 			return fmt.Errorf("printer %d address %q must be host:port", i+1, p.Address)
 		}
+		if p.Name == "" {
+			c.Printers[i].Name = fmt.Sprintf("printer-%d", i+1) // the LAN cache is keyed by name
+		}
+	}
+	if c.LAN != nil {
+		return c.LAN.validate()
 	}
 	return nil
 }
@@ -67,10 +78,13 @@ type agent struct {
 	client *http.Client
 	// send writes raw bytes to the printer; replaceable in tests.
 	send func(ctx context.Context, address string, data []byte) error
+
+	mu    sync.Mutex
+	cache map[string]printfmt.Printer // printer name -> settings, for the LAN fallback
 }
 
 func newAgent(cfg Config) *agent {
-	return &agent{cfg: cfg, client: &http.Client{Timeout: 15 * time.Second}, send: sendRaw}
+	return &agent{cfg: cfg, client: &http.Client{Timeout: 15 * time.Second}, send: sendRaw, cache: map[string]printfmt.Printer{}}
 }
 
 // sendRaw prints over a plain TCP connection (port 9100 "raw"/JetDirect printing).
@@ -87,16 +101,18 @@ func sendRaw(ctx context.Context, address string, data []byte) error {
 }
 
 func (a *agent) run(ctx context.Context) {
-	done := make(chan struct{})
+	var wg sync.WaitGroup
+	if a.cfg.LAN != nil {
+		a.serveLAN(ctx, &wg)
+	}
 	for _, p := range a.cfg.Printers {
+		wg.Add(1)
 		go func(p PrinterConfig) {
+			defer wg.Done()
 			a.loop(ctx, p)
-			done <- struct{}{}
 		}(p)
 	}
-	for range a.cfg.Printers {
-		<-done
-	}
+	wg.Wait()
 }
 
 func (a *agent) loop(ctx context.Context, p PrinterConfig) {

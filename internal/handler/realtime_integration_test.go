@@ -165,6 +165,21 @@ func TestRealtimeIteration5cIntegration(t *testing.T) {
 			t.Fatalf("relay failed: %v", err)
 		}
 	}
+	// drain relays the backlog other packages left in the shared store before a client connects: a backlog
+	// above the client's 64-message buffer would otherwise crowd out the event this test waits for.
+	drain := func() {
+		t.Helper()
+		for range 20 {
+			relay()
+			var pending int
+			inStore(centralID, func(tx *sqlx.Tx) error {
+				return tx.GetContext(ctx, &pending, `SELECT COUNT(*) FROM outbox_events WHERE store_id = $1 AND processed_at IS NULL`, centralID)
+			})
+			if pending == 0 {
+				return
+			}
+		}
+	}
 
 	productID := uuid.New()
 	inStore(centralID, func(tx *sqlx.Tx) error {
@@ -226,6 +241,7 @@ func TestRealtimeIteration5cIntegration(t *testing.T) {
 		if !strings.Contains(strings.Join(tk.Channels, ","), realtime.ChannelPOS) {
 			t.Fatalf("cashier must get the POS channel, got %v", tk.Channels)
 		}
+		drain()
 		conn, code := dial(tk.Ticket, -1)
 		if code != http.StatusSwitchingProtocols {
 			t.Fatalf("dial failed with %d", code)
@@ -252,6 +268,7 @@ func TestRealtimeIteration5cIntegration(t *testing.T) {
 		if strings.Contains(strings.Join(tk.Channels, ","), realtime.ChannelPOS) {
 			t.Fatalf("kitchen must not get the POS channel, got %v", tk.Channels)
 		}
+		drain()
 		conn, _ := dial(tk.Ticket, -1)
 		res := createOrder()
 		if _, err := orderSvc.CancelOrExpireUnpaidOrder(ctx, centralID, res.Order.ID, domain.OrderPaymentStatusUnpaid, "test"); err != nil {
@@ -341,6 +358,7 @@ func TestRealtimeIteration5cIntegration(t *testing.T) {
 		if len(tk.Channels) != 1 || !strings.HasPrefix(tk.Channels[0], realtime.ChannelGuestPrefix) {
 			t.Fatalf("guest must get only its own channel, got %v", tk.Channels)
 		}
+		drain()
 		conn, _ := dial(tk.Ticket, -1)
 
 		other := createOrder()
@@ -371,6 +389,7 @@ func TestRealtimeIteration5cIntegration(t *testing.T) {
 	t.Run("RevokedStaffSessionClosesOpenConnection", func(t *testing.T) {
 		fresh := login("central-cafe", "cashier.central@mycaffe.local")
 		tk := ticket("/pos/ws-ticket", fresh, "")
+		drain()
 		conn, _ := dial(tk.Ticket, -1)
 		inStore(centralID, func(tx *sqlx.Tx) error {
 			_, err := tx.ExecContext(ctx, `UPDATE auth_sessions SET revoked_at = NOW(), revoked_reason = 'logout'
@@ -391,6 +410,7 @@ func TestRealtimeIteration5cIntegration(t *testing.T) {
 				centralID, email)
 			return err
 		})
+		drain()
 		conn, _ := dial(ticket("/pos/ws-ticket", login("central-cafe", email), "").Ticket, -1)
 		inStore(centralID, func(tx *sqlx.Tx) error {
 			_, err := tx.ExecContext(ctx, `UPDATE users SET is_active = false WHERE store_id = $1 AND email = $2`, centralID, email)

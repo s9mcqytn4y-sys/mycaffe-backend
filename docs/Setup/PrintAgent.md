@@ -71,3 +71,26 @@ WantedBy=multi-user.target
   marks the job dead after 5 attempts (`print_job.failed` on the POS channel).
 - A crash between printing and acknowledging re-prints after the server's 60 s lease (at-least-once).
 - A refused token (rotated, printer inactive) is logged and retried every minute.
+
+## 6. LAN fallback during an outage (decision W18)
+
+Add a `lan` block to `print-agent.json` to let the POS print kitchen tickets on the LAN while the internet
+is down:
+
+```json
+"lan": {"listen": ":8787", "key": "<random, 32+ characters, shared with this cafe's POS devices>"}
+```
+
+- While online the agent fetches each printer's settings (`GET /api/v1/print-agent/printer`) every 5 minutes
+  and saves them to `print-agent-cache.json` next to the config (mode 600), so a restart during an outage
+  still prints.
+- The POS sends `POST http://<agent-ip>:8787/print` with `Authorization: Bearer <key>` and a ticket:
+  `{"queue_number": "X1-007", "customer_name": "Rina", "table_number": "", "lines": [{"name": "Nasi Goreng",
+  "variant": "", "options": [], "notes": "", "quantity": 2, "station": "kitchen"}]}`. Lines are routed by
+  station exactly like the server (bar and kitchen their own lines, checker all, label the bar lines), and
+  every ticket is marked `*** OFFLINE - nomor resmi menyusul ***`. The answer lists the printers that
+  printed and those that failed; `503` means no settings were cached yet.
+- When the order is synced, the POS sends `printed_locally: true` so the server does not print it again.
+- **Browser limit:** a POS web app served over HTTPS may not call a plain-HTTP LAN address (mixed content).
+  It works when the agent runs on the POS device itself (`http://localhost:8787`, allowed by browsers) or
+  from a native/wrapped POS app. The agent answers CORS and Private Network Access preflights.

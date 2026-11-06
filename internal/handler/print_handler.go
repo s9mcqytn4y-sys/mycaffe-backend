@@ -157,3 +157,13 @@ func (h *PrintHandler) Reprint(c *gin.Context) {
 	}
 	c.JSON(http.StatusAccepted, gin.H{"jobs": n})
 }
+
+// AgentPrinter handles GET /api/v1/print-agent/printer: the printer's settings for the agent's LAN cache.
+func (h *PrintHandler) AgentPrinter(c *gin.Context) {
+	p, err := h.prints.AgentPrinter(c.Request.Context(), printerToken(c))
+	if err != nil {
+		writePrintError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, p)
+}

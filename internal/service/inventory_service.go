@@ -57,11 +57,12 @@ type RecipeItem struct {
 
 type InventoryService struct {
 	db      *sqlx.DB
+	outlet  *OutletCashService // pays supplier payables from the outlet fund (PR 11.5)
 	nowFunc func() time.Time
 }
 
 func NewInventoryService(db *sqlx.DB) *InventoryService {
-	return &InventoryService{db: db, nowFunc: time.Now}
+	return &InventoryService{db: db, outlet: NewOutletCashService(db), nowFunc: time.Now}
 }
 
 func (s *InventoryService) tx(ctx context.Context, actor *AuthenticatedStaff, fn func(tx *sqlx.Tx) error) error {

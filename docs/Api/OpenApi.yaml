@@ -853,6 +853,8 @@ paths:
               properties:
                 supplier_id: {type: string, format: uuid}
                 supplier_name: {type: string, maxLength: 100}
+                pay_with: {type: string, enum: [outlet_cash, transfer, cash], description: "Settle at once; omit to leave a payable (PR 11.5)"}
+                payment_reference: {type: string, maxLength: 100}
                 note: {type: string, maxLength: 500}
                 lines:
                   type: array
@@ -865,6 +867,79 @@ paths:
               schema: {$ref: "#/components/schemas/GoodsReceipt"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
+        "422": {$ref: "#/components/responses/ValidationFailed"}
+  /api/v1/inventory/payables:
+    get:
+      tags: [Catalog]
+      operationId: listPayables
+      summary: Supplier payables, open ones by due date first (inventory.manage, X7)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - {name: status, in: query, schema: {type: string, enum: [open, paid]}}
+      responses:
+        "200":
+          description: Payables
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  payables:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, goods_receipt_id, supplier_name, amount, paid_amount, remaining, due_date, overdue, received_at]
+                      properties:
+                        id: {type: string, format: uuid}
+                        goods_receipt_id: {type: string, format: uuid}
+                        purchase_order_number: {type: integer}
+                        supplier_id: {type: string, format: uuid}
+                        supplier_name: {type: string}
+                        amount: {type: integer, format: int64}
+                        paid_amount: {type: integer, format: int64}
+                        remaining: {type: integer, format: int64}
+                        due_date: {type: string, format: date, description: "Receipt date in the store time zone plus the supplier payment terms"}
+                        overdue: {type: boolean}
+                        received_at: {type: string, format: date-time}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "422": {$ref: "#/components/responses/ValidationFailed"}
+  /api/v1/inventory/payables/{id}/payments:
+    post:
+      tags: [Catalog]
+      operationId: payPayable
+      summary: Pay an instalment or the rest of a payable (audited, X7)
+      description: >-
+        outlet_cash writes an outlet fund expense of category ingredients (the balance must cover it, V13);
+        transfer and cash are recorded with an optional reference. Payments are append-only.
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount, method]
+              properties:
+                amount: {type: integer, format: int64, minimum: 1, description: At most what is still owed}
+                method: {type: string, enum: [outlet_cash, transfer, cash]}
+                reference: {type: string, maxLength: 100}
+                note: {type: string, maxLength: 500}
+      responses:
+        "201":
+          description: The payable after the payment
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409":
+          description: OUTLET_INSUFFICIENT_FUNDS
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
         "422": {$ref: "#/components/responses/ValidationFailed"}
   /api/v1/inventory/receipts:
     get:

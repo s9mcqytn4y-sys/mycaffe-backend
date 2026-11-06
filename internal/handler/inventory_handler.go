@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -243,7 +244,7 @@ func (h *InventoryHandler) DirectPurchase(c *gin.Context) {
 	}
 	out, err := h.inventory.DirectPurchase(c.Request.Context(), currentStaff(c), in)
 	if err != nil {
-		writeServiceError(c, err)
+		writePayableError(c, err)
 		return
 	}
 	c.JSON(http.StatusCreated, out)
@@ -266,4 +267,37 @@ func (h *InventoryHandler) ListReceipts(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"receipts": out})
+}
+
+func writePayableError(c *gin.Context, err error) {
+	if errors.Is(err, service.ErrOutletInsufficientFunds) {
+		authError(c, http.StatusConflict, "OUTLET_INSUFFICIENT_FUNDS", "Saldo kas outlet tidak cukup.")
+		return
+	}
+	writeServiceError(c, err)
+}
+
+// ListPayables handles GET /api/v1/inventory/payables?status=open|paid.
+func (h *InventoryHandler) ListPayables(c *gin.Context) {
+	out, err := h.inventory.ListPayables(c.Request.Context(), currentStaff(c), c.Query("status"))
+	if err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"payables": out})
+}
+
+// PayPayable handles POST /api/v1/inventory/payables/:id/payments {amount, method, reference, note}.
+func (h *InventoryHandler) PayPayable(c *gin.Context) {
+	id, ok := pathID(c, "id")
+	var in service.PayPayableInput
+	if !ok || !bindJSON(c, &in) {
+		return
+	}
+	out, err := h.inventory.PayPayable(c.Request.Context(), currentStaff(c), id, in)
+	if err != nil {
+		writePayableError(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, out)
 }

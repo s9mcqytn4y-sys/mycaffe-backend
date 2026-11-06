@@ -203,6 +203,7 @@ func TestOfflineSyncIntegration(t *testing.T) {
 	snapOrder := order(func(o map[string]any) { o["catalog_version"] = oldVersion })
 	qrisOrder := order(func(o map[string]any) {
 		o["payment"] = map[string]any{"method": "static_qris", "reference": "QR-REF-" + prefix}
+		o["offline_created_at"] = time.Now().Add(-time.Minute) // device clock a minute behind the shift: tolerated
 	})
 	var accepted []result
 	t.Run("AcceptedOrdersArePricedFromTheirSnapshot", func(t *testing.T) {

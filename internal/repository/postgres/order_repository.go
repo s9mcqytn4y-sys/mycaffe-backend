@@ -735,3 +735,21 @@ func prepStationValue(station string) string {
 	}
 	return station
 }
+
+// DeductStockAllowNegative deducts tracked stock without the >= guard and returns the new balance. Only
+// offline sync uses it (ADR-005 OF5, W17): the goods were already handed over, so a negative balance is
+// the honest record. table is "products" or "modifier_options". Untracked rows are left alone (ok=false).
+func (r *OrderRepository) DeductStockAllowNegative(ctx context.Context, tx *sqlx.Tx, table string, storeID, id uuid.UUID, quantity int) (balance int, ok bool, err error) {
+	if table != "products" && table != "modifier_options" {
+		return 0, false, fmt.Errorf("unsupported stock table %q", table)
+	}
+	err = tx.GetContext(ctx, &balance, `UPDATE `+table+` SET stock_quantity = stock_quantity - $3
+		WHERE store_id = $1 AND id = $2 AND track_stock = true RETURNING stock_quantity`, storeID, id, quantity)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, fmt.Errorf("failed to deduct %s stock: %w", table, err)
+	}
+	return balance, true, nil
+}

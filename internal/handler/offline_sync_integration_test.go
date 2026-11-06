@@ -68,6 +68,11 @@ func TestOfflineSyncIntegration(t *testing.T) {
 	r.POST("/device/offline-orders/sync", oh.Sync)
 	r.GET("/store/offline-submissions", ah.RequirePermission(rbac.DeviceManage), oh.ListSubmissions)
 	r.POST("/store/offline-submissions/:id/resolve", ah.RequirePermission(rbac.DeviceManage), oh.ResolveSubmission)
+	ch := handler.NewCatalogHandler(service.NewCatalogService(db))
+	r.POST("/catalog/products", ah.RequirePermission(rbac.CatalogManage), ch.CreateProduct)
+	r.DELETE("/catalog/products/:id", ah.RequirePermission(rbac.CatalogManage), ch.ArchiveProduct)
+	pos := handler.NewPOSHandler(orders, payments, service.NewSettingsService(db))
+	r.POST("/pos/orders", ah.RequireStaff(), pos.CreateOrder)
 
 	call := func(method, path, authz string, body any) *httptest.ResponseRecorder {
 		var buf bytes.Buffer
@@ -320,6 +325,73 @@ func TestOfflineSyncIntegration(t *testing.T) {
 		})
 		if audits != 2 {
 			t.Fatalf("both decisions are audited, got %d", audits)
+		}
+	})
+
+	t.Run("OfflineSaleDrivesStockNegative", func(t *testing.T) {
+		// A product of its own with 1 in stock, so parallel tests never see its balance move.
+		res := call("POST", "/catalog/products", owner, map[string]any{"name": "Stok " + prefix, "product_type": "ready_to_serve",
+			"prep_station": "none", "track_stock": true, "stock_quantity": 1,
+			"variants": []map[string]any{{"name": "Reguler", "price": 10000, "is_default": true}}})
+		if res.Code != http.StatusCreated {
+			t.Fatalf("create product failed: %d: %s", res.Code, res.Body.String())
+		}
+		var product struct {
+			ID uuid.UUID `json:"id"`
+		}
+		_ = json.Unmarshal(res.Body.Bytes(), &product)
+		t.Cleanup(func() { call("DELETE", "/catalog/products/"+product.ID.String(), owner, nil) })
+		stockOrder := func(qty int) map[string]any {
+			return map[string]any{"idempotency_key": "stock-" + uuid.NewString(), "order_type": "takeaway", "customer_name": "Online",
+				"items": []map[string]any{{"product_id": product.ID, "quantity": qty}}}
+		}
+		if res := call("POST", "/pos/orders", cashier, stockOrder(2)); res.Code == http.StatusCreated {
+			t.Fatal("online ordering must still refuse short stock (W17)")
+		}
+
+		var current struct {
+			Version string `json:"catalog_version"`
+		}
+		_ = json.Unmarshal(call("GET", "/device/catalog", deviceAuth, nil).Body.Bytes(), &current)
+		results := sync(map[string]any{"orders": []any{order(func(o map[string]any) {
+			o["catalog_version"] = current.Version
+			o["items"] = []map[string]any{{"product_id": product.ID, "quantity": 3}}
+		})}})
+		if len(results) != 1 || results[0].Status != "accepted" {
+			t.Fatalf("an offline sale is never refused for stock: %+v", results)
+		}
+		var balance, oversold int
+		var audited string
+		inStore(func(tx *sqlx.Tx) error {
+			if err := tx.GetContext(ctx, &balance, `SELECT stock_quantity FROM products WHERE store_id = $1 AND id = $2`, storeID, product.ID); err != nil {
+				return err
+			}
+			if err := tx.GetContext(ctx, &oversold, `SELECT COUNT(*) FROM order_items WHERE store_id = $1 AND order_id = $2 AND oversold`, storeID, *results[0].OrderID); err != nil {
+				return err
+			}
+			return tx.GetContext(ctx, &audited, `SELECT metadata::jsonb->>'oversold_lines' FROM audit_logs WHERE store_id = $1 AND action = 'OFFLINE_ORDER_SYNCED'
+				AND reference_id = $2`, storeID, results[0].ClientOrderID.String())
+		})
+		if balance != -2 || oversold != 1 || audited != "1" {
+			t.Fatalf("stock must go to -2 with the line flagged oversold and audited, got balance=%d oversold=%d audited=%q", balance, oversold, audited)
+		}
+		var view struct {
+			Catalog struct {
+				Products []struct {
+					ID        uuid.UUID `json:"id"`
+					Available bool      `json:"available"`
+					Stock     *int      `json:"stock_quantity"`
+				} `json:"products"`
+			} `json:"catalog"`
+		}
+		_ = json.Unmarshal(call("GET", "/device/catalog", deviceAuth, nil).Body.Bytes(), &view)
+		for _, p := range view.Catalog.Products {
+			if p.ID == product.ID && (p.Available || p.Stock == nil || *p.Stock != -2) {
+				t.Fatalf("a negative balance shows as sold out with its real count: %+v", p)
+			}
+		}
+		if res := call("POST", "/pos/orders", cashier, stockOrder(1)); res.Code == http.StatusCreated {
+			t.Fatal("online ordering must refuse while the balance is negative")
 		}
 	})
 

@@ -65,6 +65,9 @@ services:
       WHATSAPP_ACCESS_TOKEN: ${WHATSAPP_ACCESS_TOKEN:-}
       WHATSAPP_RECEIPT_TEMPLATE: ${WHATSAPP_RECEIPT_TEMPLATE:-struk_digital}
       WHATSAPP_TEMPLATE_LANGUAGE: ${WHATSAPP_TEMPLATE_LANGUAGE:-id}
+      WHATSAPP_DRIVER: ${WHATSAPP_DRIVER:-}
+      WHATSAPP_BRIDGE_URL: ${WHATSAPP_BRIDGE_URL:-}
+      WHATSAPP_BRIDGE_TOKEN: ${WHATSAPP_BRIDGE_TOKEN:-}
       SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USERNAME: ${SMTP_USERNAME:-}
@@ -99,7 +102,18 @@ services:
     networks:
       - mycaffe-edge
 
+  # Development WhatsApp relay (W12): `docker compose --profile whatsapp up wa-bridge`, then scan the QR in its log.
+  wa-bridge:
+    build:
+      context: ../../cmd/wa-bridge
+    profiles: ["whatsapp"]
+    environment:
+      WA_BRIDGE_TOKEN: ${WHATSAPP_BRIDGE_TOKEN:-}
+    volumes:
+      - wa-bridge-data:/data
+
 volumes:
+  wa-bridge-data:
   pgdata:
     driver: local
 

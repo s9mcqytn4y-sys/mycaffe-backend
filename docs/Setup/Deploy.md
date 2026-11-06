@@ -99,3 +99,31 @@ Differences, all on the host and none in the images:
 - `/opt/mycaffe/deploy/docker/.env` links to `/etc/mycaffe/prod.env` (mode 600): fresh database passwords and JWT key,
   provider keys copied from the owner's `.env.demo`.
 - Ingress is the `mycaffe-demo` Named Tunnel: public hostname `demo.abbdullaziz.online` → `http://nginx:80`.
+
+## 9. Self-hosted CI runner (decision W11)
+
+> **Inactive while the repository is public (2026-11-06).** Workflows use `ubuntu-latest`; the service is stopped and
+> disabled (`sudo systemctl disable --now actions.runner.s9mcqytn4y-sys-mycaffe-backend.wsl-mycaffe`). Never run a
+> self-hosted runner on a public repository: a fork pull request can change `runs-on` and execute code on the host.
+
+CI and releases run on the WSL demo host: runner `wsl-mycaffe` (labels `self-hosted, linux, mycaffe`), installed
+in `/opt/actions-runner` as the systemd service `actions.runner.s9mcqytn4y-sys-mycaffe-backend.wsl-mycaffe`,
+user `runner` (docker group, passwordless sudo because the workflows install tools). Jobs run only while the PC and
+WSL are up; one job at a time. Re-register after a reinstall with a fresh token from
+`gh api -X POST repos/s9mcqytn4y-sys/mycaffe-backend/actions/runners/registration-token`.
+
+Host prerequisites learned on the first run: `build-essential` (gcc for `go test -race`), `postgresql-client`, AWS CLI v2
+(backup/restore test), and
+`/etc/docker/daemon.json` with `"dns": ["1.1.1.1", "8.8.8.8"]` (containers cannot reach the WSL DNS tunnel at
+10.255.255.254). The CI PostgreSQL service publishes host port 55432, because Docker Desktop on the same machine
+already forwards 127.0.0.1:5432 into the shared WSL network.
+
+## 10. Demo WhatsApp bridge (decision W12)
+
+The demo sends WhatsApp receipts through `cmd/wa-bridge` (whatsmeow, unofficial; demo and development only, the
+API refuses `WHATSAPP_DRIVER=bridge` in production). The override `docker-compose.demo-vps.yml` adds the
+`wa-bridge` container and points the API at it. On the demo host, `/etc/mycaffe/prod.env` needs
+`WA_BRIDGE_IMAGE_DIGEST` (from the `mycaffe-wa-bridge` release run summary) and `WHATSAPP_BRIDGE_TOKEN`
+(`openssl rand -hex 32`). Pair once with a dedicated demo number: `scripts/deploy/compose.sh logs -f wa-bridge`,
+then WhatsApp > Linked devices > Link a device and scan the QR. The session stays in the `wa-bridge-data` volume;
+the phone number is never stored in the repository or the environment.

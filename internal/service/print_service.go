@@ -15,6 +15,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/domain"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/database"
+	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/printfmt"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/rbac"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/repository/postgres"
 )
@@ -447,7 +448,7 @@ func enqueuePrintJobsTx(ctx context.Context, tx *sqlx.Tx, orders *postgres.Order
 	if err != nil {
 		return 0, err
 	}
-	base := PrintTicket{QueueNumber: order.QueueNumber, TableNumber: order.TableNumber, OrderNumber: order.OrderNumber,
+	base := printfmt.Ticket{QueueNumber: order.QueueNumber, TableNumber: order.TableNumber, OrderNumber: order.OrderNumber,
 		CustomerName: order.CustomerName, LocalTime: formatStoreTime(now, store.Timezone), Reprint: sc.reprintBy != nil}
 	if sc.roundID != nil {
 		if err := tx.GetContext(ctx, &base.RoundNumber, `SELECT round_number FROM order_rounds WHERE store_id = $1 AND id = $2`, order.StoreID, *sc.roundID); err != nil {
@@ -482,12 +483,12 @@ func enqueuePrintJobsTx(ctx context.Context, tx *sqlx.Tx, orders *postgres.Order
 			continue
 		}
 		t := base
-		t.Title, t.Lines = stationTitles[p.Station], sel
+		t.Title, t.Lines = stationTitles[p.Station], printLines(sel)
 		var payload []byte
 		if p.Format == "tspl" {
-			payload, err = RenderLabels(&t, p.PaperWidthMM, *p.LabelHeightMM, p.Copies)
+			payload, err = printfmt.Labels(&t, p.PaperWidthMM, *p.LabelHeightMM, p.Copies)
 		} else {
-			payload, err = RenderStationTicket(&t, p.PaperWidthMM, p.Copies, p.Footer)
+			payload, err = printfmt.StationTicket(&t, p.PaperWidthMM, p.Copies, p.Footer)
 		}
 		if err != nil {
 			// A bad printer setting must never block a payment or a round: skip it and say why.
@@ -519,4 +520,13 @@ func (s *PrintService) audit(ctx context.Context, tx *sqlx.Tx, actor *Authentica
 		StoreID: actor.Staff.Store.ID, ActorID: &actorID, ActorName: actor.Staff.FullName, Action: action,
 		Reason: reason, ReferenceID: ref.String(), Metadata: string(payload), CreatedAt: s.nowFunc().UTC(),
 	})
+}
+
+// printLines drops prices: kitchen output never shows them (brand guidelines §5.2).
+func printLines(lines []ReceiptLine) []printfmt.Line {
+	out := make([]printfmt.Line, len(lines))
+	for i, l := range lines {
+		out[i] = printfmt.Line{Name: l.Name, Variant: l.Variant, Options: l.Options, Notes: l.Notes, Quantity: l.Quantity}
+	}
+	return out
 }

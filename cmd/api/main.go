@@ -222,9 +222,18 @@ func newMessageService(cfg *config.Config, db *sqlx.DB, ctx context.Context, mai
 		sender = webhookSender
 	}
 	messages := service.NewMessageService(db, sender)
-	// WhatsApp Cloud API receipts (W9): on only with both the access token and the phone number id.
+	// WhatsApp receipts: Cloud API (W9) in production; the whatsmeow bridge (W12) only for demo and
+	// development, refused in production by config validation.
 	whatsapp := "disabled"
-	if cfg.WhatsAppAccessToken != "" && cfg.WhatsAppPhoneNumberID != "" {
+	switch {
+	case cfg.WhatsAppDriver == "bridge":
+		wa, err := sms.NewBridgeSender(cfg.WhatsAppBridgeURL, cfg.WhatsAppBridgeToken, cfg.WhatsAppReceiptTemplate)
+		if err != nil {
+			log.Fatalf("[FATAL CONFIG] WhatsApp bridge initialization failed: %v", err)
+		}
+		messages.SetWhatsApp(wa)
+		whatsapp = "bridge"
+	case cfg.WhatsAppDriver != "disabled" && cfg.WhatsAppAccessToken != "" && cfg.WhatsAppPhoneNumberID != "":
 		wa, err := sms.NewWhatsAppSender(cfg.WhatsAppAPIVersion, cfg.WhatsAppPhoneNumberID, cfg.WhatsAppAccessToken,
 			cfg.WhatsAppReceiptTemplate, cfg.WhatsAppTemplateLanguage)
 		if err != nil {

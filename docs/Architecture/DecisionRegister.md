@@ -231,6 +231,24 @@ permissions to shell, `curl` and `.env*` files.
 | W9 | Digital receipts | **Email live; WhatsApp Cloud API driver built** and switched on when the owner adds the Meta token and phone number id; SMS sends the link only to verified phones (V4). Every send is audited and rate limited |
 | W10 | Order of work | **Environment first**: E1 PR #65, E2 WSL demo with `v0.8.0` by digest, E3 real-environment tests with `curl`; then v0.9 docs (PRD, brand, analytics) and PRs 9.1–9.4 |
 
+## CI runner, demo WhatsApp, print agent and v0.10 offline (recorded 2026-11-06, fourteenth interview)
+
+Status: decided. Context: GitHub-hosted runners stopped on a billing failure right after v0.9.0 was tagged.
+
+| ID | Decision | Approved option |
+|----|----------|-----------------|
+| W11 | CI and releases without hosted-runner billing | **Self-hosted runner on the WSL demo host** (`wsl-mycaffe`, labels `self-hosted, linux, mycaffe`, systemd service, user `runner` in the docker group). The repository stays private; making it public even briefly was rejected (history and code would be exposed for good) **Amended 2026-11-06:** the owner made the repository public; CI and releases moved back to `ubuntu-latest` (free for public repositories) and the WSL runner is stopped, because a fork pull request could otherwise run its own workflow on the demo host. Restart it only if the repository goes private again |
+| W12 | WhatsApp for demo and development | **`cmd/wa-bridge` with whatsmeow** (its own Go module) as a separate container in the demo/dev compose only; the API uses a `bridge` WhatsApp driver that the config refuses in production. Session in a SQLite file on the bridge volume (amended 2026-11-06 from "own PostgreSQL schema": keeps the bridge out of the application database and its migration chain), pairing by QR from the bridge log, a dedicated demo number (never stored in the repository). Production keeps the Cloud API driver |
+| W13 | First print agent platform | **Go binary `cmd/print-agent`** (Windows service, Linux/ARM systemd) on a LAN device, printing to `IP:9100`. An Android app follows only when a client has no other device |
+| W14 | WhatsApp receipt template | `struk_digital`, category **Utility**, language `id`, three parameters (store, order number, link): "Terima kasih sudah berbelanja di {{1}}. Struk digital pesanan {{2}} bisa dilihat di {{3}}. Tautan berlaku 90 hari." The bridge renders the same text |
+| W15 | Table timer per area | **Deferred**: one limit per store. `area_settings (section, time_limit_minutes)` overrides it only when a client asks |
+| W16 | v0.8 features offline (amends ADR-005 OF1) | Cash rounding applies (server recomputes); discounts only up to `cashier_max_discount_bps`, no owner-approved discount or compliment; no multi-payment; badge + PIN allowed with the device-held verifier |
+| W17 | Negative stock (ADR-005 §5 item 1) | **Approved**: tracked stock may go below zero only through offline sync; lines flagged `oversold` and audited; online reservation still refuses. Every reader of `stock_quantity` is checked before the migration |
+| W18 | Kitchen printing during an outage | The print agent serves `POST :8787/print` on the LAN with a per-agent local key; it renders with the shared `internal/pkg/printfmt` and marks tickets OFFLINE, using its cached printer/station config. Orders synced with `printed_locally` get no server print job |
+| W19 | Offline PIN verifier (ADR-005 OF2) | Argon2id(PIN, per-device salt), 64 MB / 3 iterations, 72 h expiry, device lock after 5 failures, revocation from the owner's phone as the main control. Residual risk (GPU brute force of a copied tablet within 72 h) accepted |
+| W20 | Catalog snapshots (ADR-005 OF3) | Stored **when the catalog is served** to a device: version = SHA-256 of the pricing content, insert-once; `stale_catalog` measured from first serve |
+| W21 | Order of work | (1) runner + v0.9.0 build, (2) wa-bridge, (3) printfmt + print-agent → v0.9.1, (4) ADR-005 update, (5–9) PRs 10.1 devices/verifiers/snapshots, 10.2 offline sync + owner review, 10.3 negative stock, 10.4 agent LAN printing, 10.5 pending-sync shifts and amended Z-reports → v0.10.0 |
+
 ## Awaiting owner approval
 
 None. The G-1/G-2 contract (PR #55) and ADR-007 (G-5) were approved on 2026-11-04.

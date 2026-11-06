@@ -624,6 +624,270 @@ paths:
           $ref: "#/components/responses/NotFound"
         "422":
           $ref: "#/components/responses/ValidationFailed"
+  /api/v1/inventory/suppliers:
+    get:
+      tags: [Catalog]
+      operationId: listSuppliers
+      summary: Suppliers, active first (inventory.manage)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: Suppliers
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  suppliers:
+                    type: array
+                    items: {$ref: "#/components/schemas/Supplier"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    post:
+      tags: [Catalog]
+      operationId: createSupplier
+      summary: Create a supplier (audited, X7)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/SupplierInput"}
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Supplier"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "422": {$ref: "#/components/responses/ValidationFailed"}
+  /api/v1/inventory/suppliers/{id}:
+    patch:
+      tags: [Catalog]
+      operationId: updateSupplier
+      summary: Update or deactivate a supplier (audited)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/SupplierInput"}
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Supplier"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "422": {$ref: "#/components/responses/ValidationFailed"}
+  /api/v1/inventory/purchase-orders:
+    get:
+      tags: [Catalog]
+      operationId: listPurchaseOrders
+      summary: Purchase orders, newest first, optionally by status (inventory.manage)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - {name: status, in: query, schema: {type: string, enum: [draft, sent, partial, received, closed, cancelled]}}
+      responses:
+        "200":
+          description: Purchase orders (without lines)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  purchase_orders:
+                    type: array
+                    items: {$ref: "#/components/schemas/PurchaseOrder"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    post:
+      tags: [Catalog]
+      operationId: createPurchaseOrder
+      summary: Create a draft purchase order (audited, X7)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/PurchaseOrderInput"}
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PurchaseOrder"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "422": {$ref: "#/components/responses/ValidationFailed"}
+  /api/v1/inventory/purchase-orders/{id}:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      tags: [Catalog]
+      operationId: getPurchaseOrder
+      summary: A purchase order with its lines and received quantities
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: Purchase order
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PurchaseOrder"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    patch:
+      tags: [Catalog]
+      operationId: updatePurchaseOrder
+      summary: Edit a draft purchase order (lines replace all lines); 409 once sent
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/PurchaseOrderInput"}
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PurchaseOrder"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "422": {$ref: "#/components/responses/ValidationFailed"}
+  /api/v1/inventory/purchase-orders/{id}/{action}:
+    post:
+      tags: [Catalog]
+      operationId: transitionPurchaseOrder
+      summary: send (draft), cancel (draft or sent) or close (partial, stop waiting for the rest); audited
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: action, in: path, required: true, schema: {type: string, enum: [send, cancel, close]}}
+      responses:
+        "200":
+          description: New state
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PurchaseOrder"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+  /api/v1/inventory/purchase-orders/{id}/receipts:
+    post:
+      tags: [Catalog]
+      operationId: receivePurchaseOrder
+      summary: Receive a delivery of a sent or partial PO (audited, X7)
+      description: >-
+        Each line adds quantity x conversion base units to its ingredient or ready-to-serve product and blends
+        its cost (the PO price, or unit_price to correct it) into the moving average; negative balances carry no
+        weight. The PO becomes partial or received. Receipts are append-only.
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [lines]
+              properties:
+                note: {type: string, maxLength: 500}
+                lines:
+                  type: array
+                  items:
+                    type: object
+                    required: [purchase_order_line_id, quantity]
+                    properties:
+                      purchase_order_line_id: {type: string, format: uuid}
+                      quantity: {type: integer, format: int64, minimum: 1, description: At most the quantity not yet received}
+                      unit_price: {type: integer, format: int64, minimum: 0, description: Corrects the PO price}
+      responses:
+        "201":
+          description: Receipt
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/GoodsReceipt"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "422": {$ref: "#/components/responses/ValidationFailed"}
+  /api/v1/inventory/purchases:
+    post:
+      tags: [Catalog]
+      operationId: directPurchase
+      summary: Record goods bought without a PO (supplier_id or supplier_name); stock and moving-average cost at once
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [lines]
+              properties:
+                supplier_id: {type: string, format: uuid}
+                supplier_name: {type: string, maxLength: 100}
+                note: {type: string, maxLength: 500}
+                lines:
+                  type: array
+                  items: {$ref: "#/components/schemas/StockLine"}
+      responses:
+        "201":
+          description: Receipt
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/GoodsReceipt"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "422": {$ref: "#/components/responses/ValidationFailed"}
+  /api/v1/inventory/receipts:
+    get:
+      tags: [Catalog]
+      operationId: listReceipts
+      summary: Goods receipts (PO deliveries and direct purchases), newest first
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - {name: purchase_order_id, in: query, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: Receipts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  receipts:
+                    type: array
+                    items: {$ref: "#/components/schemas/GoodsReceipt"}
+        "403": {$ref: "#/components/responses/Forbidden"}
   /api/v1/inventory/products/{id}/unit-cost:
     put:
       tags: [Catalog]
@@ -5610,6 +5874,82 @@ components:
         is_active: {type: boolean}
         opening_quantity: {type: integer, format: int64, description: Create only; recorded as an opening movement}
         opening_cost: {type: integer, format: int64, description: Total rupiah of the opening quantity; sets cost_per_1000}
+    Supplier:
+      type: object
+      required: [id, name, contact, payment_days, notes, is_active]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        contact: {type: string}
+        payment_days: {type: integer, description: "Payment terms in days (due date of payables, PR 11.5)"}
+        notes: {type: string}
+        is_active: {type: boolean}
+    SupplierInput:
+      type: object
+      properties:
+        name: {type: string, maxLength: 100}
+        contact: {type: string, maxLength: 150}
+        payment_days: {type: integer, minimum: 0, maximum: 180}
+        notes: {type: string, maxLength: 500}
+        is_active: {type: boolean}
+    StockLine:
+      type: object
+      description: >-
+        Buys quantity purchase units at unit_price each; conversion is the base units (g, ml, pcs or product
+        units) in one purchase unit. Exactly one of ingredient_id or product_id (a ready-to-serve product, X9).
+      required: [purchase_unit, conversion, quantity, unit_price]
+      properties:
+        ingredient_id: {type: string, format: uuid}
+        product_id: {type: string, format: uuid}
+        purchase_unit: {type: string, maxLength: 30, example: karton}
+        conversion: {type: integer, format: int64, minimum: 1, example: 12000}
+        quantity: {type: integer, format: int64, minimum: 1}
+        unit_price: {type: integer, format: int64, minimum: 0}
+    PurchaseOrder:
+      type: object
+      required: [id, number, supplier_id, supplier_name, status, notes, total, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        number: {type: integer}
+        supplier_id: {type: string, format: uuid}
+        supplier_name: {type: string}
+        status: {type: string, enum: [draft, sent, partial, received, closed, cancelled]}
+        expected_date: {type: string, format: date}
+        notes: {type: string}
+        total: {type: integer, format: int64}
+        created_at: {type: string, format: date-time}
+        lines:
+          type: array
+          items:
+            allOf:
+              - $ref: "#/components/schemas/StockLine"
+              - type: object
+                properties:
+                  id: {type: string, format: uuid}
+                  item_name: {type: string}
+                  received_quantity: {type: integer, format: int64}
+    PurchaseOrderInput:
+      type: object
+      properties:
+        supplier_id: {type: string, format: uuid}
+        expected_date: {type: string, format: date}
+        notes: {type: string, maxLength: 500}
+        lines:
+          type: array
+          description: Create, or replace all lines of a draft
+          items:
+            $ref: "#/components/schemas/StockLine"
+    GoodsReceipt:
+      type: object
+      required: [id, supplier_name, total_amount, note, received_at]
+      properties:
+        id: {type: string, format: uuid}
+        purchase_order_id: {type: string, format: uuid, description: Absent for a direct purchase}
+        supplier_id: {type: string, format: uuid}
+        supplier_name: {type: string}
+        total_amount: {type: integer, format: int64}
+        note: {type: string}
+        received_at: {type: string, format: date-time}
     RecipeItem:
       type: object
       required: [ingredient_id, quantity]

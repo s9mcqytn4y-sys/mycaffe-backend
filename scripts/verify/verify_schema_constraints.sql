@@ -355,6 +355,21 @@ BEGIN
     IF has_table_privilege('mycaffe_app', 'public.kds_tickets', 'DELETE') THEN
         RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may DELETE kds_tickets!';
     END IF;
+    -- 10F-24. Purchasing (migration 000046): RLS on; receipts are append-only (stock and cost already moved).
+    IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.suppliers'::regclass)
+       OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.purchase_orders'::regclass)
+       OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.purchase_order_lines'::regclass)
+       OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.goods_receipts'::regclass)
+       OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.goods_receipt_lines'::regclass) THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: purchasing tables do not have row-level security enabled!';
+    END IF;
+    IF has_table_privilege('mycaffe_app', 'public.goods_receipts', 'UPDATE')
+       OR has_table_privilege('mycaffe_app', 'public.goods_receipts', 'DELETE')
+       OR has_table_privilege('mycaffe_app', 'public.goods_receipt_lines', 'UPDATE')
+       OR has_table_privilege('mycaffe_app', 'public.goods_receipt_lines', 'DELETE')
+       OR has_table_privilege('mycaffe_app', 'public.suppliers', 'DELETE') THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may rewrite goods receipts or delete suppliers!';
+    END IF;
     -- 10F-23. Ingredients, recipes, movements (migration 000045): RLS on; the movement ledger is append-only.
     IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.ingredients'::regclass)
        OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.recipe_items'::regclass)

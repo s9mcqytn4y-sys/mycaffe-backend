@@ -50,13 +50,18 @@ type Config struct {
 	WhatsAppAccessToken      string
 	WhatsAppReceiptTemplate  string
 	WhatsAppTemplateLanguage string
-	SMTPHost                 string
-	SMTPPort                 int
-	SMTPUsername             string
-	SMTPPassword             string
-	SMTPTLSMode              string // "starttls" (587) or "implicit" (465)
-	EmailFromEmail           string
-	EmailFromName            string
+	// WhatsAppDriver is "cloud" (Cloud API), "bridge" (cmd/wa-bridge via whatsmeow, demo/development only,
+	// decision W12) or "disabled"; empty picks cloud when the Cloud API token is set.
+	WhatsAppDriver      string
+	WhatsAppBridgeURL   string
+	WhatsAppBridgeToken string
+	SMTPHost            string
+	SMTPPort            int
+	SMTPUsername        string
+	SMTPPassword        string
+	SMTPTLSMode         string // "starttls" (587) or "implicit" (465)
+	EmailFromEmail      string
+	EmailFromName       string
 	// AppPublicURL is the frontend origin used in links inside emails.
 	AppPublicURL string
 
@@ -192,6 +197,9 @@ func LoadConfig() (*Config, error) {
 		WhatsAppAccessToken:      strings.TrimSpace(getEnv("WHATSAPP_ACCESS_TOKEN", "")),
 		WhatsAppReceiptTemplate:  strings.TrimSpace(getEnv("WHATSAPP_RECEIPT_TEMPLATE", "struk_digital")),
 		WhatsAppTemplateLanguage: strings.TrimSpace(getEnv("WHATSAPP_TEMPLATE_LANGUAGE", "id")),
+		WhatsAppDriver:           strings.ToLower(strings.TrimSpace(getEnv("WHATSAPP_DRIVER", ""))),
+		WhatsAppBridgeURL:        strings.TrimSpace(getEnv("WHATSAPP_BRIDGE_URL", "")),
+		WhatsAppBridgeToken:      strings.TrimSpace(getEnv("WHATSAPP_BRIDGE_TOKEN", "")),
 		SMTPHost:                 getEnv("SMTP_HOST", ""),
 		SMTPPort:                 smtpPort,
 		SMTPUsername:             getEnv("SMTP_USERNAME", ""),
@@ -361,7 +369,36 @@ func ValidateConfig(cfg *Config) error {
 	if err := validateSMSConfig(cfg); err != nil {
 		return err
 	}
+	if err := validateWhatsAppConfig(cfg); err != nil {
+		return err
+	}
 	return validateEmailConfig(cfg)
+}
+
+// validateWhatsAppConfig keeps the unofficial whatsmeow bridge out of production (decision W12).
+func validateWhatsAppConfig(cfg *Config) error {
+	switch cfg.WhatsAppDriver {
+	case "", "disabled":
+		return nil
+	case "cloud":
+		if cfg.WhatsAppAccessToken == "" || cfg.WhatsAppPhoneNumberID == "" {
+			return errors.New("WHATSAPP_DRIVER=cloud requires WHATSAPP_ACCESS_TOKEN and WHATSAPP_PHONE_NUMBER_ID")
+		}
+		return nil
+	case "bridge":
+		if cfg.AppEnv == "production" {
+			return errors.New("[SECURITY FAIL-CLOSED] WHATSAPP_DRIVER=bridge (unofficial whatsmeow) is not allowed in production; use cloud")
+		}
+		u, err := url.Parse(cfg.WhatsAppBridgeURL)
+		if err != nil || u.Scheme == "" || u.Host == "" {
+			return errors.New("WHATSAPP_DRIVER=bridge requires a valid absolute WHATSAPP_BRIDGE_URL")
+		}
+		if len(cfg.WhatsAppBridgeToken) < 32 {
+			return errors.New("WHATSAPP_DRIVER=bridge requires WHATSAPP_BRIDGE_TOKEN of at least 32 characters")
+		}
+		return nil
+	}
+	return fmt.Errorf("invalid WHATSAPP_DRIVER %q: allowed values are cloud, bridge, disabled", cfg.WhatsAppDriver)
 }
 
 func validateSMSConfig(cfg *Config) error {

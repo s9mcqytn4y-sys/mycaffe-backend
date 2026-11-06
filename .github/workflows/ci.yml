@@ -69,6 +69,15 @@ jobs:
       - name: Compile Application & Migration CLI (Go Build)
         run: go build -v ./...
 
+      # wa-bridge is its own module (decision W12) so whatsmeow never enters the API module.
+      - name: wa-bridge module (tidy, vet, govulncheck, test)
+        working-directory: cmd/wa-bridge
+        run: |
+          go mod tidy -diff
+          go vet ./...
+          govulncheck ./...
+          go test -race -timeout 5m ./...
+
   docker-build:
     name: Docker, Compose, Nginx TLS Bootstrap & Backup/Restore Script Verification
     runs-on: [self-hosted, linux, mycaffe]

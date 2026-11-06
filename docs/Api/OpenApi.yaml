@@ -465,6 +465,196 @@ paths:
         "409":
           $ref: "#/components/responses/Conflict"
 
+  /api/v1/inventory/ingredients:
+    get:
+      tags: [Catalog]
+      operationId: listIngredients
+      summary: Ingredients (inventory.manage); low=true lists only active ones below their minimum
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: low
+          in: query
+          schema: {type: boolean}
+      responses:
+        "200":
+          description: Ingredients
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ingredients]
+                properties:
+                  ingredients:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Ingredient"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      tags: [Catalog]
+      operationId: createIngredient
+      summary: Create an ingredient in g, ml or pcs with an optional opening stock and cost (audited, K2)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IngredientInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ingredient"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+  /api/v1/inventory/ingredients/{id}:
+    patch:
+      tags: [Catalog]
+      operationId: updateIngredient
+      summary: Rename, set minimum or manual cost, or deactivate an ingredient (unit is fixed; audited)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IngredientInput"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ingredient"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+  /api/v1/inventory/recipes/{kind}/{id}:
+    parameters:
+      - name: kind
+        in: path
+        required: true
+        schema: {type: string, enum: [variant, option]}
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+    get:
+      tags: [Catalog]
+      operationId: getRecipe
+      summary: Recipe of a variant or a modifier option (inventory.manage)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: Recipe
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/RecipeItem"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    put:
+      tags: [Catalog]
+      operationId: setRecipe
+      summary: Replace a recipe (empty removes it); ingredients are deducted when an order is paid (audited, X6)
+      description: >-
+        Paid orders deduct the recipes of their variants and options; balances may go negative and never block
+        a sale (X5); crossing the minimum emits inventory.low_stock to the owner channel; each line stores its
+        cost of goods (X10).
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items]
+              properties:
+                items:
+                  type: array
+                  maxItems: 30
+                  items:
+                    $ref: "#/components/schemas/RecipeItem"
+      responses:
+        "200":
+          description: The new recipe
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/RecipeItem"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+  /api/v1/inventory/products/{id}/unit-cost:
+    put:
+      tags: [Catalog]
+      operationId: setProductUnitCost
+      summary: Unit cost of a ready-to-serve product for its COGS (X9; purchases keep it from PR 11.4)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [unit_cost]
+              properties:
+                unit_cost: {type: integer, format: int64, minimum: 0}
+      responses:
+        "204":
+          description: Saved
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
   /api/v1/catalog/promotions:
     get:
       tags: [Catalog]
@@ -5391,6 +5581,46 @@ components:
           type: string
         queue_number:
           type: string
+    Ingredient:
+      type: object
+      required: [id, name, unit, stock_quantity, min_stock, cost_per_1000, is_active, low]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        unit: {type: string, enum: [g, ml, pcs]}
+        stock_quantity:
+          type: integer
+          format: int64
+          description: May be negative (X5); corrected by the stock count.
+        min_stock: {type: integer, format: int64}
+        cost_per_1000:
+          type: integer
+          format: int64
+          description: Rupiah per 1000 units (e.g. 300000 = Rp300 per gram)
+        is_active: {type: boolean}
+        low: {type: boolean, description: stock_quantity below min_stock}
+        updated_at: {type: string, format: date-time}
+    IngredientInput:
+      type: object
+      properties:
+        name: {type: string, maxLength: 80}
+        unit: {type: string, enum: [g, ml, pcs], description: Create only}
+        min_stock: {type: integer, format: int64}
+        cost_per_1000: {type: integer, format: int64, description: Manual cost until purchases set it (PR 11.4)}
+        is_active: {type: boolean}
+        opening_quantity: {type: integer, format: int64, description: Create only; recorded as an opening movement}
+        opening_cost: {type: integer, format: int64, description: Total rupiah of the opening quantity; sets cost_per_1000}
+    RecipeItem:
+      type: object
+      required: [ingredient_id, quantity]
+      properties:
+        ingredient_id: {type: string, format: uuid}
+        name: {type: string}
+        unit: {type: string}
+        quantity:
+          type: integer
+          format: int64
+          description: Per unit sold; a modifier option may be negative to substitute (X6)
     BundleSlot:
       type: object
       required: [id, name, quantity, display_order, product_ids]
@@ -6949,6 +7179,10 @@ components:
         bundle_group_id:
           type: string
           format: uuid
+        cogs_amount:
+          type: integer
+          format: int64
+          description: Cost of goods sold of the line, stored when the order is paid (X10); absent before payment.
         options:
           type: array
           items:

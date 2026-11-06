@@ -127,6 +127,9 @@ func (s *PaymentService) commitPaidOrderTx(ctx context.Context, tx *sqlx.Tx, ord
 			if err := consumePromotionsTx(ctx, tx, order.StoreID, order.ID); err != nil {
 				return err
 			}
+			if err := consumeIngredientsTx(ctx, tx, order.StoreID, order.ID, s.nowFunc().UTC()); err != nil {
+				return err
+			}
 			return s.insertPaymentOutboxTx(ctx, tx, order, "order.paid", map[string]any{
 				"paid_amount":  order.PaidAmount,
 				"status":       order.Status,
@@ -169,6 +172,9 @@ func (s *PaymentService) commitPaidOrderTx(ctx context.Context, tx *sqlx.Tx, ord
 		return err
 	}
 	if err := consumePromotionsTx(ctx, tx, order.StoreID, order.ID); err != nil {
+		return err
+	}
+	if err := consumeIngredientsTx(ctx, tx, order.StoreID, order.ID, s.nowFunc().UTC()); err != nil {
 		return err
 	}
 	return s.insertPaymentOutboxTx(ctx, tx, order, "order.paid", map[string]any{

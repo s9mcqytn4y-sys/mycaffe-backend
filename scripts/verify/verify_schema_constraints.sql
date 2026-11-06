@@ -355,6 +355,17 @@ BEGIN
     IF has_table_privilege('mycaffe_app', 'public.kds_tickets', 'DELETE') THEN
         RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may DELETE kds_tickets!';
     END IF;
+    -- 10F-23. Ingredients, recipes, movements (migration 000045): RLS on; the movement ledger is append-only.
+    IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.ingredients'::regclass)
+       OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.recipe_items'::regclass)
+       OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.ingredient_movements'::regclass) THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: inventory tables do not have row-level security enabled!';
+    END IF;
+    IF has_table_privilege('mycaffe_app', 'public.ingredient_movements', 'UPDATE')
+       OR has_table_privilege('mycaffe_app', 'public.ingredient_movements', 'DELETE')
+       OR has_table_privilege('mycaffe_app', 'public.ingredients', 'DELETE') THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may rewrite the ingredient ledger or delete ingredients!';
+    END IF;
     -- 10F-22. Bundle slots (migration 000044): RLS on (replaced as a whole by the owner, so DELETE is granted).
     IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.bundle_slots'::regclass) THEN
         RAISE EXCEPTION 'SECURITY FAILURE: bundle_slots does not have row-level security enabled!';

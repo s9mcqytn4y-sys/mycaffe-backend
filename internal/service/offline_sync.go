@@ -29,6 +29,8 @@ const (
 	offlineMaxHours  = 12
 	offlineMaxOrders = 300
 	staleCatalogAge  = 24 * time.Hour
+	// offlineClockSkew tolerates a device clock that runs a little off the server clock.
+	offlineClockSkew = 5 * time.Minute
 )
 
 var (
@@ -169,7 +171,7 @@ func (s *OfflineSyncService) checkPolicy(ctx context.Context, tx *sqlx.Tx, store
 	switch {
 	case len(o.Items) == 0:
 		return "pesanan tanpa item", nil
-	case o.OfflineCreatedAt.IsZero() || o.OfflineCreatedAt.After(now.Add(5*time.Minute)):
+	case o.OfflineCreatedAt.IsZero() || o.OfflineCreatedAt.After(now.Add(offlineClockSkew)):
 		return "waktu pesanan offline tidak valid", nil
 	case !strings.HasPrefix(o.OfflineQueueNumber, device.Prefix+"-") || len(o.OfflineQueueNumber) > 20:
 		return "nomor offline harus diawali prefix perangkat " + device.Prefix, nil
@@ -285,7 +287,7 @@ func (s *OfflineSyncService) place(ctx context.Context, tx *sqlx.Tx, storeID, de
 		OpenedAt time.Time `db:"opened_at"`
 	}
 	err = tx.GetContext(ctx, &shift, `SELECT drawer_id, status, opened_at FROM shifts WHERE store_id = $1 AND id = $2`, storeID, o.ShiftID)
-	if errors.Is(err, sql.ErrNoRows) || (err == nil && (shift.Status != "open" || shift.OpenedAt.After(o.OfflineCreatedAt))) {
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && (shift.Status != "open" || shift.OpenedAt.After(o.OfflineCreatedAt.Add(offlineClockSkew)))) {
 		// Late orders into a closed shift and amended Z-reports arrive with PR 10.5 (OF4).
 		return nil, ErrNoOpenShift
 	}

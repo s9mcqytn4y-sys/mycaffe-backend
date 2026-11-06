@@ -3712,6 +3712,43 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+  /api/v1/print-agent/printer:
+    get:
+      security:
+        - PrinterToken: []
+      tags: [Printing]
+      operationId: getAgentPrinter
+      summary: This printer's settings, cached by the agent for LAN printing during an outage (W18)
+      x-implementation-status: implemented
+      responses:
+        "200":
+          description: Printer settings
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [station, format, paper_width_mm, copies, footer]
+                properties:
+                  station:
+                    type: string
+                    enum: [bar, kitchen, checker, label]
+                  format:
+                    type: string
+                    enum: [escpos, tspl]
+                  paper_width_mm:
+                    type: integer
+                  label_height_mm:
+                    type: integer
+                  copies:
+                    type: integer
+                  footer:
+                    type: string
+        "401":
+          description: PRINTER_TOKEN_INVALID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /api/v1/print-agent/jobs/claim:
     post:
       security:
@@ -5179,6 +5216,9 @@ components:
             reference:
               type: string
               description: Required for static_qris (OF8).
+        printed_locally:
+          type: boolean
+          description: The kitchen tickets were printed on the LAN print agent during the outage; the server queues no print job (W18).
     OfflineSyncResult:
       type: object
       required: [client_order_id, status]

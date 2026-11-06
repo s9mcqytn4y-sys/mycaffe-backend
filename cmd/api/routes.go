@@ -276,6 +276,7 @@ func registerStoreAndPOSRoutes(v1 *gin.RouterGroup, h *handlerSet) {
 	agent := v1.Group("/print-agent", handler.LimitBody(4<<10))
 	agent.POST("/jobs/claim", h.print.Claim)
 	agent.POST("/jobs/:id/ack", h.print.Ack)
+	agent.GET("/printer", h.print.AgentPrinter)
 	// POS devices (v0.10 PR 10.1, ADR-005): owner registers/revokes; devices use "Authorization: Device <credential>".
 	devices := v1.Group("/store/devices", h.auth.RequirePermission(rbac.DeviceManage))
 	devices.GET("", h.device.ListDevices)

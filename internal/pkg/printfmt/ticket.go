@@ -17,6 +17,8 @@ type Line struct {
 	Options  []string `json:"options,omitempty"`
 	Notes    string   `json:"notes,omitempty"`
 	Quantity int      `json:"quantity"`
+	// Station is the prep station of the line (bar, kitchen, none): it routes the line to printers.
+	Station string `json:"station,omitempty"`
 }
 
 // Ticket is the header and lines of one station ticket, checker slip or label set.

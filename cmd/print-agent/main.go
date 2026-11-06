@@ -6,7 +6,8 @@
 //	{
 //	  "api_url": "https://demo.abbdullaziz.online",
 //	  "poll_seconds": 3,
-//	  "printers": [{"name": "Bar", "token": "<agent token>", "address": "192.168.1.50:9100"}]
+//	  "printers": [{"name": "Bar", "token": "<agent token>", "address": "192.168.1.50:9100"}],
+//	  "lan": {"listen": ":8787", "key": "<shared with the POS devices, 32+ chars>"}
 //	}
 //
 // The tokens are secrets: keep the file readable only by the account running the agent. On Windows
@@ -20,6 +21,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 )
 
@@ -31,6 +33,9 @@ func loadConfig(path string) (Config, error) {
 	}
 	if err := json.Unmarshal(raw, &cfg); err != nil {
 		return cfg, err
+	}
+	if cfg.LAN != nil && cfg.LAN.CacheFile == "" {
+		cfg.LAN.CacheFile = filepath.Join(filepath.Dir(path), "print-agent-cache.json")
 	}
 	return cfg, cfg.validate()
 }

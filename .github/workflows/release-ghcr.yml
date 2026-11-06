@@ -16,7 +16,7 @@ concurrency:
 jobs:
   publish-ghcr:
     name: Build & Push ghcr.io/s9mcqytn4y-sys/mycaffe-api
-    runs-on: [self-hosted, linux, mycaffe]
+    runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
       contents: write # GitHub Release for v* tags
@@ -115,7 +115,7 @@ jobs:
   # Demo/development only (decision W12): the whatsmeow bridge is never deployed to production.
   publish-wa-bridge:
     name: Build & Push ghcr.io/s9mcqytn4y-sys/mycaffe-wa-bridge
-    runs-on: [self-hosted, linux, mycaffe]
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
       IMAGE: ghcr.io/${{ github.repository_owner }}/mycaffe-wa-bridge

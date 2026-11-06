@@ -102,6 +102,10 @@ Differences, all on the host and none in the images:
 
 ## 9. Self-hosted CI runner (decision W11)
 
+> **Inactive while the repository is public (2026-11-06).** Workflows use `ubuntu-latest`; the service is stopped and
+> disabled (`sudo systemctl disable --now actions.runner.s9mcqytn4y-sys-mycaffe-backend.wsl-mycaffe`). Never run a
+> self-hosted runner on a public repository: a fork pull request can change `runs-on` and execute code on the host.
+
 CI and releases run on the WSL demo host: runner `wsl-mycaffe` (labels `self-hosted, linux, mycaffe`), installed
 in `/opt/actions-runner` as the systemd service `actions.runner.s9mcqytn4y-sys-mycaffe-backend.wsl-mycaffe`,
 user `runner` (docker group, passwordless sudo because the workflows install tools). Jobs run only while the PC and

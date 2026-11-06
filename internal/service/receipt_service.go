@@ -79,6 +79,8 @@ type ReceiptLine struct {
 	// PromoName took PromoDiscount off the line (K7); Amount + PromoDiscount is the normal price.
 	PromoName     string `json:"promo_name,omitempty"`
 	PromoDiscount int64  `json:"promo_discount,omitempty"`
+	// Bundle names the bundle this component line was sold in (X4).
+	Bundle string `json:"bundle,omitempty"`
 }
 
 type ReceiptPayment struct {
@@ -369,11 +371,12 @@ func receiptLinesTx(ctx context.Context, tx *sqlx.Tx, storeID, orderID uuid.UUID
 		RoundID   *uuid.UUID `db:"round_id"`
 		PromoName string     `db:"promo_name"`
 		Promo     int64      `db:"promo_discount_amount"`
+		Bundle    string     `db:"bundle_name"`
 	}
 	if err := tx.SelectContext(ctx, &items, `
 		SELECT id, snapshot_name, COALESCE(snapshot_variant_name, '') AS snapshot_variant_name, COALESCE(notes, '') AS notes,
 			quantity, snapshot_price, subtotal_amount, COALESCE(snapshot_prep_station, 'none') AS station, round_id,
-			COALESCE(snapshot_promo_name, '') AS promo_name, promo_discount_amount
+			COALESCE(snapshot_promo_name, '') AS promo_name, promo_discount_amount, COALESCE(snapshot_bundle_name, '') AS bundle_name
 		FROM order_items WHERE store_id = $1 AND order_id = $2 ORDER BY created_at, id`, storeID, orderID); err != nil {
 		return nil, fmt.Errorf("failed to load receipt lines: %w", err)
 	}
@@ -404,7 +407,7 @@ func receiptLinesTx(ctx context.Context, tx *sqlx.Tx, storeID, orderID uuid.UUID
 	lines := make([]ReceiptLine, len(items))
 	for i, it := range items {
 		lines[i] = ReceiptLine{itemID: it.ID, station: it.Station, roundID: it.RoundID, Name: it.Name, Variant: it.Variant, Options: byItem[it.ID], Notes: it.Notes,
-			Quantity: it.Quantity, UnitPrice: it.UnitPrice, Amount: it.Amount, PromoName: it.PromoName, PromoDiscount: it.Promo}
+			Quantity: it.Quantity, UnitPrice: it.UnitPrice, Amount: it.Amount, PromoName: it.PromoName, PromoDiscount: it.Promo, Bundle: it.Bundle}
 	}
 	return lines, nil
 }

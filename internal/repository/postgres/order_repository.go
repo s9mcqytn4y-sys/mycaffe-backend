@@ -29,6 +29,8 @@ type CatalogData struct {
 	OptionsByGroup        map[uuid.UUID][]domain.ModifierOption
 	OptionModifierGroups  map[uuid.UUID][]domain.OptionModifierGroup
 	Variants              map[uuid.UUID]domain.ProductVariant
+	// BundleSlots are the slots of requested bundle products (X4).
+	BundleSlots map[uuid.UUID][]domain.BundleSlot
 	// Promotions are the store's active promotions (K7); the pricing engine decides which run now.
 	Promotions []domain.Promotion
 }
@@ -282,6 +284,7 @@ func (r *OrderRepository) loadCatalogForOrder(ctx context.Context, tx *sqlx.Tx, 
 		OptionsByGroup:        make(map[uuid.UUID][]domain.ModifierOption),
 		OptionModifierGroups:  make(map[uuid.UUID][]domain.OptionModifierGroup),
 		Variants:              make(map[uuid.UUID]domain.ProductVariant),
+		BundleSlots:           make(map[uuid.UUID][]domain.BundleSlot),
 	}
 	if err := tx.SelectContext(ctx, &data.Promotions, `SELECT id, store_id, name, kind, value, product_ids, category_ids, starts_at, ends_at,
 		days_mask, start_minute, end_minute, quota, used_count, is_active, created_at, updated_at
@@ -314,6 +317,27 @@ func (r *OrderRepository) loadCatalogForOrder(ctx context.Context, tx *sqlx.Tx, 
 	}
 	for _, p := range products {
 		data.Products[p.ID] = p
+	}
+	// Slots of requested bundles (X4); the caller also requests the chosen component products.
+	var bundleIDs []uuid.UUID
+	for _, p := range products {
+		if p.ProductType == domain.ProductTypeBundle {
+			bundleIDs = append(bundleIDs, p.ID)
+		}
+	}
+	if len(bundleIDs) > 0 {
+		slotQuery, slotArgs, err := sqlx.In(`SELECT id, store_id, bundle_product_id, name, quantity, display_order, product_ids
+			FROM bundle_slots WHERE store_id = ? AND bundle_product_id IN (?) ORDER BY bundle_product_id, display_order, id`, storeID, bundleIDs)
+		if err != nil {
+			return nil, fmt.Errorf("failed to build bundle_slots query: %w", err)
+		}
+		var slots []domain.BundleSlot
+		if err := tx.SelectContext(ctx, &slots, tx.Rebind(slotQuery), slotArgs...); err != nil {
+			return nil, fmt.Errorf("failed to query bundle_slots: %w", err)
+		}
+		for _, s := range slots {
+			data.BundleSlots[s.BundleProductID] = append(data.BundleSlots[s.BundleProductID], s)
+		}
 	}
 
 	// Active variants of the requested products (owner decision K1).
@@ -638,11 +662,12 @@ func (r *OrderRepository) InsertOrderItem(ctx context.Context, tx *sqlx.Tx, item
 			id, store_id, order_id, product_id, config_hash, snapshot_name,
 			unit_base_price, modifier_total_price, snapshot_price, quantity,
 			subtotal_amount, selected_options, notes, variant_id, snapshot_variant_name, snapshot_sku, round_id,
-			snapshot_prep_station, promotion_id, promo_discount_amount, snapshot_promo_name, snapshot_category_name
+			snapshot_prep_station, promotion_id, promo_discount_amount, snapshot_promo_name,
+			bundle_product_id, bundle_group_id, snapshot_bundle_name, snapshot_category_name
 		) VALUES (
 			$1, $2, $3, $4, $5, $6,
 			$7, $8, $9, $10,
-			$11, $12::jsonb, $13, $14, $15, $16, $17, $18, $19, $20, $21,
+			$11, $12::jsonb, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24,
 			-- B2: snapshot the product category as it is at sale time.
 			COALESCE((SELECT c.name FROM products p JOIN categories c ON c.store_id = p.store_id AND c.id = p.category_id
 				WHERE p.store_id = $2 AND p.id = $4), '')
@@ -655,6 +680,7 @@ func (r *OrderRepository) InsertOrderItem(ctx context.Context, tx *sqlx.Tx, item
 		item.UnitBasePrice, item.ModifierTotalPrice, item.SnapshotPrice, item.Quantity,
 		item.SubtotalAmount, selectedOptsJSON, item.Notes, item.VariantID, item.SnapshotVariant, item.SnapshotSKU, item.RoundID, prepStationValue(item.SnapshotPrepStation),
 		item.PromotionID, item.PromoDiscountAmount, item.SnapshotPromoName,
+		item.BundleProductID, item.BundleGroupID, item.SnapshotBundleName,
 	).Scan(&item.CreatedAt)
 }
 

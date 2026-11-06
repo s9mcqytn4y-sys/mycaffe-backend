@@ -447,3 +447,22 @@ func (h *CatalogHandler) UpdatePromotion(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, out)
 }
+
+type bundleSlotsRequest struct {
+	Slots []service.BundleSlotInput `json:"slots"`
+}
+
+// SetBundleSlots handles PUT /api/v1/catalog/products/:id/bundle-slots: replaces the parts of a bundle (X4).
+func (h *CatalogHandler) SetBundleSlots(c *gin.Context) {
+	id, ok := pathID(c, "id")
+	var req bundleSlotsRequest
+	if !ok || !bindJSON(c, &req) {
+		return
+	}
+	out, err := h.catalog.SetBundleSlots(c.Request.Context(), currentStaff(c), id, req.Slots)
+	if err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"slots": out})
+}

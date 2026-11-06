@@ -355,6 +355,10 @@ BEGIN
     IF has_table_privilege('mycaffe_app', 'public.kds_tickets', 'DELETE') THEN
         RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may DELETE kds_tickets!';
     END IF;
+    -- 10F-22. Bundle slots (migration 000044): RLS on (replaced as a whole by the owner, so DELETE is granted).
+    IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.bundle_slots'::regclass) THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: bundle_slots does not have row-level security enabled!';
+    END IF;
     -- 10F-21. Promotions (migration 000043): RLS on; ended by deactivation, never deleted by the app role.
     IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.promotions'::regclass) THEN
         RAISE EXCEPTION 'SECURITY FAILURE: promotions does not have row-level security enabled!';

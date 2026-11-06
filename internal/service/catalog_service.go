@@ -94,6 +94,8 @@ type CatalogProduct struct {
 	StockQuantity  *int             `json:"stock_quantity,omitempty"`
 	Variants       []CatalogVariant `json:"variants"`
 	ModifierGroups []CatalogGroup   `json:"modifier_groups"`
+	// BundleSlots are the parts of a bundle product to choose from (X4).
+	BundleSlots []domain.BundleSlot `json:"bundle_slots,omitempty"`
 }
 
 type CatalogCategory struct {
@@ -181,6 +183,18 @@ func (s *CatalogService) catalogTx(ctx context.Context, tx *sqlx.Tx, storeID uui
 		return nil, err
 	}
 	view := buildCatalogView(store, settings, rows, staff)
+	var slots []domain.BundleSlot
+	if err := tx.SelectContext(ctx, &slots, `SELECT id, store_id, bundle_product_id, name, quantity, display_order, product_ids
+		FROM bundle_slots WHERE store_id = $1 ORDER BY bundle_product_id, display_order, id`, storeID); err != nil {
+		return nil, fmt.Errorf("failed to load bundle slots: %w", err)
+	}
+	byBundle := map[uuid.UUID][]domain.BundleSlot{}
+	for _, sl := range slots {
+		byBundle[sl.BundleProductID] = append(byBundle[sl.BundleProductID], sl)
+	}
+	for i := range view.Products {
+		view.Products[i].BundleSlots = byBundle[view.Products[i].ID]
+	}
 	view.Promotions = []CatalogPromotion{}
 	if err := tx.SelectContext(ctx, &view.Promotions, `SELECT id, name, kind, value, product_ids, category_ids, starts_at, ends_at,
 		days_mask, start_minute, end_minute, quota FROM promotions WHERE store_id = $1 AND is_active ORDER BY id`, storeID); err != nil {

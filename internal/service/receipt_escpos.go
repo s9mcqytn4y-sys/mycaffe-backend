@@ -57,6 +57,9 @@ func RenderESCPOS(r *Receipt, widthMM int, qrURL string) ([]byte, error) {
 		if l.Variant != "" {
 			name += " (" + l.Variant + ")"
 		}
+		if l.Bundle != "" {
+			name = l.Bundle + ": " + name
+		}
 		p.Wrap(name, "")
 		for _, o := range l.Options {
 			if strings.HasPrefix(o, "- ") { // nested sub-option

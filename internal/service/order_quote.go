@@ -137,10 +137,7 @@ func (s *OrderService) QuoteOrder(ctx context.Context, trustedStoreID uuid.UUID,
 
 	var result *OrderQuoteResult
 	err := database.WithTenantTx(ctx, s.db, trustedStoreID, func(tx *sqlx.Tx) error {
-		productIDs := make([]uuid.UUID, 0, len(input.Items))
-		for _, item := range input.Items {
-			productIDs = append(productIDs, item.ProductID)
-		}
+		productIDs := orderProductIDs(input.Items)
 
 		catalogData, err := s.repo.LoadCatalogForQuote(ctx, tx, trustedStoreID, productIDs)
 		if err != nil {

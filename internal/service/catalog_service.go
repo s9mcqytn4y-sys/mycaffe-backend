@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"regexp"
 	"strings"
 	"time"
@@ -102,11 +103,34 @@ type CatalogCategory struct {
 	IsActive     bool      `json:"is_active"`
 }
 
+// CatalogPromotion is an active promotion as menus and the offline snapshot show it: no usage counter, so
+// serving it twice yields the same snapshot version (W20). The server decides which promotion applies.
+type CatalogPromotion struct {
+	ID          uuid.UUID       `json:"id" db:"id"`
+	Name        string          `json:"name" db:"name"`
+	Kind        string          `json:"kind" db:"kind"`
+	Value       int64           `json:"value" db:"value"`
+	ProductIDs  domain.UUIDList `json:"product_ids" db:"product_ids"`
+	CategoryIDs domain.UUIDList `json:"category_ids" db:"category_ids"`
+	StartsAt    *time.Time      `json:"starts_at,omitempty" db:"starts_at"`
+	EndsAt      *time.Time      `json:"ends_at,omitempty" db:"ends_at"`
+	DaysMask    int             `json:"days_mask" db:"days_mask"`
+	StartMinute *int            `json:"start_minute,omitempty" db:"start_minute"`
+	EndMinute   *int            `json:"end_minute,omitempty" db:"end_minute"`
+	Quota       *int            `json:"quota,omitempty" db:"quota"`
+}
+
+func (p CatalogPromotion) promotion() domain.Promotion {
+	return domain.Promotion{ID: p.ID, Name: p.Name, Kind: p.Kind, Value: p.Value, ProductIDs: p.ProductIDs, CategoryIDs: p.CategoryIDs,
+		StartsAt: p.StartsAt, EndsAt: p.EndsAt, DaysMask: p.DaysMask, StartMinute: p.StartMinute, EndMinute: p.EndMinute, Quota: p.Quota, IsActive: true}
+}
+
 type CatalogView struct {
-	Store       CatalogStore      `json:"store"`
-	Categories  []CatalogCategory `json:"categories"`
-	Products    []CatalogProduct  `json:"products"`
-	GeneratedAt time.Time         `json:"generated_at"`
+	Store       CatalogStore       `json:"store"`
+	Categories  []CatalogCategory  `json:"categories"`
+	Products    []CatalogProduct   `json:"products"`
+	Promotions  []CatalogPromotion `json:"promotions"`
+	GeneratedAt time.Time          `json:"generated_at"`
 }
 
 // StaffCatalog is the POS view: inactive categories and stock counts included.
@@ -156,7 +180,13 @@ func (s *CatalogService) catalogTx(ctx context.Context, tx *sqlx.Tx, storeID uui
 	if err != nil {
 		return nil, err
 	}
-	return buildCatalogView(store, settings, rows, staff), nil
+	view := buildCatalogView(store, settings, rows, staff)
+	view.Promotions = []CatalogPromotion{}
+	if err := tx.SelectContext(ctx, &view.Promotions, `SELECT id, name, kind, value, product_ids, category_ids, starts_at, ends_at,
+		days_mask, start_minute, end_minute, quota FROM promotions WHERE store_id = $1 AND is_active ORDER BY id`, storeID); err != nil {
+		return nil, fmt.Errorf("failed to load promotions: %w", err)
+	}
+	return view, nil
 }
 
 func buildCatalogView(store *domain.Store, settings domain.StoreSettings, rows *postgres.CatalogRows, staff bool) *CatalogView {

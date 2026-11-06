@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"math"
+	"time"
 
 	"encoding/json"
 	"errors"
@@ -24,6 +25,7 @@ type offlinePricing struct {
 	snap                              catalogSnapshot
 	liveSubtotal                      *int64 // today's subtotal for the same items, for price_delta; nil when today's catalog refuses them
 	oversoldProducts, oversoldOptions []uuid.UUID
+	at                                time.Time // when the device took the order: promotions and happy hours run at this time (X3)
 }
 
 func newOfflinePricing(raw []byte) (*offlinePricing, error) {
@@ -60,6 +62,11 @@ func (p *offlinePricing) apply(store *domain.Store, cat *CatalogSnapshot, input 
 	}
 
 	store.TaxBps, store.ServiceBps = p.snap.TaxBPS, p.snap.ServiceBPS
+	cat.Promotions = make([]domain.Promotion, len(p.snap.Promotions))
+	for i, sp := range p.snap.Promotions {
+		cat.Promotions[i] = sp.promotion()
+	}
+	cat.PromoAt, cat.IgnorePromoQuota = p.at, true
 	for id, prod := range cat.Products {
 		if !products[id] {
 			delete(cat.Products, id)

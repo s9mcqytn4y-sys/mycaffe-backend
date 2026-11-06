@@ -73,6 +73,8 @@ func TestOfflineSyncIntegration(t *testing.T) {
 	ch := handler.NewCatalogHandler(service.NewCatalogService(db))
 	r.POST("/catalog/products", ah.RequirePermission(rbac.CatalogManage), ch.CreateProduct)
 	r.DELETE("/catalog/products/:id", ah.RequirePermission(rbac.CatalogManage), ch.ArchiveProduct)
+	r.POST("/catalog/promotions", ah.RequirePermission(rbac.CatalogManage), ch.CreatePromotion)
+	r.PATCH("/catalog/promotions/:id", ah.RequirePermission(rbac.CatalogManage), ch.UpdatePromotion)
 	pos := handler.NewPOSHandler(orders, payments, service.NewSettingsService(db))
 	r.POST("/pos/orders", ah.RequireStaff(), pos.CreateOrder)
 	ph := handler.NewPrintHandler(service.NewPrintService(db))
@@ -487,6 +489,46 @@ func TestOfflineSyncIntegration(t *testing.T) {
 		_ = json.Unmarshal(res.Body.Bytes(), &z)
 		if res.Code != http.StatusOK || !z.Amended || z.LateOfflineOrders != 1 || z.LateOfflineAmount <= 0 || z.ExpectedCash != 0 || z.CountedCash != 0 {
 			t.Fatalf("the Z-report must show amended and keep the original close figures: %d %+v", res.Code, z)
+		}
+	})
+
+	t.Run("PromotionFollowsTheSnapshot", func(t *testing.T) {
+		res := call("POST", "/catalog/products", owner, map[string]any{"name": "Promo Offline " + prefix, "product_type": "ready_to_serve",
+			"prep_station": "none", "variants": []map[string]any{{"name": "Reguler", "price": 20000, "is_default": true}}})
+		var product struct {
+			ID uuid.UUID `json:"id"`
+		}
+		_ = json.Unmarshal(res.Body.Bytes(), &product)
+		t.Cleanup(func() { call("DELETE", "/catalog/products/"+product.ID.String(), owner, nil) })
+		res = call("POST", "/catalog/promotions", owner, map[string]any{"name": "Offline 50% " + prefix, "kind": "percent", "value": 5000,
+			"product_ids": []uuid.UUID{product.ID}})
+		if res.Code != http.StatusCreated {
+			t.Fatalf("create promotion failed: %d: %s", res.Code, res.Body.String())
+		}
+		var promo struct {
+			ID uuid.UUID `json:"id"`
+		}
+		_ = json.Unmarshal(res.Body.Bytes(), &promo)
+		var served struct {
+			Version string `json:"catalog_version"`
+		}
+		_ = json.Unmarshal(call("GET", "/device/catalog", deviceAuth, nil).Body.Bytes(), &served)
+		// The owner ends the promotion before the device syncs: the order keeps the price it was sold at (X3).
+		call("PATCH", "/catalog/promotions/"+promo.ID.String(), owner, map[string]any{"is_active": false})
+
+		results := sync(map[string]any{"orders": []any{order(func(o map[string]any) {
+			o["catalog_version"] = served.Version
+			o["items"] = []map[string]any{{"product_id": product.ID, "quantity": 1}}
+		})}})
+		if len(results) != 1 || results[0].Status != "accepted" {
+			t.Fatalf("the offline order must be accepted: %+v", results)
+		}
+		var subtotal int64
+		inStore(func(tx *sqlx.Tx) error {
+			return tx.GetContext(ctx, &subtotal, `SELECT subtotal_amount FROM orders WHERE store_id = $1 AND id = $2`, storeID, *results[0].OrderID)
+		})
+		if subtotal != 10000 {
+			t.Fatalf("the snapshot promotion must price the offline order (Rp10.000), got %d", subtotal)
 		}
 	})
 

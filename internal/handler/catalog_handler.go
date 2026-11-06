@@ -408,3 +408,42 @@ func (h *CatalogHandler) DetachChildGroupFromOption(c *gin.Context) {
 	}
 	c.Status(http.StatusNoContent)
 }
+
+// ListPromotions handles GET /api/v1/catalog/promotions (catalog.manage).
+func (h *CatalogHandler) ListPromotions(c *gin.Context) {
+	out, err := h.catalog.ListPromotions(c.Request.Context(), currentStaff(c))
+	if err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"promotions": out})
+}
+
+// CreatePromotion handles POST /api/v1/catalog/promotions (K7).
+func (h *CatalogHandler) CreatePromotion(c *gin.Context) {
+	var in service.PromotionInput
+	if !bindJSON(c, &in) {
+		return
+	}
+	out, err := h.catalog.CreatePromotion(c.Request.Context(), currentStaff(c), in)
+	if err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, out)
+}
+
+// UpdatePromotion handles PATCH /api/v1/catalog/promotions/:id; is_active=false ends a promotion.
+func (h *CatalogHandler) UpdatePromotion(c *gin.Context) {
+	id, ok := pathID(c, "id")
+	var in service.PromotionInput
+	if !ok || !bindJSON(c, &in) {
+		return
+	}
+	out, err := h.catalog.UpdatePromotion(c.Request.Context(), currentStaff(c), id, in)
+	if err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, out)
+}

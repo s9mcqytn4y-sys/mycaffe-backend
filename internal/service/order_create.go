@@ -161,14 +161,7 @@ func (s *OrderService) createOrderTx(ctx context.Context, tx *sqlx.Tx, trustedSt
 			return err
 		}
 
-		snapshot := CatalogSnapshot{
-			Products:          catalogData.Products,
-			ModifierGroups:    catalogData.ModifierGroups,
-			ModifierOptions:   catalogData.ModifierOptions,
-			ProductGroups:     catalogData.ProductModifierGroups,
-			OptionChildGroups: catalogData.OptionModifierGroups,
-			Variants:          catalogData.Variants,
-		}
+		snapshot := catalogSnapshotOf(catalogData, s.nowFunc())
 		if normalizedInput.Offline != nil {
 			// Offline sync (ADR-005 OF3): price from the served snapshot, not from today's catalog.
 			if err := normalizedInput.Offline.apply(&catalogData.Store, &snapshot, normalizedInput); err != nil {

@@ -147,14 +147,7 @@ func (s *OrderService) QuoteOrder(ctx context.Context, trustedStoreID uuid.UUID,
 			return err
 		}
 
-		snapshot := CatalogSnapshot{
-			Products:          catalogData.Products,
-			ModifierGroups:    catalogData.ModifierGroups,
-			ModifierOptions:   catalogData.ModifierOptions,
-			ProductGroups:     catalogData.ProductModifierGroups,
-			OptionChildGroups: catalogData.OptionModifierGroups,
-			Variants:          catalogData.Variants,
-		}
+		snapshot := catalogSnapshotOf(catalogData, s.nowFunc())
 
 		billingMode := input.BillingMode
 		if billingMode == "" {

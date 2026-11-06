@@ -68,7 +68,10 @@ func RenderESCPOS(r *Receipt, widthMM int, qrURL string) ([]byte, error) {
 		if l.Notes != "" {
 			p.Wrap("* "+l.Notes, "  ")
 		}
-		p.Pair(fmt.Sprintf("  %d x %s", l.Quantity, rupiah(l.UnitPrice)), rupiah(l.Amount))
+		p.Pair(fmt.Sprintf("  %d x %s", l.Quantity, rupiah(l.UnitPrice)), rupiah(l.Amount+l.PromoDiscount))
+		if l.PromoDiscount > 0 { // shown apart from the cashier discount (X2)
+			p.Pair("  Promo "+l.PromoName, rupiah(-l.PromoDiscount))
+		}
 	}
 	p.Sep()
 

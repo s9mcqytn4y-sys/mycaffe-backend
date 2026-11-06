@@ -355,6 +355,10 @@ func registerKDSAndCatalogRoutes(v1 *gin.RouterGroup, h *handlerSet) {
 	cat.POST("/products/:id/variants", manage, h.catalog.CreateVariant)
 	cat.PATCH("/variants/:id", manage, h.catalog.UpdateVariant)
 	cat.DELETE("/variants/:id", manage, h.catalog.ArchiveVariant)
+	// Promotions (v0.11 PR 11.1, K7): one best promotion per line, taken off the line subtotal.
+	cat.GET("/promotions", manage, h.catalog.ListPromotions)
+	cat.POST("/promotions", manage, h.catalog.CreatePromotion)
+	cat.PATCH("/promotions/:id", manage, h.catalog.UpdatePromotion)
 	cat.POST("/modifier-groups", manage, h.catalog.CreateModifierGroup)
 	cat.GET("/modifier-groups", manage, h.catalog.ListModifierGroups)
 	cat.GET("/modifier-groups/:id", manage, h.catalog.GetModifierGroup)

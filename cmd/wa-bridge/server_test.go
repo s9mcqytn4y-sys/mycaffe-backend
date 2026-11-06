@@ -23,7 +23,7 @@ func (f *fakeSender) Send(_ context.Context, phone, text string) error {
 	return nil
 }
 
-const testToken = "0123456789abcdef0123456789abcdef"
+var testToken = strings.Repeat("t", 32)
 
 func post(h http.Handler, auth, body string) int {
 	req := httptest.NewRequest("POST", "/send", strings.NewReader(body))

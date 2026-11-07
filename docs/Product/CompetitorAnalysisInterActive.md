@@ -1,0 +1,80 @@
+# Competitor Deep Research: InterActive Technologies (`interactive.co.id`)
+
+Tanggal evaluasi: 2026-11-07
+Penyusun: Principal Systems Architect & Product Strategy (AzureDevID)
+Benchmark pembanding sebelumnya: [CompetitorAnalysisMajoo.md](CompetitorAnalysisMajoo.md)
+
+## 1. Executive Summary
+
+InterActive Technologies Corp (**PT Interaktif Internasional**, berbasis di Surabaya sejak akhir 1990-an/2000-an) adalah pemain POS & hardware F&B/ritel mapan di Indonesia yang mengandalkan strategi **bundling perangkat keras berpemilik + lisensi tahunan per cabang + akuisisi sales lapangan korporat**. Kekuatan utama mereka terletak pada kematangan integrasi perangkat kasir fisik (printer thermal, laci kasir RJ11, Android terminal dual-screen, kiosk mandiri) dan kredibilitas korporasi (PSE Komdigi, ISO, jaringan cabang kota besar).
+
+Namun, arsitektur warisan (*legacy*) mereka menyisakan celah besar bagi kafe independen, coffee shop modern, dan jaringan multi-gerai UMKM:
+1. **Biaya awal (CapEx) tinggi dan lock-in perangkat keras**, berbanding terbalik dengan kebutuhan pemilik kafe yang ingin langsung memakai tablet Android/iPad/laptop yang sudah ada.
+2. **Onboarding lambat berbasis sales call/demo terjadwal**, bukan *self-service instant SaaS onboarding* dengan uji coba transparan.
+3. **Ketergantungan rekonsiliasi pembayaran agregator atau setup EDC manual**, sedangkan MyCaffe by AzureDevID menawarkan **Dual-Lane BYOK Midtrans Core API (0% potongan komisi platform, pencairan 100% langsung ke rekening tenant)** ditambah fallback QRIS Statis/Tunai instan.
+4. **Pengalaman QR Table Order pelanggan yang terasa seperti web katalog lama**, bukan PWA modern cepat tanpa instalasi aplikasi dengan pelacakan pesanan *real-time* via WebSocket.
+
+---
+
+## 2. Bedah Lini Produk & Software (`interactive.co.id/product/`)
+
+| Lini Produk InterActive | Fungsi Utama | Analisis Arsitektur & Posisi MyCaffe (`mycaffe-backend` + `myCaffe-client`) |
+|-------------------------|--------------|-----------------------------------------------------------------------------|
+| **InterActive MyProfit** | POS Kasir Cloud & Ritel/F&B, manajemen stok, laporan penjualan, multi-cabang | Di MyCaffe sudah **Implemented & Tested** melalui modul POS Kasir (`internal/service/order_*.go`), Shift & Blind Cash Count (`shift_service.go`), Resep/Bahan Baku & HPP Moving-Average (`inventory_service.go`), Pembelian PO & Hutang Dagang (`payables`), serta Laporan Laba Kotor & Z-Report. |
+| **InterActive MyResto** | Manajemen meja lantai restoran (pindah/gabung/pisah meja), open tab, kitchen routing, split bill | Di MyCaffe sudah **Implemented & Tested** pada v0.9 Cafe Floor (`table_service.go`, `tab_service.go`, timer meja, split bill per item & nominal parsial, serta KDS multi-stasiun real-time). |
+| **InterActive QR Menu** | Scan QR meja oleh tamu untuk melihat menu dan mengirim pesanan ke kasir/dapur | Fokus rilis utama **MyCaffe QR Table Order v1.0**: token QR kriptografis per meja yang dapat dirotasi (`resolve_table_qr`), sesi tamu terbatas per perangkat, kuotasi harga/pajak/promo di sisi server, pembayaran QRIS Dinamis Core API tanpa redirect Snap, serta tracker pesanan publik via WebSocket. |
+| **InterActive Self-Service Kiosk** | Layar sentuh berdiri (standing kiosk) untuk pesan & bayar mandiri di antrean depan | Dapat dijalankan langsung oleh aplikasi tablet/kiosk mode `myCaffe-client` menggunakan kontrak POS/Guest API yang sama dan antrean TV (`display_tokens`). |
+| **InterActive BeOne / Backoffice** | Portal pemilik bisnis untuk memantau omzet cabang dan akuntansi dasar | Di MyCaffe ditingkatkan melalui **Tenant Self-Service Governance (`000051`)**: pemilik kafe mengatur sendiri CMS tema brand, BYOK Midtrans, SMTP/WhatsApp sendiri, dan topologi IP perangkat LAN tanpa harus menelepon teknisi vendor. |
+
+---
+
+## 3. Ekosistem Perangkat Keras & Topologi Jaringan Kompetitor
+
+### 3.1 Perangkat Keras yang Dijual InterActive
+- **Terminal POS Android All-in-One (`I-POS` Series / Sunmi OEM)**: Layar sentuh kasir + layar kedua menghadap pelanggan (*Customer Display*) + printer thermal internal 58mm/80mm.
+- **Printer Dapur & Kasir**: Printer thermal ESC/POS 80mm dengan koneksi **LAN Ethernet (`TCP:9100`)** untuk dapur basah/panas (jarak kabel >15 meter jauh lebih stabil daripada Bluetooth) serta USB/Bluetooth untuk meja kasir.
+- **Cash Drawer (Laci Uang)**: Terhubung melalui kabel **RJ11 (6-pin)** ke port `DK` di belakang printer thermal; laci terbuka otomatis melalui pulsa listrik perintah byte ESC/POS `ESC p m t1 t2` (`0x1B 0x70 0x00 0x19 0xFA`), bukan terhubung langsung ke tablet Android/iOS.
+- **Barcode Scanner**: USB HID (bekerja sebagai emulasi papan ketik di web/Android) atau Bluetooth HID untuk scan SKU kemasan dan *staff ID badge*.
+- **Kitchen Display & Queue TV**: Android TV / Smart TV atau mini-PC HDMI untuk menampilkan nomor antrean pesanan yang siap diambil.
+
+### 3.2 Arsitektur Jaringan Kompetitor vs Strategi MyCaffe
+- **Pola InterActive**: Aplikasi kasir lokal menyimpan master menu di penyimpanan perangkat, mencetak langsung ke IP LAN printer dapur (`192.168.1.x:9100`), dan menyinkronkan transaksi ke cloud saat internet tersedia. Kelemahan umumnya adalah **konflik perubahan IP router (DHCP drift)** yang membuat printer dapur tiba-tiba mati saat router ISP di-restart, memaksa pemilik kafe memanggil teknisi.
+- **Keunggulan MyCaffe**:
+  1. **Print Queue Terkelola + Direct LAN Bridge**: Mendukung agen cetak terautentikasi (`Authorization: Printer <token>`) sekaligus *Direct TCP:9100 Coroutines/NWConnection Adapter* di `myCaffe-client/apps/android` dan `apps/ios`.
+  2. **Panel Self-Maintain Jaringan & Simulator Visual (`store_network_nodes`)**: Pemilik kafe dapat mendaftarkan IP statis/MAC perangkat, menguji skenario gangguan (*WAN Offline*, *Printer Paper Out*, *DHCP IP Drift*), dan mengikuti panduan perbaikan mandiri tanpa downtime menunggu teknisi.
+  3. **Offline Cash & Static QRIS Sync (ADR-005)**: Tetap melayani kasir saat internet kafe mati dengan verifikasi PIN offline perangkat terdaftar, lalu rekonsiliasi aman saat koneksi kembali.
+
+---
+
+## 4. Branding, Model Harga, dan Legalitas Kompetitor
+
+### 4.1 Branding & Positioning
+- **InterActive**: Korporat biru-merah bergaya vendor B2B konvensional. Kuat untuk waralaba konvensional dan manajemen properti, tetapi terasa kaku bagi *specialty coffee shop*, *artisan bakery*, dan resto independen generasi baru yang menginginkan tampilan menu QR sekelas brand mereka sendiri (*white-label*).
+- **MyCaffe by AzureDevID**: Mengusung arsitektur **Dual-Brand**:
+  - **AzureDevID** (`Royal Azure #0A4DA2` & `Electric Cyan #00AEEF`) sebagai jaminan rekayasa sistem, keamanan data, penagihan SaaS, dan kepatuhan hukum.
+  - **MyCaffe** (*Espresso & Crema* `#2C1A12` & `#C68B59`) sebagai identitas produk F&B hangat yang dapat diganti penuh (*custom hex palette, logo, hero banner, custom domain*) oleh masing-masing tenant melalui tabel `store_cms_configs`.
+
+### 4.2 Perbandingan Skema Harga
+
+| Aspek Biaya | InterActive / Kompetitor Korporat | MyCaffe by AzureDevID |
+|-------------|-----------------------------------|-----------------------|
+| Biaya Langganan Software | Sekitar Rp 250.000 s.d. Rp 500.000+/bulan/outlet (sering ditagih tahunan di muka) | Transparan bulanan atau tahunan (hemat 20%): **Starter UMKM Rp 149.000/bln**, **Pro Cafe & Resto Rp 299.000/bln**, **Enterprise White-Label Rp 599.000/bln** |
+| Komisi per Transaksi QR Order | Sering mengenakan biaya layanan per pesanan atau menahan dana pencairan H+1/H+2 melalui rekening agregator | **0% Komisi Platform per Transaksi**; skema BYOK Midtrans mencairkan dana langsung dari Midtrans ke rekening bank tenant |
+| Perangkat Keras | Paket bundling Rp 4.500.000 s.d. Rp 12.000.000+ | **Open-Standard Hardware**: bebas pakai tablet/HP/printer ESC/POS 58mm/80mm merek apa saja (Epson, Xprinter, Codesoft, VSC, Sunmi) |
+| Uji Coba | Harus mengisi formulir janji temu tim sales | **Self-Service 14-Day Free Trial (`Rp 0`)** dengan persetujuan digital ToS & UU PDP |
+
+### 4.3 Kepatuhan Hukum & Regulasi Indonesia
+- Kompetitor besar berbadan hukum PT memiliki pendaftaran **PSE Lingkup Privat Komdigi**, syarat & ketentuan tertulis, serta pemisahan peran sebagai penyedia perangkat lunak kasir (bukan penyelenggara jasa pembayaran tanpa izin Bank Indonesia).
+- **Langkah Kepatuhan AzureDevID (Implemented & Guarded)**:
+  1. **Bebas Risiko Izin PJP Bank Indonesia**: Dengan memisahkan **Lane 1 (Midtrans AzureDevID khusus tagihan langganan SaaS)** dan **Lane 2 (Midtrans BYOK terenkripsi AES-256-GCM milik masing-masing Tenant untuk pesanan makan/minum)**, AzureDevID **tidak pernah menampung, memotong, atau meneruskan dana milik kafe klien**.
+  2. **UU PDP No. 27 Tahun 2022 & UU KUP Pasal 28**: Persetujuan elektronik dicatat dengan jejak SHA-256 (`tenant_legal_acceptances`), kredensial dienkripsi (`secretbox`), dan prosedur penutupan akun (`tenant_clearance_requests`) menghapus kredensial/PII sambil mempertahankan buku besar transaksi selama 10 tahun untuk kepatuhan pajak.
+  3. **Pendaftaran PSE Komdigi**: Dilengkapi playbook penyelesaian kendala OTP melalui SSO OSS RBA PB-UMKU untuk badan usaha perorangan ber-NIB.
+
+---
+
+## 5. Matriks Keunggulan Kompetitif Utama (Actionable Moat)
+
+1. **Zero Fund Commingling (BYOK Midtrans Core API)**: Pemilik kafe memegang kendali penuh atas arus kas dan MDR resmi mereka sendiri tanpa ketergantungan pada pencairan dompet pihak ketiga.
+2. **Keamanan Multi-Tenant Kelas Perbankan**: Isolasi *Row-Level Security* (RLS) PostgreSQL 18 dengan role `mycaffe_app` (`NOBYPASSRLS`) dan tidak adanya akses `DELETE` pada tabel buku besar keuangan.
+3. **Self-Maintainable Cafe Infrastructure**: Pemilik atau kepala toko mampu mengganti IP printer LAN, merotasi QR meja yang bocor, menguji jaringan lokal via simulator visual, dan beralih ke mode kasir offline/QRIS Statis dalam hitungan detik saat gangguan ISP terjadi.
+

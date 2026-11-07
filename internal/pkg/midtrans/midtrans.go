@@ -25,15 +25,31 @@ type Client struct {
 }
 
 func NewClient(cfg *config.Config) *Client {
+	return NewClientWithKey(cfg.MidtransServerKey, cfg.MidtransIsProduction)
+}
+
+// NewClientWithKey constructs an isolated Midtrans Core API client for either Platform Billing
+// (Lane 1) or a tenant's decrypted BYOK Midtrans credentials (Lane 2).
+func NewClientWithKey(serverKey string, isProduction bool) *Client {
 	var env midtrans.EnvironmentType = midtrans.Sandbox
-	if cfg.MidtransIsProduction {
+	if isProduction {
 		env = midtrans.Production
 	}
 
 	return &Client{
-		serverKey: cfg.MidtransServerKey,
+		serverKey: strings.TrimSpace(serverKey),
 		env:       env,
 	}
+}
+
+// IsConfigured reports whether a non-empty server key is loaded.
+func (c *Client) IsConfigured() bool {
+	return c != nil && strings.TrimSpace(c.serverKey) != ""
+}
+
+// IsProduction reports whether the client targets the live Midtrans Production endpoint.
+func (c *Client) IsProduction() bool {
+	return c != nil && c.env == midtrans.Production
 }
 
 // ChargeRequest represents one immutable Midtrans payment attempt.

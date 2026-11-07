@@ -573,6 +573,29 @@ BEGIN
         RAISE EXCEPTION 'SECURITY FAILURE: list_stores_with_due_table_timers is executable by PUBLIC!';
     END IF;
 
+    -- Platform SaaS Governance & BYOK tables (migration 000051): RLS on all tenant-owned tables,
+    -- append-only legal acceptances & governance audit logs, and zero DELETE privileges for mycaffe_app.
+    IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.tenant_legal_acceptances'::regclass)
+       OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.store_kyb_profiles'::regclass)
+       OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.platform_invoices'::regclass)
+       OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.tenant_clearance_requests'::regclass)
+       OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.store_payment_credentials'::regclass)
+       OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.store_cms_configs'::regclass)
+       OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.store_notification_configs'::regclass)
+       OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.store_network_nodes'::regclass)
+       OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.governance_audit_logs'::regclass) THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: platform SaaS governance tenant tables must have row-level security enabled!';
+    END IF;
+    IF has_table_privilege('mycaffe_app', 'public.tenant_legal_acceptances', 'UPDATE')
+       OR has_table_privilege('mycaffe_app', 'public.tenant_legal_acceptances', 'DELETE')
+       OR has_table_privilege('mycaffe_app', 'public.governance_audit_logs', 'UPDATE')
+       OR has_table_privilege('mycaffe_app', 'public.governance_audit_logs', 'DELETE')
+       OR has_table_privilege('mycaffe_app', 'public.store_payment_credentials', 'DELETE')
+       OR has_table_privilege('mycaffe_app', 'public.platform_invoices', 'DELETE')
+       OR has_table_privilege('mycaffe_app', 'public.tenant_clearance_requests', 'DELETE') THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app has forbidden UPDATE/DELETE on immutable governance/BYOK tables!';
+    END IF;
+
     RAISE NOTICE 'SUCCESS: Row-Level Security (RLS) on stores/orders/payments/notifications and DELETE privilege revocation verified.';
     RAISE NOTICE 'ALL CONSTRAINTS, RLS POLICIES, AND BEHAVIORAL VERIFICATIONS PASSED SUCCESSFULLY.';
 END $$;

@@ -50,7 +50,7 @@ func ScrubSentryEvent(event *sentry.Event, _ *sentry.EventHint) *sentry.Event {
 			for k := range event.Request.Headers {
 				lower := strings.ToLower(k)
 				if lower == "authorization" || lower == "cookie" || lower == "set-cookie" ||
-					strings.Contains(lower, "secret") || strings.Contains(lower, "token") || strings.Contains(lower, "pin") {
+					strings.Contains(lower, "secret") || strings.Contains(lower, "token") || strings.Contains(lower, "pin") || strings.Contains(lower, "key") {
 					event.Request.Headers[k] = "[REDACTED]"
 				}
 			}

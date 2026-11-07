@@ -6036,8 +6036,387 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /api/v1/payments/midtrans/webhook/{store_slug}:
+    post:
+      security: []
+      tags: [Payments]
+      operationId: handleTenantMidtransWebhook
+      summary: Tenant-specific BYOK Midtrans Core API webhook notification (ADR-009)
+      x-implementation-status: implemented
+      parameters:
+        - name: store_slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Notification verified against tenant BYOK SHA-512 key and processed idempotently
+        "401":
+          description: Invalid SHA-512 signature key
+        "404":
+          description: Store not found or BYOK webhook not enabled
+
+  /api/v1/public/legal:
+    get:
+      security: []
+      tags: [SaaS Governance]
+      operationId: listPublicLegalDocuments
+      summary: List active ToS, UU PDP Privacy Policy, Tenant DPA, and Refund Policy documents
+      x-implementation-status: implemented
+      parameters:
+        - name: locale
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [id-ID, en-US]
+            default: id-ID
+      responses:
+        "200":
+          description: Active legal documents with SHA-256 hashes
+
+  /api/v1/public/plans:
+    get:
+      security: []
+      tags: [SaaS Governance]
+      operationId: listPublicSubscriptionPlans
+      summary: List SaaS subscription plans in integer IDR (0% transaction commission)
+      x-implementation-status: implemented
+      responses:
+        "200":
+          description: Active subscription plans
+
+  /api/v1/public/onboarding/apply:
+    post:
+      security: []
+      tags: [SaaS Governance]
+      operationId: submitOnboardingApplication
+      summary: Submit an idempotent self-service tenant onboarding application with legal consent hashes
+      x-implementation-status: implemented
+      responses:
+        "201":
+          description: Application recorded (NIB/NPWP masked)
+        "200":
+          description: Idempotent replay
+
+  /api/v1/public/stores/{slug}/cms:
+    get:
+      security: []
+      tags: [SaaS Governance]
+      operationId: getPublicStoreCMS
+      summary: Public storefront theme tokens, hero copy, and supported locales (id-ID / en-US)
+      x-implementation-status: implemented
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Storefront CMS configuration
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/store/legal/acceptances:
+    get:
+      tags: [SaaS Governance]
+      operationId: listTenantLegalAcceptances
+      summary: List recorded legal acceptances for the authenticated store (owner)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: Recorded acceptances
+
+  /api/v1/store/legal/{id}/accept:
+    post:
+      tags: [SaaS Governance]
+      operationId: acceptLegalDocument
+      summary: Record owner acceptance of an active legal document version (owner)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - $ref: "#/components/parameters/ResourceID"
+      responses:
+        "201":
+          description: Legal consent recorded
+
+  /api/v1/store/kyb:
+    get:
+      tags: [SaaS Governance]
+      operationId: getStoreKYB
+      summary: Get business verification (KYB) and subscription profile for the store (owner)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: Store KYB profile
+    put:
+      tags: [SaaS Governance]
+      operationId: upsertStoreKYB
+      summary: Update store legal entity, masked NIB/NPWP, PSE number, and selected plan (owner)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: Updated KYB profile
+
+  /api/v1/store/payment-credentials:
+    get:
+      tags: [SaaS Governance]
+      operationId: getStorePaymentCredentials
+      summary: Get masked BYOK Midtrans configuration for the store (owner)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: Masked BYOK Midtrans credential metadata (ciphertext never returned)
+    put:
+      tags: [SaaS Governance]
+      operationId: upsertStorePaymentCredentials
+      summary: Seal BYOK Midtrans Server Key with AES-256-GCM bound to store_id AAD (owner)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: Stored and validated BYOK credential metadata
+
+  /api/v1/store/cms:
+    get:
+      tags: [SaaS Governance]
+      operationId: getStoreCMS
+      summary: Get storefront CMS, brand hex colors, WCAG high-contrast flag, and i18n copy (owner)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: Store CMS configuration
+    put:
+      tags: [SaaS Governance]
+      operationId: upsertStoreCMS
+      summary: Update storefront CMS, brand colors, custom domain, and bilingual copy (owner)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: Updated Store CMS configuration
+
+  /api/v1/store/notifications:
+    get:
+      tags: [SaaS Governance]
+      operationId: getStoreNotifications
+      summary: Get masked BYO-SMTP and WhatsApp notification configuration (owner)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: Store notification configuration
+    put:
+      tags: [SaaS Governance]
+      operationId: upsertStoreNotifications
+      summary: Seal custom SMTP password and WhatsApp API token with AES-256-GCM (owner)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: Updated notification configuration
+
+  /api/v1/store/network/nodes:
+    get:
+      tags: [SaaS Governance]
+      operationId: listStoreNetworkNodes
+      summary: List self-maintained local LAN/hardware devices (ESC/POS, drawer, KDS, Queue TV, IoT)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: Registered store hardware/network nodes
+    put:
+      tags: [SaaS Governance]
+      operationId: upsertStoreNetworkNode
+      summary: Register or update a local IP/port/protocol hardware node (owner)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: Upserted network node
+
+  /api/v1/store/network/simulate:
+    post:
+      tags: [SaaS Governance]
+      operationId: simulateStoreNetwork
+      summary: Run live DB probe and fault-injection topology simulation (healthy, wan_offline, printer_paper_out, lan_ip_conflict, midtrans_review)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: Topology simulation diagnostic report
+
+  /api/v1/store/subscription/invoices:
+    get:
+      tags: [SaaS Governance]
+      operationId: listStoreSubscriptionInvoices
+      summary: List Lane 1 SaaS subscription invoices for the store (owner)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: Store SaaS invoices
+    post:
+      tags: [SaaS Governance]
+      operationId: createStoreSubscriptionInvoice
+      summary: Create a Lane 1 AzureDevID SaaS subscription invoice (monthly/annual)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "201":
+          description: Created platform subscription invoice
+
+  /api/v1/store/clearance:
+    post:
+      tags: [SaaS Governance]
+      operationId: requestAccountClearance
+      summary: Request tax-safe account clearance (blocks if open shift or active orders exist; 7-day cooling-off, 10-year UU KUP ledger retention)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "201":
+          description: Clearance request initiated
+        "409":
+          description: Open shift, active order, or existing clearance in progress
+
+  /api/v1/store/clearance/{id}/cancel:
+    post:
+      tags: [SaaS Governance]
+      operationId: cancelAccountClearance
+      summary: Cancel a cooling-off account clearance request (owner)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - $ref: "#/components/parameters/ResourceID"
+      responses:
+        "200":
+          description: Clearance cancelled
+
+  /api/v1/platform/overview:
+    get:
+      tags: [Platform Superadmin]
+      operationId: getPlatformOverview
+      summary: AzureDevID Superadmin multi-tenant overview & registry
+      x-implementation-status: implemented
+      security:
+        - PlatformAdminKey: []
+      responses:
+        "200":
+          description: Tenant summary counts and registry
+        "401":
+          description: Invalid X-Platform-Admin-Key
+        "503":
+          description: PLATFORM_ADMIN_UNCONFIGURED
+
+  /api/v1/platform/onboarding:
+    get:
+      tags: [Platform Superadmin]
+      operationId: listPlatformOnboarding
+      summary: List tenant onboarding applications
+      x-implementation-status: implemented
+      security:
+        - PlatformAdminKey: []
+      responses:
+        "200":
+          description: Onboarding applications
+
+  /api/v1/platform/onboarding/{id}/review:
+    post:
+      tags: [Platform Superadmin]
+      operationId: reviewPlatformOnboarding
+      summary: Review and transition an onboarding application (under_review, approved, rejected)
+      x-implementation-status: implemented
+      security:
+        - PlatformAdminKey: []
+      parameters:
+        - $ref: "#/components/parameters/ResourceID"
+      responses:
+        "200":
+          description: Updated onboarding application
+
+  /api/v1/platform/tenants/{store_id}/kyb-review:
+    post:
+      tags: [Platform Superadmin]
+      operationId: reviewTenantKYB
+      summary: Verify or update a tenant's KYB and subscription status
+      x-implementation-status: implemented
+      security:
+        - PlatformAdminKey: []
+      parameters:
+        - name: store_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Updated KYB profile
+
+  /api/v1/platform/tenants/{store_id}/clearance/{id}/execute:
+    post:
+      tags: [Platform Superadmin]
+      operationId: executeTenantClearance
+      summary: Execute tenant account clearance (wipes BYOK & notification secrets, retains 10-year financial ledger)
+      x-implementation-status: implemented
+      security:
+        - PlatformAdminKey: []
+      parameters:
+        - name: store_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/ResourceID"
+      responses:
+        "200":
+          description: Executed clearance record
+
+  /api/v1/platform/midtrans-readiness:
+    get:
+      tags: [Platform Superadmin]
+      operationId: getMidtransBusinessReviewReadiness
+      summary: Audit Midtrans Production Business Review readiness & Core API edge-case playbook
+      x-implementation-status: implemented
+      security:
+        - PlatformAdminKey: []
+      responses:
+        "200":
+          description: Readiness score, checks, and edge-case mitigations
+
 components:
   securitySchemes:
+    PlatformAdminKey:
+      type: apiKey
+      in: header
+      name: X-Platform-Admin-Key
+      description: Constant-time SHA-256 verified Superadmin key for AzureDevID platform endpoints; fails closed (503) if unset.
     DeviceCredential:
       type: apiKey
       in: header

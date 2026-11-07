@@ -1,6 +1,6 @@
 # ADR-009: Multi-Tenant SaaS Governance, Dual-Lane BYOK Midtrans, Unified Client Monorepo & Hardware Topology
 
-- **Status**: Accepted & Implemented (Backend Migration `000051`, Client Foundation `myCaffe-client`)
+- **Status**: Accepted & Implemented (Backend Migration `000051`, Client Foundation `MyCaffeClient`)
 - **Date**: 2026-11-07
 - **Deciders**: Abdul Aziz (Director / Product Owner, AzureDevID)
 
@@ -34,14 +34,14 @@ Menjelang peluncuran komersial produk **MyCaffe QR Code Table Order & Cloud POS*
 
 ### 2.4 Self-Maintain Hardware Nodes & Visual Network Simulator
 - Tabel `store_network_nodes` menyimpan inventaris perangkat lokal gerai (`escpos_printer`, `cash_drawer`, `pos_terminal`, `kds_screen`, `queue_tv`, `barcode_scanner`, `iot_buzzer`, `router_gateway`, `local_edge_server`) lengkap dengan IP lokal, port (`9100`), alamat MAC, lebar kertas (`58`/`80` mm), dan status pemicu laci kasir RJ11 (`drawer_kick_enabled`).
-- Endpoint `POST /api/v1/store/network/simulate` melakukan pengukuran latensi database riil dan menyimulasikan lima skenario operasional (`healthy`, `wan_offline`, `printer_paper_out`, `lan_ip_conflict`, `midtrans_review`) yang terhubung langsung dengan simulator visual interaktif di `myCaffe-client/apps/web/network-topology-simulator.html`.
+- Endpoint `POST /api/v1/store/network/simulate` melakukan pengukuran latensi database riil dan menyimulasikan lima skenario operasional (`healthy`, `wan_offline`, `printer_paper_out`, `lan_ip_conflict`, `midtrans_review`) yang terhubung langsung dengan simulator visual interaktif di `MyCaffeClient/apps/web/network-topology-simulator.html`.
 
-### 2.5 Topologi Repositori Klien & Kompilasi iOS Objective-C dari Windows 11
-- Sesuai aturan batas repositori `AGENTS.md`, seluruh kode antarmuka pengguna ditempatkan pada monorepo terpisah **`C:\Projects\myCaffe-client`** dengan pembagian ruang kerja:
+### 2.5 Topologi Repositori Klien & Strategi Multiplatform
+- Sesuai aturan batas repositori `AGENTS.md`, seluruh kode antarmuka pengguna ditempatkan pada monorepo terpisah **`C:\Projects\MyCaffeClient`** dengan pembagian ruang kerja:
   - `packages/design-tokens`: Token warna, tipografi, kontras WCAG 2.2 AA terverifikasi otomatis, dan kamus lokalisasi `id-ID` / `en-US` bebas *em-dash*.
   - `apps/web`: Aplikasi Web PWA (QR Table Order tamu, KDS, Antrean TV, Backoffice Owner, Simulator Topologi Jaringan).
   - `apps/android`: Aplikasi kasir native **Kotlin + Coroutines + Jetpack Compose** dengan jembatan cetak termal `EscPosHardwareBridge.kt` (`TCP:9100` + kick laci `ESC p`).
-  - `apps/ios`: Modul native iOS dengan jembatan perangkat keras Objective-C (`MyCaffeHardwareBridge.h/.m`). Pada laptop Windows 11, validasi kompilasi dan sintaks Objective-C dijalankan secara lokal menggunakan **`zig cc -x objective-c -Wall -Wextra -Werror`**, sementara pembuatan bundel `.ipa` dan penandatanganan kode Apple dieksekusi pada runner GitHub Actions **`macos-15` (Xcode 16.2)** yang di-pin dengan SHA komit.
+  - `apps/ios`: Modul native iOS owner/staff yang direncanakan menggunakan **SwiftUI** modern (Keputusan D2). Jembatan Objective-C warisan (`MyCaffeHardwareBridge.h/.m`) diarsipkan dan tidak lagi dijadikan target utama kompilasi. Pembuatan bundel resmi `.ipa` dan penandatanganan kode Apple akan dieksekusi pada runner GitHub Actions **`macos-15` (Xcode 16.2)** yang di-pin dengan SHA komit setelah akun Apple Developer resmi tersedia.
 
 ### 2.6 Strategi Isolasi Git terhadap Agen Paralel
 - Seluruh perubahan backend dibangun di *git worktree* terpisah (`C:\Projects\mycaffe-wt-platform`, cabang `feat/platform-saas-governance`) menggunakan nomor migrasi `20261107000051_platform_saas_governance` dan tabel audit tata kelola tersendiri (`governance_audit_logs`) sehingga tidak menyentuh `chk_audit_logs_action` maupun kelima file layanan kasir yang sedang dimodifikasi oleh agen paralel pada `000050_stamp_card`.

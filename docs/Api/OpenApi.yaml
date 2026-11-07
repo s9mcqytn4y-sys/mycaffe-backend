@@ -6092,13 +6092,47 @@ paths:
       security: []
       tags: [SaaS Governance]
       operationId: submitOnboardingApplication
-      summary: Submit an idempotent self-service tenant onboarding application with legal consent hashes
+      summary: Submit an idempotent self-service tenant onboarding application and dispatch a 6-digit Email OTP
       x-implementation-status: implemented
       responses:
         "201":
-          description: Application recorded (NIB/NPWP masked)
+          description: Application recorded in pending_email_otp status (NIB/NPWP masked)
         "200":
           description: Idempotent replay
+
+  /api/v1/public/onboarding/{id}/verify-otp:
+    post:
+      security: []
+      tags: [SaaS Governance]
+      operationId: verifyOnboardingEmailOTP
+      summary: Verify the 6-digit Email OTP for an onboarding application (constant-time SHA-256, max 5 attempts)
+      x-implementation-status: implemented
+      parameters:
+        - $ref: "#/components/parameters/ResourceID"
+      responses:
+        "200":
+          description: Email verified and application moved to submitted status
+        "422":
+          description: Invalid or expired OTP code
+        "429":
+          description: Maximum OTP verification attempts exceeded
+
+  /api/v1/public/onboarding/{id}/resend-otp:
+    post:
+      security: []
+      tags: [SaaS Governance]
+      operationId: resendOnboardingEmailOTP
+      summary: Issue and send a fresh 6-digit Email OTP after a 60-second cooldown
+      x-implementation-status: implemented
+      parameters:
+        - $ref: "#/components/parameters/ResourceID"
+      responses:
+        "200":
+          description: Fresh OTP dispatched
+        "409":
+          description: Email already verified
+        "429":
+          description: Cooldown active (60 seconds)
 
   /api/v1/public/stores/{slug}/cms:
     get:
@@ -6267,6 +6301,42 @@ paths:
         "200":
           description: Topology simulation diagnostic report
 
+  /api/v1/store/network/mikrotik:
+    get:
+      tags: [SaaS Governance]
+      operationId: getStoreMikrotikProfile
+      summary: Get tenant MikroTik RouterOS v7 VLAN, Dual-WAN, QoS, Winbox, and SFTP profile (owner)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: Store MikroTik RouterOS v7 profile
+    put:
+      tags: [SaaS Governance]
+      operationId: upsertStoreMikrotikProfile
+      summary: Save validated non-overlapping VLAN CIDRs, Winbox subnet lock, and SFTP-only port (blocks plain FTP port 21)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: Saved MikroTik RouterOS v7 profile
+        "422":
+          description: Overlapping VLAN subnet or forbidden plain FTP port 21
+
+  /api/v1/store/network/mikrotik/generate-rsc:
+    post:
+      tags: [SaaS Governance]
+      operationId: generateStoreMikrotikRsc
+      summary: Generate downloadable MikroTik RouterOS v7 (.rsc) automation script, Winbox Safe Mode steps, and FileZilla SFTP policy
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: Generated .rsc script bundle with SHA-256 digest and Winbox guide
+
   /api/v1/store/subscription/invoices:
     get:
       tags: [SaaS Governance]
@@ -6358,6 +6428,26 @@ paths:
       responses:
         "200":
           description: Updated onboarding application
+
+  /api/v1/platform/onboarding/{id}/provision:
+    post:
+      tags: [Platform Superadmin]
+      operationId: provisionPlatformOnboarding
+      summary: Provision an unverified tenant store, owner account, cash drawer, and QR tables from an OTP-verified onboarding application
+      x-implementation-status: implemented
+      security:
+        - PlatformAdminKey: []
+      parameters:
+        - $ref: "#/components/parameters/ResourceID"
+      responses:
+        "201":
+          description: New tenant store provisioned (kyb_status=unverified)
+        "200":
+          description: Idempotent replay returning existing provisioned store
+        "409":
+          description: Store slug conflict
+        "422":
+          description: Email OTP unverified or weak initial owner PIN
 
   /api/v1/platform/tenants/{store_id}/kyb-review:
     post:

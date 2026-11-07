@@ -63,6 +63,16 @@ func writeGovernanceError(c *gin.Context, err error) {
 		authError(c, http.StatusServiceUnavailable, "BYOK_ENCRYPTION_UNAVAILABLE", "Brankas enkripsi kredensial belum diaktifkan pada server ini.")
 	case errors.Is(err, service.ErrBYOKLiveAuthFailed):
 		authError(c, http.StatusUnprocessableEntity, "BYOK_MIDTRANS_AUTH_FAILED", "Server Key ditolak oleh Midtrans Core API (401 Unauthorized). Periksa kembali kunci Anda.")
+	case errors.Is(err, service.ErrOnboardingOTPExpired):
+		authError(c, http.StatusUnprocessableEntity, "OTP_EXPIRED", err.Error())
+	case errors.Is(err, service.ErrOnboardingOTPInvalid):
+		authError(c, http.StatusUnprocessableEntity, "OTP_INVALID", err.Error())
+	case errors.Is(err, service.ErrOnboardingOTPLocked):
+		authError(c, http.StatusTooManyRequests, "OTP_ATTEMPTS_EXCEEDED", err.Error())
+	case errors.Is(err, service.ErrOnboardingOTPCooldown):
+		authError(c, http.StatusTooManyRequests, "OTP_RESEND_COOLDOWN", err.Error())
+	case errors.Is(err, service.ErrOnboardingOTPUnverified):
+		authError(c, http.StatusUnprocessableEntity, "EMAIL_OTP_UNVERIFIED", err.Error())
 	default:
 		writeServiceError(c, err)
 	}
@@ -98,7 +108,7 @@ func (h *GovernanceHandler) SubmitOnboardingApplication(c *gin.Context) {
 	if !bindJSON(c, &in) {
 		return
 	}
-	app, replay, err := h.governance.SubmitOnboardingApplication(c.Request.Context(), in)
+	app, replay, devOTP, err := h.governance.SubmitOnboardingApplication(c.Request.Context(), in)
 	if err != nil {
 		writeGovernanceError(c, err)
 		return
@@ -108,7 +118,51 @@ func (h *GovernanceHandler) SubmitOnboardingApplication(c *gin.Context) {
 		status = http.StatusOK
 	}
 	c.Header("Cache-Control", "no-store")
-	c.JSON(status, gin.H{"application": app, "is_idempotent_replay": replay})
+	resp := gin.H{"application": app, "is_idempotent_replay": replay}
+	if devOTP != "" {
+		resp["dev_otp_preview"] = devOTP
+	}
+	c.JSON(status, resp)
+}
+
+// VerifyOnboardingOTP handles POST /api/v1/public/onboarding/:id/verify-otp
+func (h *GovernanceHandler) VerifyOnboardingOTP(c *gin.Context) {
+	id, ok := pathID(c, "id")
+	if !ok {
+		return
+	}
+	var body struct {
+		OTPCode string `json:"otp_code"`
+	}
+	if !bindJSON(c, &body) {
+		return
+	}
+	app, err := h.governance.VerifyOnboardingEmailOTP(c.Request.Context(), id, body.OTPCode)
+	if err != nil {
+		writeGovernanceError(c, err)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, gin.H{"application": app})
+}
+
+// ResendOnboardingOTP handles POST /api/v1/public/onboarding/:id/resend-otp
+func (h *GovernanceHandler) ResendOnboardingOTP(c *gin.Context) {
+	id, ok := pathID(c, "id")
+	if !ok {
+		return
+	}
+	expAt, devOTP, err := h.governance.ResendOnboardingEmailOTP(c.Request.Context(), id)
+	if err != nil {
+		writeGovernanceError(c, err)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	resp := gin.H{"otp_expires_at": expAt}
+	if devOTP != "" {
+		resp["dev_otp_preview"] = devOTP
+	}
+	c.JSON(http.StatusOK, resp)
 }
 
 // GetPublicStoreCMS handles GET /api/v1/public/stores/:slug/cms
@@ -291,6 +345,43 @@ func (h *GovernanceHandler) RunNetworkSimulation(c *gin.Context) {
 	c.JSON(http.StatusOK, report)
 }
 
+// GetStoreMikrotikProfile handles GET /api/v1/store/network/mikrotik
+func (h *GovernanceHandler) GetStoreMikrotikProfile(c *gin.Context) {
+	out, err := h.governance.GetStoreMikrotikProfile(c.Request.Context(), currentStaff(c))
+	if err != nil {
+		writeGovernanceError(c, err)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, out)
+}
+
+// UpsertStoreMikrotikProfile handles PUT /api/v1/store/network/mikrotik
+func (h *GovernanceHandler) UpsertStoreMikrotikProfile(c *gin.Context) {
+	var in service.MikrotikProfileInput
+	if !bindJSON(c, &in) {
+		return
+	}
+	out, err := h.governance.UpsertStoreMikrotikProfile(c.Request.Context(), currentStaff(c), in)
+	if err != nil {
+		writeGovernanceError(c, err)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, out)
+}
+
+// GenerateStoreMikrotikRsc handles POST /api/v1/store/network/mikrotik/generate-rsc
+func (h *GovernanceHandler) GenerateStoreMikrotikRsc(c *gin.Context) {
+	bundle, err := h.governance.GenerateStoreMikrotikRsc(c.Request.Context(), currentStaff(c))
+	if err != nil {
+		writeGovernanceError(c, err)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, bundle)
+}
+
 // ListStoreSubscriptionInvoices handles GET /api/v1/store/subscription/invoices
 func (h *GovernanceHandler) ListStoreSubscriptionInvoices(c *gin.Context) {
 	rows, err := h.governance.ListStorePlatformInvoices(c.Request.Context(), currentStaff(c))
@@ -391,6 +482,29 @@ func (h *GovernanceHandler) ReviewOnboardingApplication(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, out)
+}
+
+// ProvisionOnboardingApplication handles POST /api/v1/platform/onboarding/:id/provision
+func (h *GovernanceHandler) ProvisionOnboardingApplication(c *gin.Context) {
+	id, ok := pathID(c, "id")
+	if !ok {
+		return
+	}
+	var in service.ProvisionOnboardingInput
+	if !bindJSON(c, &in) {
+		return
+	}
+	out, err := h.governance.ProvisionStoreFromOnboarding(c.Request.Context(), id, in)
+	if err != nil {
+		writeGovernanceError(c, err)
+		return
+	}
+	status := http.StatusCreated
+	if out.AlreadyExisted {
+		status = http.StatusOK
+	}
+	c.Header("Cache-Control", "no-store")
+	c.JSON(status, out)
 }
 
 // ReviewStoreKYB handles POST /api/v1/platform/tenants/:store_id/kyb-review

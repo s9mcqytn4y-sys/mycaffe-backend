@@ -15,6 +15,7 @@ import (
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/config"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/domain"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/database"
+	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/mailer"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/midtrans"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/rbac"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/secretbox"
@@ -25,6 +26,11 @@ var (
 	ErrGovernanceNotFound        = errors.New("governance resource not found")
 	ErrBYOKEncryptionUnavailable = errors.New("BYOK credential encryption key is not configured")
 	ErrBYOKLiveAuthFailed        = errors.New("Midtrans Core API rejected the supplied Server Key (401 Unauthorized)")
+	ErrOnboardingOTPExpired      = errors.New("kode OTP email sudah kedaluwarsa; silakan kirim ulang OTP")
+	ErrOnboardingOTPInvalid      = errors.New("kode OTP email tidak sesuai")
+	ErrOnboardingOTPLocked       = errors.New("batas percobaan OTP terlampaui; silakan kirim ulang OTP baru")
+	ErrOnboardingOTPCooldown     = errors.New("tunggu 60 detik sebelum meminta kode OTP baru")
+	ErrOnboardingOTPUnverified   = errors.New("email pendaftar wajib diverifikasi melalui OTP sebelum gerai dapat diaktifkan")
 )
 
 var (
@@ -49,12 +55,23 @@ func WithPlatformGatewayClient(client GatewayClient) GovernanceOption {
 	}
 }
 
+func WithGovernanceMailer(sender mailer.Sender, appPublicURL string) GovernanceOption {
+	return func(s *GovernanceService) {
+		s.mailSender = sender
+		if strings.TrimSpace(appPublicURL) != "" {
+			s.appPublicURL = strings.TrimRight(strings.TrimSpace(appPublicURL), "/")
+		}
+	}
+}
+
 type GovernanceService struct {
 	db               *sqlx.DB
 	authRepo         *postgres.AuthRepository
 	box              *secretbox.Box
 	platformGateway  GatewayClient
 	gatewayBuilder   func(serverKey string, isProduction bool) GatewayClient
+	mailSender       mailer.Sender
+	appPublicURL     string
 	appEnv           string
 	platformEnv      string
 	defaultStoreProd bool
@@ -65,6 +82,7 @@ func NewGovernanceService(db *sqlx.DB, cfg *config.Config, opts ...GovernanceOpt
 	appEnv := "development"
 	rawEncKey := ""
 	platformEnv := "sandbox"
+	appPublicURL := ""
 	var defaultStoreProd bool
 	var platformGW GatewayClient
 
@@ -74,11 +92,16 @@ func NewGovernanceService(db *sqlx.DB, cfg *config.Config, opts ...GovernanceOpt
 		}
 		rawEncKey = cfg.CredentialEncryptionKey
 		defaultStoreProd = cfg.MidtransIsProduction
+		appPublicURL = strings.TrimRight(strings.TrimSpace(cfg.AppPublicURL), "/")
 		if cfg.PlatformMidtransIsProduction {
 			platformEnv = "production"
 		}
 		if strings.TrimSpace(cfg.PlatformMidtransServerKey) != "" {
-			platformGW = midtrans.NewClientWithKey(cfg.PlatformMidtransServerKey, cfg.PlatformMidtransIsProduction)
+			mc := midtrans.NewClientWithKey(cfg.PlatformMidtransServerKey, cfg.PlatformMidtransIsProduction)
+			if strings.HasPrefix(strings.ToLower(appPublicURL), "https://") {
+				mc = mc.WithDefaultNotificationURL(appPublicURL + "/api/v1/payments/midtrans/webhook")
+			}
+			platformGW = mc
 		}
 	}
 
@@ -92,6 +115,7 @@ func NewGovernanceService(db *sqlx.DB, cfg *config.Config, opts ...GovernanceOpt
 		gatewayBuilder: func(serverKey string, isProduction bool) GatewayClient {
 			return midtrans.NewClientWithKey(serverKey, isProduction)
 		},
+		appPublicURL:     appPublicURL,
 		appEnv:           appEnv,
 		platformEnv:      platformEnv,
 		defaultStoreProd: defaultStoreProd,
@@ -203,7 +227,7 @@ type OnboardingApplicationInput struct {
 	AcceptedPDPSHA256  string `json:"accepted_pdp_sha256"`
 }
 
-func (s *GovernanceService) SubmitOnboardingApplication(ctx context.Context, in OnboardingApplicationInput) (*domain.TenantOnboardingApplication, bool, error) {
+func (s *GovernanceService) SubmitOnboardingApplication(ctx context.Context, in OnboardingApplicationInput) (*domain.TenantOnboardingApplication, bool, string, error) {
 	f := fieldErrors{}
 	idem := f.text("idempotency_key", in.IdempotencyKey, 8, 100)
 	slug := strings.ToLower(strings.TrimSpace(in.RequestedSlug))
@@ -252,7 +276,7 @@ func (s *GovernanceService) SubmitOnboardingApplication(ctx context.Context, in 
 		f.add("accepted_pdp_sha256", "wajib berupa hash SHA-256 64 karakter heksadesimal dari Kebijakan Privasi UU PDP")
 	}
 	if err := f.err(); err != nil {
-		return nil, false, err
+		return nil, false, "", err
 	}
 
 	var existing domain.TenantOnboardingApplication
@@ -260,30 +284,37 @@ func (s *GovernanceService) SubmitOnboardingApplication(ctx context.Context, in 
 		SELECT id, idempotency_key, requested_slug, business_name, business_entity_type,
 		       owner_name, owner_email, owner_phone, city_region, selected_plan_code, billing_cycle,
 		       nib_masked, npwp_masked, accepted_tos_sha256, accepted_pdp_sha256,
-		       status, provisioned_store_id, review_notes, reviewed_at, created_at, updated_at
+		       status, email_otp_expires_at, email_otp_sent_at, email_otp_attempts, email_verified_at,
+		       provisioned_store_id, review_notes, reviewed_at, created_at, updated_at
 		FROM tenant_onboarding_applications
 		WHERE idempotency_key = $1
 	`, idem)
 	if err == nil {
 		if existing.RequestedSlug != slug || !strings.EqualFold(existing.OwnerEmail, ownerEmail) {
-			return nil, false, &ConflictError{Field: "idempotency_key", Message: "idempotency_key sudah digunakan untuk pengajuan lain"}
+			return nil, false, "", &ConflictError{Field: "idempotency_key", Message: "idempotency_key sudah digunakan untuk pengajuan lain"}
 		}
-		return &existing, true, nil
+		return &existing, true, "", nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
-		return nil, false, fmt.Errorf("failed to check onboarding idempotency: %w", err)
+		return nil, false, "", fmt.Errorf("failed to check onboarding idempotency: %w", err)
 	}
 
 	var planExists bool
 	if err := s.db.GetContext(ctx, &planExists, `SELECT EXISTS (SELECT 1 FROM subscription_plans WHERE code = $1 AND is_active = true)`, planCode); err != nil {
-		return nil, false, err
+		return nil, false, "", err
 	}
 	if !planExists {
 		f.add("selected_plan_code", "paket langganan tidak ditemukan atau tidak aktif")
-		return nil, false, f.err()
+		return nil, false, "", f.err()
 	}
 
+	otpPlain, err := generateSixDigitOTP()
+	if err != nil {
+		return nil, false, "", err
+	}
+	otpHash := hashOTPCode(otpPlain)
 	now := s.nowFunc().UTC()
+	otpExp := now.Add(onboardingOTPTTL)
 	app := &domain.TenantOnboardingApplication{
 		ID:                 uuid.New(),
 		IdempotencyKey:     idem,
@@ -300,7 +331,10 @@ func (s *GovernanceService) SubmitOnboardingApplication(ctx context.Context, in 
 		NPWPMasked:         secretbox.MaskSecret(in.NPWP),
 		AcceptedTOSSHA256:  tosHash,
 		AcceptedPDPSHA256:  pdpHash,
-		Status:             domain.OnboardingSubmitted,
+		Status:             domain.OnboardingPendingEmailOTP,
+		EmailOTPExpiresAt:  &otpExp,
+		EmailOTPSentAt:     &now,
+		EmailOTPAttempts:   0,
 		CreatedAt:          now,
 		UpdatedAt:          now,
 	}
@@ -310,21 +344,30 @@ func (s *GovernanceService) SubmitOnboardingApplication(ctx context.Context, in 
 			id, idempotency_key, requested_slug, business_name, business_entity_type,
 			owner_name, owner_email, owner_phone, city_region, selected_plan_code, billing_cycle,
 			nib_masked, npwp_masked, accepted_tos_sha256, accepted_pdp_sha256,
-			status, created_at, updated_at
+			status, email_otp_hash, email_otp_expires_at, email_otp_sent_at, email_otp_attempts,
+			created_at, updated_at
 		) VALUES (
 			$1, $2, $3, $4, $5,
 			$6, $7, $8, $9, $10, $11,
 			$12, $13, $14, $15,
-			$16, $17, $17
+			$16, $17, $18, $19, 0,
+			$19, $19
 		)
 	`, app.ID, app.IdempotencyKey, app.RequestedSlug, app.BusinessName, app.BusinessEntityType,
 		app.OwnerName, app.OwnerEmail, app.OwnerPhone, app.CityRegion, app.SelectedPlanCode, app.BillingCycle,
 		app.NIBMasked, app.NPWPMasked, app.AcceptedTOSSHA256, app.AcceptedPDPSHA256,
-		app.Status, now)
+		app.Status, otpHash, otpExp, now)
 	if err != nil {
-		return nil, false, fmt.Errorf("failed to create onboarding application: %w", err)
+		return nil, false, "", fmt.Errorf("failed to create onboarding application: %w", err)
 	}
-	return app, false, nil
+
+	s.sendOnboardingOTPEmail(ctx, app, otpPlain)
+
+	devPreview := ""
+	if s.appEnv == "development" || s.appEnv == "test" {
+		devPreview = otpPlain
+	}
+	return app, false, devPreview, nil
 }
 
 func defaultStoreCMS(storeID uuid.UUID, now time.Time) *domain.StoreCMSConfig {
@@ -699,6 +742,29 @@ func (s *GovernanceService) UpsertStorePaymentCredential(ctx context.Context, ac
 		return nil, err
 	}
 
+	storeID := actor.Staff.Store.ID
+	userID := actor.Staff.UserID
+
+	// Strict KYB gate for Production Midtrans BYOK: unverified/trialing tenants may configure
+	// Midtrans Sandbox keys freely for testing, while Production BYOK requires kyb_status = 'verified'.
+	if env == "production" {
+		var kybStatus string
+		if kybErr := database.WithTenantTx(ctx, s.db, storeID, func(tx *sqlx.Tx) error {
+			qErr := tx.GetContext(ctx, &kybStatus, `SELECT kyb_status FROM store_kyb_profiles WHERE store_id = $1`, storeID)
+			if errors.Is(qErr, sql.ErrNoRows) {
+				kybStatus = string(domain.KYBUnverified)
+				return nil
+			}
+			return qErr
+		}); kybErr != nil {
+			return nil, kybErr
+		}
+		if kybStatus != string(domain.KYBVerified) {
+			f.add("environment", "kredensial Midtrans Production hanya dapat disimpan setelah verifikasi legalitas bisnis (KYB) disetujui; gunakan Sandbox untuk uji coba")
+			return nil, f.err()
+		}
+	}
+
 	// Optional live Core API probe outside database transaction locks (2-phase discipline).
 	validationStatus := "valid"
 	if in.VerifyLive {
@@ -719,8 +785,6 @@ func (s *GovernanceService) UpsertStorePaymentCredential(ctx context.Context, ac
 		}
 	}
 
-	storeID := actor.Staff.Store.ID
-	userID := actor.Staff.UserID
 	ciphertext, err := s.box.Seal(serverKey, midtransServerKeyAAD(storeID))
 	if err != nil {
 		return nil, err
@@ -804,13 +868,15 @@ func (s *GovernanceService) ResolveStoreGatewayClientTx(ctx context.Context, tx 
 		return nil, nil
 	}
 	var row struct {
+		Slug                string `db:"slug"`
 		Environment         string `db:"environment"`
 		ServerKeyCiphertext []byte `db:"server_key_ciphertext"`
 	}
 	err := tx.GetContext(ctx, &row, `
-		SELECT environment, server_key_ciphertext
-		FROM store_payment_credentials
-		WHERE store_id = $1 AND is_enabled = true AND validation_status = 'valid'
+		SELECT s.slug, spc.environment, spc.server_key_ciphertext
+		FROM store_payment_credentials spc
+		JOIN stores s ON s.id = spc.store_id
+		WHERE spc.store_id = $1 AND spc.is_enabled = true AND spc.validation_status = 'valid'
 	`, storeID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -822,7 +888,11 @@ func (s *GovernanceService) ResolveStoreGatewayClientTx(ctx context.Context, tx 
 	if err != nil {
 		return nil, fmt.Errorf("failed to decrypt store BYOK Midtrans credential: %w", err)
 	}
-	return s.gatewayBuilder(plainKey, row.Environment == "production"), nil
+	gw := s.gatewayBuilder(plainKey, row.Environment == "production")
+	if mc, ok := gw.(*midtrans.Client); ok && strings.HasPrefix(strings.ToLower(s.appPublicURL), "https://") && row.Slug != "" {
+		gw = mc.WithDefaultNotificationURL(s.appPublicURL + "/api/v1/payments/midtrans/webhook/" + row.Slug)
+	}
+	return gw, nil
 }
 
 // VerifyTenantWebhookSignature resolves the store by slug via resolve_store_for_login, decrypts
@@ -1796,7 +1866,8 @@ func (s *GovernanceService) GetPlatformOverview(ctx context.Context) (*domain.Pl
 			out.PendingKYBReviews++
 		}
 	}
-	_ = s.db.GetContext(ctx, &out.PendingOnboarding, `SELECT COUNT(*) FROM tenant_onboarding_applications WHERE status IN ('submitted', 'under_review')`)
+	_ = s.db.GetContext(ctx, &out.PendingOnboarding, `SELECT COUNT(*) FROM tenant_onboarding_applications WHERE status IN ('pending_email_otp', 'submitted', 'under_review')`)
+	_ = s.db.GetContext(ctx, &out.ActiveClearanceCount, `SELECT COUNT(*) FROM tenant_clearance_requests WHERE status = 'cooling_off'`)
 	return out, nil
 }
 
@@ -1809,7 +1880,8 @@ func (s *GovernanceService) ListOnboardingApplications(ctx context.Context, stat
 			SELECT id, idempotency_key, requested_slug, business_name, business_entity_type,
 			       owner_name, owner_email, owner_phone, city_region, selected_plan_code, billing_cycle,
 			       nib_masked, npwp_masked, accepted_tos_sha256, accepted_pdp_sha256,
-			       status, provisioned_store_id, review_notes, reviewed_at, created_at, updated_at
+			       status, email_otp_expires_at, email_otp_sent_at, email_otp_attempts, email_verified_at,
+			       provisioned_store_id, review_notes, reviewed_at, created_at, updated_at
 			FROM tenant_onboarding_applications
 			ORDER BY created_at DESC
 		`)
@@ -1818,7 +1890,8 @@ func (s *GovernanceService) ListOnboardingApplications(ctx context.Context, stat
 			SELECT id, idempotency_key, requested_slug, business_name, business_entity_type,
 			       owner_name, owner_email, owner_phone, city_region, selected_plan_code, billing_cycle,
 			       nib_masked, npwp_masked, accepted_tos_sha256, accepted_pdp_sha256,
-			       status, provisioned_store_id, review_notes, reviewed_at, created_at, updated_at
+			       status, email_otp_expires_at, email_otp_sent_at, email_otp_attempts, email_verified_at,
+			       provisioned_store_id, review_notes, reviewed_at, created_at, updated_at
 			FROM tenant_onboarding_applications
 			WHERE status = $1
 			ORDER BY created_at DESC
@@ -1851,7 +1924,8 @@ func (s *GovernanceService) ReviewOnboardingApplication(ctx context.Context, app
 		RETURNING id, idempotency_key, requested_slug, business_name, business_entity_type,
 		          owner_name, owner_email, owner_phone, city_region, selected_plan_code, billing_cycle,
 		          nib_masked, npwp_masked, accepted_tos_sha256, accepted_pdp_sha256,
-		          status, provisioned_store_id, review_notes, reviewed_at, created_at, updated_at
+		          status, email_otp_expires_at, email_otp_sent_at, email_otp_attempts, email_verified_at,
+		          provisioned_store_id, review_notes, reviewed_at, created_at, updated_at
 	`, appID, st, strings.TrimSpace(notes), now)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrGovernanceNotFound

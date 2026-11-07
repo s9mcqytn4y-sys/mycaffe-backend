@@ -1,0 +1,9 @@
+{{define "subject"}}Kode OTP Pendaftaran Gerai MyCaffe: {{.OTPCode}}{{end}}
+{{define "preheader"}}Kode verifikasi 6 digit untuk pendaftaran {{.StoreName}} berlaku {{.ExpiresIn}}.{{end}}
+{{define "html_body"}}<h1 style="margin:0 0 16px 0;font-size:22px;line-height:30px;color:#2C1810;">Halo {{.RecipientName}},</h1>
+<p style="margin:0 0 16px 0;">Terima kasih telah mendaftarkan gerai <strong>{{.StoreName}}</strong> (kode gerai: <code>{{.StoreSlug}}</code>) pada platform <strong>MyCaffe by AzureDevID</strong>. Masukkan kode verifikasi 6 digit berikut pada layar pendaftaran:</p>
+<div style="margin:20px 0;padding:18px 24px;background-color:#FAF6F1;border:2px solid #C68B59;border-radius:10px;text-align:center;">
+  <span style="font-family:'Courier New',monospace;font-size:32px;font-weight:700;letter-spacing:8px;color:#2C1A12;">{{.OTPCode}}</span>
+</div>
+<p style="margin:0 0 16px 0;font-size:14px;line-height:22px;">Kode ini berlaku sampai <strong>{{.ExpiresAt}}</strong> ({{.ExpiresIn}}). Demi keamanan akun usaha Anda, jangan bagikan kode OTP ini kepada siapa pun.</p>
+<p style="margin:0;font-size:14px;line-height:22px;color:#6B5B52;">Jika Anda tidak mengajukan pendaftaran gerai ini, abaikan email ini.</p>{{end}}

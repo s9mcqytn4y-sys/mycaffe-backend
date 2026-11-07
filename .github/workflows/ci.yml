@@ -234,8 +234,19 @@ jobs:
           DATABASE_URL: postgres://mycaffe_migrator:mycaffe_migrator_password@localhost:55432/mycaffe_test?sslmode=disable
           PGPASSWORD: mycaffe_migrator_password
         run: |
-          echo "Executing Seed (Run 1)..."
-          go run ./cmd/migrate -action=seed
+          echo "Cleaning verification test fixtures before testing clean seed..."
+          psql -h localhost -p 55432 -U mycaffe_migrator -d mycaffe_test -c "TRUNCATE stores CASCADE;"
+
+          echo "Executing Zero-Tenant Global Reference Seed (development.sql)..."
+          go run ./cmd/migrate -action=seed -seed-file=db/seeds/development.sql
+          ZERO_TENANT_COUNT=$(psql -h localhost -p 55432 -U mycaffe_migrator -d mycaffe_test -t -A -c "SELECT COUNT(*) FROM stores;")
+          if [ "$ZERO_TENANT_COUNT" != "0" ]; then
+            echo "Expected 0 dummy stores in db/seeds/development.sql, got $ZERO_TENANT_COUNT"
+            exit 1
+          fi
+
+          echo "Executing Automated Test Fixtures Seed (Run 1)..."
+          go run ./cmd/migrate -action=seed -seed-file=db/seeds/test_fixtures.sql
 
           echo "Capturing row counts after first seed..."
           STORE_COUNT_BEFORE=$(psql -h localhost -p 55432 -U mycaffe_migrator -d mycaffe_test -t -A -c "SELECT COUNT(*) FROM stores;")
@@ -243,8 +254,8 @@ jobs:
           MOD_GROUP_COUNT_BEFORE=$(psql -h localhost -p 55432 -U mycaffe_migrator -d mycaffe_test -t -A -c "SELECT COUNT(*) FROM modifier_groups;")
           SPLIT_COUNT_BEFORE=$(psql -h localhost -p 55432 -U mycaffe_migrator -d mycaffe_test -t -A -c "SELECT COUNT(*) FROM payment_splits;")
 
-          echo "Executing Seed (Run 2 - Idempotency Verification)..."
-          go run ./cmd/migrate -action=seed
+          echo "Executing Automated Test Fixtures Seed (Run 2 - Idempotency Verification)..."
+          go run ./cmd/migrate -action=seed -seed-file=db/seeds/test_fixtures.sql
 
           echo "Verifying row stability after second seed..."
           STORE_COUNT_AFTER=$(psql -h localhost -p 55432 -U mycaffe_migrator -d mycaffe_test -t -A -c "SELECT COUNT(*) FROM stores;")

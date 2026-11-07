@@ -1,0 +1,9 @@
+Halo {{.RecipientName}},
+
+Terima kasih telah mendaftarkan gerai {{.StoreName}} (kode gerai: {{.StoreSlug}}) pada platform MyCaffe by AzureDevID.
+
+Kode OTP Pendaftaran 6 Digit Anda:
+{{.OTPCode}}
+
+Kode berlaku sampai {{.ExpiresAt}} ({{.ExpiresIn}}). Jangan bagikan kode ini kepada siapa pun.
+Jika Anda tidak mengajukan pendaftaran ini, abaikan pesan ini.

@@ -295,3 +295,41 @@ func marginBPS(profit, revenue int64) int64 {
 	}
 	return roundHalfUpDiv(profit*10_000, revenue)
 }
+
+// ChannelRow is one sales channel's orders; direct orders (counter, table, QR) are the row without a channel.
+type ChannelRow struct {
+	Channel    string `json:"channel" db:"channel"`
+	Orders     int64  `json:"orders" db:"orders"`
+	Gross      int64  `json:"gross" db:"gross"`
+	Refunded   int64  `json:"refunded" db:"refunded"`
+	Commission int64  `json:"commission" db:"commission"`
+	Net        int64  `json:"net" db:"net"`
+}
+
+type ChannelReport struct {
+	From string       `json:"from"`
+	To   string       `json:"to"`
+	Rows []ChannelRow `json:"rows"`
+}
+
+// Channels splits paid orders by sales channel (X14): gross, refunds, the commission estimate fixed at order
+// time, and what is left after both.
+func (s *ReportService) Channels(ctx context.Context, storeID uuid.UUID, from, to string) (*ChannelReport, error) {
+	var report *ChannelReport
+	err := database.WithTenantTx(ctx, s.db, storeID, func(tx *sqlx.Tx) error {
+		rng, err := parseRange(ctx, tx, storeID, from, to)
+		if err != nil {
+			return err
+		}
+		rows := []ChannelRow{}
+		if err := tx.SelectContext(ctx, &rows, `SELECT COALESCE(o.snapshot_channel_name, 'Langsung') AS channel, COUNT(*) AS orders,
+			SUM(o.total_amount) AS gross, SUM(o.refunded_amount) AS refunded, SUM(o.channel_commission_amount) AS commission,
+			SUM(o.total_amount - o.refunded_amount - o.channel_commission_amount) AS net
+			FROM orders o WHERE `+reportOrderFilter+` GROUP BY 1 ORDER BY bool_or(o.sales_channel_id IS NOT NULL), 1`, storeID, rng.start, rng.end); err != nil {
+			return fmt.Errorf("failed to run channel report: %w", err)
+		}
+		report = &ChannelReport{From: rng.From, To: rng.To, Rows: rows}
+		return nil
+	})
+	return report, err
+}

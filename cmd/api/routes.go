@@ -217,6 +217,7 @@ func registerStoreAndPOSRoutes(v1 *gin.RouterGroup, h *handlerSet) {
 	pos := v1.Group("/pos")
 	pos.POST("/orders", h.auth.RequirePermission(rbac.OrderPOSCreate), h.pos.CreateOrder)
 	pos.POST("/orders/quote", h.auth.RequirePermission(rbac.OrderPOSCreate), h.pos.QuoteOrder)
+	pos.GET("/sales-channels", h.auth.RequirePermission(rbac.OrderPOSCreate), h.catalog.ListSalesChannels(true))
 	pos.POST("/orders/:id/payments", h.auth.RequireStaff(), h.pos.InitiatePayment)
 	pos.GET("/catalog", h.auth.RequireStaff(), h.catalog.StaffCatalog)
 
@@ -299,6 +300,7 @@ func registerStoreAndPOSRoutes(v1 *gin.RouterGroup, h *handlerSet) {
 	reports.GET("/sales", h.report.Sales)
 	reports.GET("/summary", h.report.Summary)
 	reports.GET("/gross-profit", h.report.GrossProfit)
+	reports.GET("/channels", h.report.Channels)
 
 	// Media uploads (B3, K9): presigned PUT to R2, then verify + JPEG variants + link to the product.
 	media := v1.Group("/media", handler.LimitBody(4<<10), h.auth.RequirePermission(rbac.CatalogManage))
@@ -395,6 +397,11 @@ func registerKDSAndCatalogRoutes(v1 *gin.RouterGroup, h *handlerSet) {
 	cat.GET("/promotions", manage, h.catalog.ListPromotions)
 	cat.POST("/promotions", manage, h.catalog.CreatePromotion)
 	cat.PATCH("/promotions/:id", manage, h.catalog.UpdatePromotion)
+	// Sales channels (v0.11.1 PR 11.7, X12-X15): delivery-app orders typed in at the POS at channel prices.
+	cat.GET("/sales-channels", manage, h.catalog.ListSalesChannels(false))
+	cat.POST("/sales-channels", manage, h.catalog.CreateSalesChannel)
+	cat.PATCH("/sales-channels/:id", manage, h.catalog.UpdateSalesChannel)
+	cat.PUT("/sales-channels/:id/prices", manage, h.catalog.SetChannelPrices)
 	cat.POST("/modifier-groups", manage, h.catalog.CreateModifierGroup)
 	cat.GET("/modifier-groups", manage, h.catalog.ListModifierGroups)
 	cat.GET("/modifier-groups/:id", manage, h.catalog.GetModifierGroup)

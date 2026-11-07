@@ -941,6 +941,120 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
         "422": {$ref: "#/components/responses/ValidationFailed"}
+  /api/v1/catalog/sales-channels:
+    get:
+      tags: [Catalog]
+      operationId: listSalesChannels
+      summary: All sales channels with their prices (catalog.manage, X12)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: Channels, active first
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sales_channels:
+                    type: array
+                    items: {$ref: "#/components/schemas/SalesChannel"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    post:
+      tags: [Catalog]
+      operationId: createSalesChannel
+      summary: Create a delivery-app sales channel (catalog.manage, audited, X12)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/SalesChannelInput"}
+      responses:
+        "201":
+          description: The channel
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/SalesChannel"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409":
+          description: The name is already used in this store
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "422": {$ref: "#/components/responses/ValidationFailed"}
+  /api/v1/catalog/sales-channels/{id}:
+    patch:
+      tags: [Catalog]
+      operationId: updateSalesChannel
+      summary: Rename, change the commission of, or retire a sales channel (catalog.manage, audited)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/SalesChannelInput"}
+      responses:
+        "200":
+          description: The channel
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/SalesChannel"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409":
+          description: The name is already used in this store
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "422": {$ref: "#/components/responses/ValidationFailed"}
+  /api/v1/catalog/sales-channels/{id}/prices:
+    put:
+      tags: [Catalog]
+      operationId: setChannelPrices
+      summary: Set or remove channel prices per variant (catalog.manage, audited, X13)
+      description: >-
+        Each entry sets the channel price of one variant; a null price removes it so the variant sells at its
+        normal price on the channel. Variants not listed are left as they are. Modifier prices never change per channel.
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [prices]
+              properties:
+                prices:
+                  type: array
+                  minItems: 1
+                  maxItems: 500
+                  items:
+                    type: object
+                    required: [variant_id]
+                    properties:
+                      variant_id: {type: string, format: uuid}
+                      price: {type: [integer, "null"], format: int64, minimum: 0, description: null removes the channel price}
+      responses:
+        "200":
+          description: The channel with its prices
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/SalesChannel"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "422": {$ref: "#/components/responses/ValidationFailed"}
   /api/v1/inventory/stock-items:
     get:
       tags: [Catalog]
@@ -1786,6 +1900,26 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /api/v1/pos/sales-channels:
+    get:
+      tags: [Orders]
+      operationId: listPosSalesChannels
+      summary: Active sales channels with their prices, for the POS channel picker (order.pos.create, X12)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: Active channels
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sales_channels:
+                    type: array
+                    items: {$ref: "#/components/schemas/SalesChannel"}
+        "403": {$ref: "#/components/responses/Forbidden"}
   /api/v1/pos/orders/quote:
     post:
       tags: [Orders]
@@ -4900,6 +5034,55 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ValidationErrorResponse"
+  /api/v1/reports/channels:
+    get:
+      tags: [Reports]
+      operationId: getChannelReport
+      summary: Paid orders per sales channel with commission and net (X14)
+      description: >-
+        Direct orders (counter, table, QR) are the row "Langsung". Commission is the estimate fixed when the
+        order was created (channel commission_bps of its total); net = gross - refunded - commission.
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - $ref: "#/components/parameters/ReportFrom"
+        - $ref: "#/components/parameters/ReportTo"
+        - $ref: "#/components/parameters/ReportFormat"
+      responses:
+        "200":
+          description: "Report (JSON) or CSV download (kanal,jumlah_order,kotor,refund,komisi,bersih)"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [from, to, rows]
+                properties:
+                  from: {type: string, format: date}
+                  to: {type: string, format: date}
+                  rows:
+                    type: array
+                    items:
+                      type: object
+                      required: [channel, orders, gross, refunded, commission, net]
+                      properties:
+                        channel: {type: string}
+                        orders: {type: integer, format: int64}
+                        gross: {type: integer, format: int64}
+                        refunded: {type: integer, format: int64}
+                        commission: {type: integer, format: int64}
+                        net: {type: integer, format: int64}
+            text/csv:
+              schema:
+                type: string
+        "403":
+          description: Forbidden - lacks report.finance.read (owner only)
+        "422":
+          description: VALIDATION_FAILED (from, to, format)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationErrorResponse"
   /api/v1/reports/gross-profit:
     get:
       tags: [Reports]
@@ -7418,6 +7601,30 @@ components:
         cash_net: {type: integer, format: int64}
         cash_rounding: {type: integer, format: int64, description: "Net cash rounding inside cash_sales (V11); not part of total_amount"}
         outlet_expenses: {type: integer, format: int64, description: "Outlet cash fund expenses in the range (V13), outside the drawers"}
+    SalesChannel:
+      type: object
+      required: [id, name, commission_bps, is_active, updated_at, prices]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        commission_bps: {type: integer, format: int64, minimum: 0, maximum: 10000, description: Commission estimate in basis points of the order total}
+        is_active: {type: boolean}
+        updated_at: {type: string, format: date-time}
+        prices:
+          type: array
+          description: Variants with a channel price; any other variant sells at its normal price
+          items:
+            type: object
+            required: [variant_id, price]
+            properties:
+              variant_id: {type: string, format: uuid}
+              price: {type: integer, format: int64}
+    SalesChannelInput:
+      type: object
+      properties:
+        name: {type: string, minLength: 1, maxLength: 50}
+        commission_bps: {type: integer, format: int64, minimum: 0, maximum: 10000}
+        is_active: {type: boolean}
     StockSession:
       type: object
       required: [id, kind, status, value_amount, note, created_by, created_by_name, decision_note, created_at, lines]
@@ -7624,7 +7831,8 @@ components:
 
     PaymentMethod:
       type: string
-      enum: [qris, gopay, shopeepay, bank_transfer, cash, static_qris, edc]
+      enum: [qris, gopay, shopeepay, bank_transfer, cash, static_qris, edc, platform]
+      description: platform pays delivery-app channel orders only and needs reconciliation_ref (the platform order number, X14)
 
     PaymentStatus:
       type: string
@@ -7701,6 +7909,7 @@ components:
       type: object
       required: [idempotency_key, customer_name, order_type, items]
       properties:
+        sales_channel_id: {type: string, format: uuid, description: "POS only (ignored on public endpoints): prices the order at this active channel without promotions, service charge or tax (X13, X15)"}
         idempotency_key:
           type: string
           minLength: 1
@@ -8399,6 +8608,7 @@ components:
       type: object
       required: [order_type, items]
       properties:
+        sales_channel_id: {type: string, format: uuid, description: "POS only (ignored on public endpoints): prices the order at this active channel without promotions, service charge or tax (X13, X15)"}
         order_type:
           type: string
           enum: [dine_in, takeaway, delivery]

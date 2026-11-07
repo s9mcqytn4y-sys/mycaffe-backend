@@ -74,6 +74,8 @@ type OrderCreationInput struct {
 	ExpectedQuoteFingerprint string             `json:"expected_quote_fingerprint,omitempty"`
 	Notes                    string             `json:"notes,omitempty"`
 	Items                    []OrderItemInput   `json:"items"`
+	// SalesChannelID prices a delivery-app order at its channel prices (X12-X15); POS only.
+	SalesChannelID *uuid.UUID `json:"sales_channel_id,omitempty"`
 	// Guest binds a QR order to its table, table session and guest session (iteration 5b); never from JSON.
 	Guest *GuestOrderBinding `json:"-"`
 	// Offline re-prices a synced offline order from its catalog snapshot (ADR-005 OF3); never from JSON.
@@ -687,6 +689,9 @@ func ComputeInputRequestHash(
 		strings.TrimSpace(input.CustomerPhone),
 		strings.TrimSpace(input.Notes),
 	)
+	if input.SalesChannelID != nil { // appended only when set so hashes of earlier orders stay valid
+		fmt.Fprintf(&b, "|channel=%s", input.SalesChannelID.String())
+	}
 	for _, item := range input.Items {
 		cfgHash := computeItemConfigHashFromModifiers(item.ProductID, item.Modifiers)
 		if item.VariantID != nil && *item.VariantID != uuid.Nil {

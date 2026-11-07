@@ -234,6 +234,9 @@ jobs:
           DATABASE_URL: postgres://mycaffe_migrator:mycaffe_migrator_password@localhost:55432/mycaffe_test?sslmode=disable
           PGPASSWORD: mycaffe_migrator_password
         run: |
+          echo "Cleaning verification test fixtures before testing clean seed..."
+          psql -h localhost -p 55432 -U mycaffe_migrator -d mycaffe_test -c "TRUNCATE stores CASCADE;"
+
           echo "Executing Zero-Tenant Global Reference Seed (development.sql)..."
           go run ./cmd/migrate -action=seed -seed-file=db/seeds/development.sql
           ZERO_TENANT_COUNT=$(psql -h localhost -p 55432 -U mycaffe_migrator -d mycaffe_test -t -A -c "SELECT COUNT(*) FROM stores;")

@@ -65,7 +65,7 @@ Full evaluation and ordered backlog: [PosOperationsEvaluation2026-10.md](../Arch
 | K3 | Self-service configuration | All business settings editable by the owner in the app; infrastructure secrets (Midtrans keys, SMTP, DB, DNS) stay in the server `.env` and only their status is shown |
 | K4 | Subscriptions | Hostinger auto-renew + in-app expiry dates (domain/VPS/email), automatic TLS expiry check, owner email at 30/7/1 days and on failed backup |
 | K5 | Midtrans settlement | No withdraw button exists; app shows expected daily settlement (gross, MDR, net) and reconciles against an imported Midtrans settlement CSV |
-| K6 | Loyalty | Digital stamp card ("buy N get 1"), customer identified by a verified email, one stamp per paid order, reward = audited 100% item discount |
+| K6 | Loyalty | Digital stamp card ("buy N get 1"), customer identified by a verified email (**amended by X16: verified phone**), one stamp per paid order, reward = audited 100% item discount |
 | K7 | Promo & bundling | Owner-defined automatic promos (percent/amount, product/category, happy hour, period, quota), fixed-price bundles, cashier discount within O4; one best promo per line, no stacking; vouchers later |
 | K8 | Static QRIS fallback | Automatic after 2 consecutive Midtrans failures or forced by the owner; cashier confirms with a reference; auto-return to dynamic QRIS after 10 minutes |
 | K9 | Media storage & backups | **Cloudflare R2 Triple-Bucket Architecture**: `mycaffe-media` (public read via CDN / dev-url, presigned PUT), `mycaffe-private-media` (private signed URL TTL 15m for static QRIS & sensitive documents), and `mycaffe-backups` (strictly private, GPG AES256 encrypted pg_dump, relative path sha256 checksums, non-destructive restore guard). **B3 (2026-11-04):** product image variants are JPEG q80 200/600/1200 instead of WebP (no CGO), no blurhash yet; see api-conventions §4. |
@@ -264,6 +264,19 @@ Status: decided. Context: GitHub-hosted runners stopped on a billing failure rig
 | X9 | Ready-to-serve stock | Stays in `products.stock_quantity` (online blocking, offline negative stock and stock override unchanged). Purchasing, counts, waste and moving-average cost serve both kinds of stock item: ingredients and ready-to-serve products |
 | X10 | COGS capture | Default recorded without a question: the cost of goods sold is stored **per order line when the order is paid**, so margin reports do not move when ingredient prices change later |
 | X11 | Order of work | 11.1 promo engine (rules, happy hour, quota, per line, quote and guest QR, offline snapshot) → 11.2 bundles → 11.3 ingredients, recipes, deduction on payment, alerts, COGS per line → 11.4 suppliers, POs, staged receipts, direct purchases, moving average → 11.5 payables and payments → 11.6 stock counts and waste with approval, COGS and gross-profit report per menu → v0.11.0 |
+
+## v0.11.1 channels, loyalty and invoices (recorded 2026-11-07, sixteenth interview)
+
+| ID | Decision | Approved option |
+|----|----------|-----------------|
+| X12 | Delivery-app orders | **Entered by hand at the POS**: the cashier copies the GoFood/GrabFood/ShopeeFood order and picks its sales channel, which sets the prices. No platform API integration |
+| X13 | Channel prices | An **absolute price per variant per channel**; a variant without a channel price keeps its normal price; modifier prices stay the same on every channel |
+| X14 | Channel payment | A new payment method `platform`: the order is paid at once, never touches the cash drawer or the cash figures of the Z-report. Each channel has a commission % (estimate) so reports show gross, commission and net per channel. Platform payouts are not reconciled |
+| X15 | Rules on channel orders | Automatic promotions, the cashier discount, store tax/service charge and stamps **do not apply** to channel orders: the channel price is final |
+| X16 | Loyalty identity (amends K6) | Stamp-card customers are identified by their **verified phone number** (V4, existing `customers` and OTP), not by email |
+| X17 | Stamp card rules | One card per store; **one stamp per paid order at or above a minimum** amount; after N stamps the customer gets one free item from an owner-chosen list (an audited 100% line discount); each stamp expires after a set period; a full refund removes the order's stamp. N, minimum and expiry are owner settings (defaults 10, Rp25.000, 6 months). Not on channel orders (X15) |
+| X18 | Invoices | **B2B pay later**: business customers (name, optional tax ID, e-mail, phone, payment terms in days); orders charged to the account become an invoice with a due date; the receivable is paid in instalments by transfer, cash or QRIS; PDF download; automatic reminders by e-mail/WhatsApp at D-3, the due date and D+7. No e-Faktur |
+| X19 | Order of work | 11.7 sales channels, channel prices, `platform` method, report per channel → 11.8 orders linked to customers, stamp card, reward redemption → 11.9 business customers, invoices, receivables and instalments, PDF → 11.10 invoice reminders → v0.11.1 |
 
 ## Awaiting owner approval
 

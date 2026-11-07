@@ -42,6 +42,7 @@ type POSCreateOrderRequest struct {
 	ExpectedTotal            *int64                   `json:"expected_total,omitempty"`
 	ExpectedQuoteFingerprint string                   `json:"expected_quote_fingerprint,omitempty"`
 	Notes                    string                   `json:"notes" binding:"max=500"`
+	SalesChannelID           *uuid.UUID               `json:"sales_channel_id"`
 	Items                    []service.OrderItemInput `json:"items" binding:"required,min=1,max=100"`
 }
 
@@ -62,7 +63,7 @@ func (h *POSHandler) CreateOrder(c *gin.Context) {
 		IdempotencyKey: req.IdempotencyKey, TableNumber: req.TableNumber, CustomerName: name,
 		CustomerPhone: req.CustomerPhone, OrderType: req.OrderType, BillingMode: req.BillingMode,
 		ActorUserID: &actorID, ExpectedTotal: req.ExpectedTotal,
-		ExpectedQuoteFingerprint: req.ExpectedQuoteFingerprint, Notes: req.Notes, Items: req.Items,
+		ExpectedQuoteFingerprint: req.ExpectedQuoteFingerprint, Notes: req.Notes, Items: req.Items, SalesChannelID: req.SalesChannelID,
 	})
 	if err != nil {
 		orderError(c, err)
@@ -80,6 +81,7 @@ type OrderQuoteRequest struct {
 	BillingMode              domain.BillingMode       `json:"billing_mode"`
 	ExpectedTotal            *int64                   `json:"expected_total,omitempty"`
 	ExpectedQuoteFingerprint string                   `json:"expected_quote_fingerprint,omitempty"`
+	SalesChannelID           *uuid.UUID               `json:"sales_channel_id"`
 	Items                    []service.OrderItemInput `json:"items" binding:"required,min=1,max=100"`
 }
 
@@ -98,6 +100,7 @@ func (h *POSHandler) QuoteOrder(c *gin.Context) {
 		ExpectedTotal:            req.ExpectedTotal,
 		ExpectedQuoteFingerprint: req.ExpectedQuoteFingerprint,
 		ActorUserID:              &actorID,
+		SalesChannelID:           req.SalesChannelID,
 		Items:                    req.Items,
 	})
 	if err != nil {
@@ -201,7 +204,7 @@ func (h *POSHandler) InitiatePayment(c *gin.Context) {
 	actor := currentStaff(c)
 	needed := rbac.PaymentInitiateGateway
 	switch req.Method {
-	case domain.PaymentMethodCash, domain.PaymentMethodStaticQRIS, domain.PaymentMethodEDC:
+	case domain.PaymentMethodCash, domain.PaymentMethodStaticQRIS, domain.PaymentMethodEDC, domain.PaymentMethodPlatform:
 		needed = rbac.PaymentTenderDirect
 	}
 	if !actor.Can(needed) {

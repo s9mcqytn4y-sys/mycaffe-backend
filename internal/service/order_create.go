@@ -159,6 +159,15 @@ func (s *OrderService) createOrderTx(ctx context.Context, tx *sqlx.Tx, trustedSt
 		}
 
 		snapshot := catalogSnapshotOf(catalogData, s.nowFunc())
+		var channel *channelOrder
+		if normalizedInput.SalesChannelID != nil {
+			if normalizedInput.BillingMode != domain.BillingModePayFirst || normalizedInput.Guest != nil || normalizedInput.Offline != nil {
+				return fmt.Errorf("%w: a channel order is a pay-first POS order", ErrInvalidOrderInput)
+			}
+			if channel, err = applySalesChannelTx(ctx, tx, trustedStoreID, *normalizedInput.SalesChannelID, &catalogData.Store, &snapshot); err != nil {
+				return err
+			}
+		}
 		if normalizedInput.Offline != nil {
 			// Offline sync (ADR-005 OF3): price from the served snapshot, not from today's catalog.
 			if err := normalizedInput.Offline.apply(&catalogData.Store, &snapshot, normalizedInput); err != nil {
@@ -289,6 +298,16 @@ func (s *OrderService) createOrderTx(ctx context.Context, tx *sqlx.Tx, trustedSt
 			return err
 		}
 		order.Items = persistedItems
+		if channel != nil {
+			commission, err := CalculateRoundHalfUpBPS(order.TotalAmount, channel.CommissionBPS)
+			if err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, `UPDATE orders SET sales_channel_id = $3, snapshot_channel_name = $4, channel_commission_amount = $5
+				WHERE store_id = $1 AND id = $2`, trustedStoreID, order.ID, channel.ID, channel.Name, commission); err != nil {
+				return fmt.Errorf("failed to record order channel: %w", err)
+			}
+		}
 		if normalizedInput.Offline != nil {
 			if err := normalizedInput.Offline.flagOversold(ctx, tx, trustedStoreID, order.ID); err != nil {
 				return err

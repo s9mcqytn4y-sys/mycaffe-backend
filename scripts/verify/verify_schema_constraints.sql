@@ -375,6 +375,14 @@ BEGIN
        OR has_table_privilege('mycaffe_app', 'public.stock_sessions', 'DELETE') THEN
         RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may rewrite stock session lines or delete sessions!';
     END IF;
+    -- 10F-27. Sales channels (migration 000049): RLS on; channels are never deleted.
+    IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.sales_channels'::regclass)
+       OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.channel_prices'::regclass) THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: sales channel tables do not have row-level security enabled!';
+    END IF;
+    IF has_table_privilege('mycaffe_app', 'public.sales_channels', 'DELETE') THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may delete sales channels!';
+    END IF;
     -- 10F-24. Purchasing (migration 000046): RLS on; receipts are append-only (stock and cost already moved).
     IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.suppliers'::regclass)
        OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.purchase_orders'::regclass)

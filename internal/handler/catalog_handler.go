@@ -466,3 +466,62 @@ func (h *CatalogHandler) SetBundleSlots(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"slots": out})
 }
+
+// ListSalesChannels handles GET /api/v1/catalog/sales-channels (owner, all) and GET /api/v1/pos/sales-channels
+// (staff, active only, with prices for the POS).
+func (h *CatalogHandler) ListSalesChannels(activeOnly bool) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		out, err := h.catalog.ListSalesChannels(c.Request.Context(), currentStaff(c), activeOnly)
+		if err != nil {
+			writeServiceError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"sales_channels": out})
+	}
+}
+
+// CreateSalesChannel handles POST /api/v1/catalog/sales-channels (X12).
+func (h *CatalogHandler) CreateSalesChannel(c *gin.Context) {
+	var in service.SalesChannelInput
+	if !bindJSON(c, &in) {
+		return
+	}
+	out, err := h.catalog.CreateSalesChannel(c.Request.Context(), currentStaff(c), in)
+	if err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, out)
+}
+
+// UpdateSalesChannel handles PATCH /api/v1/catalog/sales-channels/:id; is_active=false retires a channel.
+func (h *CatalogHandler) UpdateSalesChannel(c *gin.Context) {
+	id, ok := pathID(c, "id")
+	var in service.SalesChannelInput
+	if !ok || !bindJSON(c, &in) {
+		return
+	}
+	out, err := h.catalog.UpdateSalesChannel(c.Request.Context(), currentStaff(c), id, in)
+	if err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, out)
+}
+
+// SetChannelPrices handles PUT /api/v1/catalog/sales-channels/:id/prices (X13).
+func (h *CatalogHandler) SetChannelPrices(c *gin.Context) {
+	id, ok := pathID(c, "id")
+	var in struct {
+		Prices []service.ChannelPriceInput `json:"prices"`
+	}
+	if !ok || !bindJSON(c, &in) {
+		return
+	}
+	out, err := h.catalog.SetChannelPrices(c.Request.Context(), currentStaff(c), id, in.Prices)
+	if err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, out)
+}

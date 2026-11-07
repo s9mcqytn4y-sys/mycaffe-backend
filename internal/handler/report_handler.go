@@ -127,3 +127,27 @@ func (h *ReportHandler) GrossProfit(c *gin.Context) {
 	}
 	writeCSV(c, fmt.Sprintf("laba-kotor-%s-%s.csv", report.From, report.To), records)
 }
+
+// Channels handles GET /api/v1/reports/channels?from=&to=&format=json|csv (X14).
+func (h *ReportHandler) Channels(c *gin.Context) {
+	format := c.DefaultQuery("format", "json")
+	if format != "json" && format != "csv" {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"code": "VALIDATION_FAILED", "error": "Periksa kembali isian yang ditandai.", "fields": map[string]string{"format": "harus json atau csv"}})
+		return
+	}
+	report, err := h.svc.Channels(c.Request.Context(), currentStaff(c).Staff.Store.ID, c.Query("from"), c.Query("to"))
+	if err != nil {
+		writeReportError(c, err)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	if format == "json" {
+		c.JSON(http.StatusOK, report)
+		return
+	}
+	records := [][]string{{"kanal", "jumlah_order", "kotor", "refund", "komisi", "bersih"}}
+	for _, r := range report.Rows {
+		records = append(records, []string{r.Channel, itoa(r.Orders), itoa(r.Gross), itoa(r.Refunded), itoa(r.Commission), itoa(r.Net)})
+	}
+	writeCSV(c, fmt.Sprintf("kanal-%s-%s.csv", report.From, report.To), records)
+}

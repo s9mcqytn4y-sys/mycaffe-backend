@@ -22,6 +22,7 @@ type OrderQuoteInput struct {
 	ExpectedTotal            *int64             `json:"expected_total,omitempty"`
 	ExpectedQuoteFingerprint string             `json:"expected_quote_fingerprint,omitempty"`
 	ActorUserID              *uuid.UUID         `json:"actor_user_id,omitempty"`
+	SalesChannelID           *uuid.UUID         `json:"sales_channel_id,omitempty"`
 	Items                    []OrderItemInput   `json:"items"`
 }
 
@@ -145,6 +146,11 @@ func (s *OrderService) QuoteOrder(ctx context.Context, trustedStoreID uuid.UUID,
 		}
 
 		snapshot := catalogSnapshotOf(catalogData, s.nowFunc())
+		if input.SalesChannelID != nil {
+			if _, err := applySalesChannelTx(ctx, tx, trustedStoreID, *input.SalesChannelID, &catalogData.Store, &snapshot); err != nil {
+				return err
+			}
+		}
 
 		billingMode := input.BillingMode
 		if billingMode == "" {

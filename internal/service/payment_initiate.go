@@ -55,7 +55,7 @@ func (s *PaymentService) InitiatePayment(
 		if input.ActorUserID == nil || *input.ActorUserID == uuid.Nil {
 			return nil, ErrUnauthorizedCashierTender
 		}
-		if (input.Method == domain.PaymentMethodStaticQRIS || input.Method == domain.PaymentMethodEDC) && input.ReconciliationRef == "" {
+		if (input.Method == domain.PaymentMethodStaticQRIS || input.Method == domain.PaymentMethodEDC || input.Method == domain.PaymentMethodPlatform) && input.ReconciliationRef == "" {
 			return nil, ErrReconciliationRefRequired
 		}
 		return s.initiateDirectCashierPayment(ctx, trustedStoreID, input)
@@ -104,7 +104,7 @@ func (s *PaymentService) directCashierPaymentTx(ctx context.Context, tx *sqlx.Tx
 		if !store.IsActive || store.DeletedAt != nil {
 			return ErrStoreInactive
 		}
-		if !isPaymentMethodEnabled(store.EnabledPaymentMethods, input.Method) {
+		if input.Method != domain.PaymentMethodPlatform && !isPaymentMethodEnabled(store.EnabledPaymentMethods, input.Method) {
 			return fmt.Errorf("%w: %s", ErrPaymentMethodNotEnabled, input.Method)
 		}
 
@@ -162,6 +162,9 @@ func (s *PaymentService) directCashierPaymentTx(ctx context.Context, tx *sqlx.Tx
 
 		order, splits, err := s.orderRepo.GetOrderByIDForUpdate(ctx, tx, trustedStoreID, input.OrderID)
 		if err != nil {
+			return err
+		}
+		if err := checkChannelPaymentTx(ctx, tx, trustedStoreID, order.ID, input.Method); err != nil {
 			return err
 		}
 		if order.BillingMode == domain.BillingModeOpenTab {
@@ -391,7 +394,7 @@ func (s *PaymentService) initiateMidtransGatewayPayment(
 		if !store.IsActive || store.DeletedAt != nil {
 			return ErrStoreInactive
 		}
-		if !isPaymentMethodEnabled(store.EnabledPaymentMethods, input.Method) {
+		if input.Method != domain.PaymentMethodPlatform && !isPaymentMethodEnabled(store.EnabledPaymentMethods, input.Method) {
 			return fmt.Errorf("%w: %s", ErrPaymentMethodNotEnabled, input.Method)
 		}
 
@@ -429,6 +432,9 @@ func (s *PaymentService) initiateMidtransGatewayPayment(
 
 		order, splits, err := s.orderRepo.GetOrderByIDForUpdate(ctx, tx, trustedStoreID, input.OrderID)
 		if err != nil {
+			return err
+		}
+		if err := checkChannelPaymentTx(ctx, tx, trustedStoreID, order.ID, input.Method); err != nil {
 			return err
 		}
 		if order.BillingMode == domain.BillingModeOpenTab {

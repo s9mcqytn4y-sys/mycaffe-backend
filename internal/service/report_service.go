@@ -229,3 +229,69 @@ func (s *ReportService) Summary(ctx context.Context, storeID uuid.UUID, from, to
 	})
 	return sum, err
 }
+
+// GrossProfitRow is one menu item's revenue (line subtotal after promotions, before the cashier discount and
+// refunds, like the item sales report) against the COGS stored at payment (X10).
+type GrossProfitRow struct {
+	Key           string `json:"key" db:"key"`
+	Quantity      int64  `json:"quantity" db:"quantity"`
+	Revenue       int64  `json:"revenue" db:"revenue"`
+	COGS          int64  `json:"cogs" db:"cogs"`
+	GrossProfit   int64  `json:"gross_profit" db:"gross_profit"`
+	MarginBPS     int64  `json:"margin_bps" db:"margin_bps"`
+	LinesNoCOGS   int64  `json:"lines_without_cogs" db:"lines_without_cogs"`
+	RevenueNoCOGS int64  `json:"revenue_without_cogs" db:"revenue_without_cogs"`
+}
+
+type GrossProfitReport struct {
+	From        string           `json:"from"`
+	To          string           `json:"to"`
+	Revenue     int64            `json:"revenue"`
+	COGS        int64            `json:"cogs"`
+	GrossProfit int64            `json:"gross_profit"`
+	MarginBPS   int64            `json:"margin_bps"`
+	Rows        []GrossProfitRow `json:"rows"`
+}
+
+// GrossProfit groups paid order lines by menu item. Lines paid before ingredient costing existed have no COGS;
+// they count as zero cost and are reported per row (lines_without_cogs) so an inflated margin is visible.
+func (s *ReportService) GrossProfit(ctx context.Context, storeID uuid.UUID, from, to string) (*GrossProfitReport, error) {
+	var report *GrossProfitReport
+	err := database.WithTenantTx(ctx, s.db, storeID, func(tx *sqlx.Tx) error {
+		rng, err := parseRange(ctx, tx, storeID, from, to)
+		if err != nil {
+			return err
+		}
+		rows := []GrossProfitRow{}
+		if err := tx.SelectContext(ctx, &rows, `SELECT oi.snapshot_name || CASE WHEN oi.snapshot_variant_name <> '' THEN ' (' || oi.snapshot_variant_name || ')' ELSE '' END AS key,
+			SUM(oi.quantity) AS quantity, SUM(oi.subtotal_amount) AS revenue, COALESCE(SUM(oi.cogs_amount), 0) AS cogs,
+			SUM(oi.subtotal_amount) - COALESCE(SUM(oi.cogs_amount), 0) AS gross_profit, 0 AS margin_bps,
+			COUNT(*) FILTER (WHERE oi.cogs_amount IS NULL) AS lines_without_cogs,
+			COALESCE(SUM(oi.subtotal_amount) FILTER (WHERE oi.cogs_amount IS NULL), 0) AS revenue_without_cogs
+			FROM orders o JOIN order_items oi ON oi.store_id = o.store_id AND oi.order_id = o.id
+			WHERE `+reportOrderFilter+` GROUP BY 1 ORDER BY 4 DESC, 1`, storeID, rng.start, rng.end); err != nil {
+			return fmt.Errorf("failed to run gross profit report: %w", err)
+		}
+		report = &GrossProfitReport{From: rng.From, To: rng.To, Rows: rows}
+		for i := range rows {
+			rows[i].MarginBPS = marginBPS(rows[i].GrossProfit, rows[i].Revenue)
+			report.Revenue += rows[i].Revenue
+			report.COGS += rows[i].COGS
+		}
+		report.GrossProfit = report.Revenue - report.COGS
+		report.MarginBPS = marginBPS(report.GrossProfit, report.Revenue)
+		return nil
+	})
+	return report, err
+}
+
+// marginBPS is profit / revenue in basis points, rounded half up away from zero; 0 when nothing was sold.
+func marginBPS(profit, revenue int64) int64 {
+	if revenue <= 0 {
+		return 0
+	}
+	if profit < 0 {
+		return -roundHalfUpDiv(-profit*10_000, revenue)
+	}
+	return roundHalfUpDiv(profit*10_000, revenue)
+}

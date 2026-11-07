@@ -69,6 +69,13 @@ func TestInventoryIntegration(t *testing.T) {
 	inv.POST("/ingredients", ih.CreateIngredient)
 	inv.PATCH("/ingredients/:id", ih.UpdateIngredient)
 	inv.PUT("/recipes/:kind/:id", ih.SetRecipe)
+	inv.GET("/stock-sessions", ih.ListStockSessions)
+	inv.POST("/stock-sessions/:id/approve", ih.DecideStockSession(true))
+	inv.POST("/stock-sessions/:id/reject", ih.DecideStockSession(false))
+	cnt := r.Group("/inventory", ah.RequirePermission(rbac.InventoryCount))
+	cnt.GET("/stock-items", ih.ListStockItems)
+	cnt.POST("/stock-sessions", ih.SubmitStockSession)
+	r.GET("/reports/gross-profit", ah.RequirePermission(rbac.ReportFinanceRead), handler.NewReportHandler(service.NewReportService(db)).GrossProfit)
 
 	call := func(method, path, authz string, body any) *httptest.ResponseRecorder {
 		var buf bytes.Buffer
@@ -240,5 +247,126 @@ func TestInventoryIntegration(t *testing.T) {
 		if !strings.Contains(low.Body.String(), coffee.String()) || strings.Contains(low.Body.String(), milk.String()) {
 			t.Fatalf("the low list shows only ingredients under their minimum: %s", low.Body.String())
 		}
+	})
+
+	// v0.11 PR 11.6 (X8): stock counts and waste; above Rp50.000 a staff session waits for the owner.
+	barista := login("barista.central@mycaffe.local")
+	type session struct {
+		ID          uuid.UUID `json:"id"`
+		Status      string    `json:"status"`
+		ValueAmount int64     `json:"value_amount"`
+		Lines       []struct {
+			Expected int64 `json:"expected_quantity"`
+			Delta    int64 `json:"delta"`
+		} `json:"lines"`
+	}
+	submit := func(authz string, body map[string]any) session {
+		t.Helper()
+		res := call("POST", "/inventory/stock-sessions", authz, body)
+		if res.Code != http.StatusCreated {
+			t.Fatalf("submit stock session failed: %d: %s", res.Code, res.Body.String())
+		}
+		var out session
+		_ = json.Unmarshal(res.Body.Bytes(), &out)
+		return out
+	}
+
+	t.Run("StaffCountBlindAndSmallSessionsPost", func(t *testing.T) {
+		items := call("GET", "/inventory/stock-items", barista, nil)
+		if items.Code != http.StatusOK || !strings.Contains(items.Body.String(), coffee.String()) || strings.Contains(items.Body.String(), "stock_quantity") {
+			t.Fatalf("staff see items without balances: %d: %s", items.Code, items.Body.String())
+		}
+		for _, bad := range []map[string]any{
+			{"kind": "count", "lines": []map[string]any{{"ingredient_id": coffee, "quantity": 1}, {"ingredient_id": coffee, "quantity": 2}}},
+			{"kind": "count", "lines": []map[string]any{{"ingredient_id": coffee, "quantity": -1}}},
+			{"kind": "waste", "lines": []map[string]any{{"ingredient_id": coffee, "quantity": 0}}},
+			{"kind": "audit", "lines": []map[string]any{{"ingredient_id": coffee, "quantity": 1}}},
+		} {
+			if res := call("POST", "/inventory/stock-sessions", barista, bad); res.Code != http.StatusUnprocessableEntity {
+				t.Fatalf("invalid session %v must be 422, got %d", bad, res.Code)
+			}
+		}
+		// 964 g on the books, 960 g on the shelf: 4 g x Rp300 = Rp1.200 posts at once.
+		s := submit(barista, map[string]any{"kind": "count", "lines": []map[string]any{{"ingredient_id": coffee, "quantity": 960}}})
+		if s.Status != "posted" || s.ValueAmount != 1200 || s.Lines[0].Expected != 964 || s.Lines[0].Delta != -4 || balance(coffee) != 960 {
+			t.Fatalf("small count posts its variance at once: %+v, balance %d", s, balance(coffee))
+		}
+	})
+
+	t.Run("OwnerApprovesOrRejectsLargeSessions", func(t *testing.T) {
+		// 1000 ml milk x Rp20 + 850 ml oat x Rp60 = Rp71.000 > Rp50.000.
+		s := submit(barista, map[string]any{"kind": "waste", "note": "Basi", "lines": []map[string]any{
+			{"ingredient_id": milk, "quantity": 1000, "reason": "Basi"}, {"ingredient_id": oat, "quantity": 850}}})
+		if s.Status != "pending" || s.ValueAmount != 71000 || balance(milk) != 1850 {
+			t.Fatalf("large waste waits for the owner without touching stock: %+v", s)
+		}
+		if res := call("POST", "/inventory/stock-sessions/"+s.ID.String()+"/approve", barista, nil); res.Code != http.StatusForbidden {
+			t.Fatalf("staff cannot approve, got %d", res.Code)
+		}
+		pending := call("GET", "/inventory/stock-sessions?status=pending", owner, nil)
+		if !strings.Contains(pending.Body.String(), s.ID.String()) {
+			t.Fatalf("the owner's queue lists the pending session: %s", pending.Body.String())
+		}
+		if res := call("POST", "/inventory/stock-sessions/"+s.ID.String()+"/approve", owner, map[string]any{"note": "OK"}); res.Code != http.StatusOK {
+			t.Fatalf("approve failed: %d: %s", res.Code, res.Body.String())
+		}
+		if m, o := balance(milk), balance(oat); m != 850 || o != 0 {
+			t.Fatalf("approval posts the waste: milk %d, oat %d", m, o)
+		}
+		if res := call("POST", "/inventory/stock-sessions/"+s.ID.String()+"/reject", owner, nil); res.Code != http.StatusConflict {
+			t.Fatalf("a decided session cannot be decided again, got %d", res.Code)
+		}
+		r := submit(barista, map[string]any{"kind": "waste", "lines": []map[string]any{{"ingredient_id": coffee, "quantity": 200}}})
+		if res := call("POST", "/inventory/stock-sessions/"+r.ID.String()+"/reject", owner, map[string]any{"note": "Hitung ulang"}); res.Code != http.StatusOK {
+			t.Fatalf("reject failed: %d: %s", res.Code, res.Body.String())
+		}
+		if balance(coffee) != 960 {
+			t.Fatal("a rejected session leaves stock alone")
+		}
+		// The owner's own sessions post whatever their value.
+		if o := submit(owner, map[string]any{"kind": "count", "lines": []map[string]any{{"ingredient_id": coffee, "quantity": 500}}}); o.Status != "posted" || balance(coffee) != 500 {
+			t.Fatalf("owner session posts at once: %+v", o)
+		}
+		var moves, audits int
+		inStore(func(tx *sqlx.Tx) error {
+			if err := tx.GetContext(ctx, &moves, `SELECT COUNT(*) FROM ingredient_movements WHERE store_id = $1 AND ingredient_id IN ($2, $3, $4)
+				AND kind IN ('count', 'waste')`, storeID, coffee, milk, oat); err != nil {
+				return err
+			}
+			return tx.GetContext(ctx, &audits, `SELECT COUNT(*) FROM audit_logs WHERE store_id = $1 AND reference_id IN ($2, $3)
+				AND action IN ('STOCK_SESSION_SUBMITTED', 'STOCK_SESSION_APPROVED', 'STOCK_SESSION_REJECTED')`, storeID, s.ID.String(), r.ID.String())
+		})
+		if moves != 4 || audits != 4 {
+			t.Fatalf("expected 4 count/waste movements and 4 audits, got %d and %d", moves, audits)
+		}
+	})
+
+	t.Run("GrossProfitPerMenu", func(t *testing.T) {
+		res := call("GET", "/reports/gross-profit", owner, nil)
+		var report struct {
+			Rows []struct {
+				Key         string `json:"key"`
+				Quantity    int64  `json:"quantity"`
+				Revenue     int64  `json:"revenue"`
+				COGS        int64  `json:"cogs"`
+				GrossProfit int64  `json:"gross_profit"`
+				MarginBPS   int64  `json:"margin_bps"`
+				NoCOGS      int64  `json:"lines_without_cogs"`
+			} `json:"rows"`
+		}
+		_ = json.Unmarshal(res.Body.Bytes(), &report)
+		for _, r := range report.Rows {
+			if r.Key == "Resep Latte "+suffix+" (Reguler)" {
+				// Rp30.000 + Rp35.000 against 8.400 + 14.400 COGS: 42.200 profit, 64,92%.
+				if r.Quantity != 2 || r.Revenue != 65000 || r.COGS != 22800 || r.GrossProfit != 42200 || r.MarginBPS != 6492 || r.NoCOGS != 0 {
+					t.Fatalf("unexpected gross profit row: %+v", r)
+				}
+				if csv := call("GET", "/reports/gross-profit?format=csv", owner, nil); !strings.Contains(csv.Body.String(), "laba_kotor") {
+					t.Fatalf("csv export missing header: %s", csv.Body.String())
+				}
+				return
+			}
+		}
+		t.Fatalf("no gross profit row for the test product: %d: %s", res.Code, res.Body.String())
 	})
 }

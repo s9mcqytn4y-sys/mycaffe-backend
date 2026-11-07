@@ -298,6 +298,7 @@ func registerStoreAndPOSRoutes(v1 *gin.RouterGroup, h *handlerSet) {
 	reports := v1.Group("/reports", h.auth.RequirePermission(rbac.ReportFinanceRead))
 	reports.GET("/sales", h.report.Sales)
 	reports.GET("/summary", h.report.Summary)
+	reports.GET("/gross-profit", h.report.GrossProfit)
 
 	// Media uploads (B3, K9): presigned PUT to R2, then verify + JPEG variants + link to the product.
 	media := v1.Group("/media", handler.LimitBody(4<<10), h.auth.RequirePermission(rbac.CatalogManage))
@@ -383,6 +384,13 @@ func registerKDSAndCatalogRoutes(v1 *gin.RouterGroup, h *handlerSet) {
 	// Payables (v0.11 PR 11.5, X7): one per receipt, paid at once or in instalments.
 	inv.GET("/payables", h.inventory.ListPayables)
 	inv.POST("/payables/:id/payments", h.inventory.PayPayable)
+	// Stock counts and waste (v0.11 PR 11.6, X8): staff record, the owner approves sessions above the limit.
+	inv.GET("/stock-sessions", h.inventory.ListStockSessions)
+	inv.POST("/stock-sessions/:id/approve", h.inventory.DecideStockSession(true))
+	inv.POST("/stock-sessions/:id/reject", h.inventory.DecideStockSession(false))
+	count := v1.Group("/inventory", h.auth.RequirePermission(rbac.InventoryCount))
+	count.GET("/stock-items", h.inventory.ListStockItems)
+	count.POST("/stock-sessions", h.inventory.SubmitStockSession)
 	// Promotions (v0.11 PR 11.1, K7): one best promotion per line, taken off the line subtotal.
 	cat.GET("/promotions", manage, h.catalog.ListPromotions)
 	cat.POST("/promotions", manage, h.catalog.CreatePromotion)

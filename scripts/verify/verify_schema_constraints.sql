@@ -365,6 +365,16 @@ BEGIN
        OR has_table_privilege('mycaffe_app', 'public.payables', 'DELETE') THEN
         RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may rewrite payable payments or delete payables!';
     END IF;
+    -- 10F-26. Stock sessions (migration 000048): RLS on; lines are append-only, sessions are never deleted.
+    IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.stock_sessions'::regclass)
+       OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.stock_session_lines'::regclass) THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: stock session tables do not have row-level security enabled!';
+    END IF;
+    IF has_table_privilege('mycaffe_app', 'public.stock_session_lines', 'UPDATE')
+       OR has_table_privilege('mycaffe_app', 'public.stock_session_lines', 'DELETE')
+       OR has_table_privilege('mycaffe_app', 'public.stock_sessions', 'DELETE') THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may rewrite stock session lines or delete sessions!';
+    END IF;
     -- 10F-24. Purchasing (migration 000046): RLS on; receipts are append-only (stock and cost already moved).
     IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.suppliers'::regclass)
        OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.purchase_orders'::regclass)

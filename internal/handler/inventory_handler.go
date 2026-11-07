@@ -301,3 +301,56 @@ func (h *InventoryHandler) PayPayable(c *gin.Context) {
 	}
 	c.JSON(http.StatusCreated, out)
 }
+
+// ListStockItems handles GET /api/v1/inventory/stock-items (inventory.count, blind count list).
+func (h *InventoryHandler) ListStockItems(c *gin.Context) {
+	out, err := h.inventory.ListStockItems(c.Request.Context(), currentStaff(c))
+	if err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"items": out})
+}
+
+// SubmitStockSession handles POST /api/v1/inventory/stock-sessions (inventory.count).
+func (h *InventoryHandler) SubmitStockSession(c *gin.Context) {
+	var in service.StockSessionInput
+	if !bindJSON(c, &in) {
+		return
+	}
+	out, err := h.inventory.SubmitStockSession(c.Request.Context(), currentStaff(c), in)
+	if err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, out)
+}
+
+// ListStockSessions handles GET /api/v1/inventory/stock-sessions?status=pending (inventory.manage).
+func (h *InventoryHandler) ListStockSessions(c *gin.Context) {
+	out, err := h.inventory.ListStockSessions(c.Request.Context(), currentStaff(c), c.Query("status"))
+	if err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"stock_sessions": out})
+}
+
+// DecideStockSession handles POST /api/v1/inventory/stock-sessions/:id/approve and /reject (inventory.manage).
+func (h *InventoryHandler) DecideStockSession(approve bool) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, ok := pathID(c, "id")
+		var in struct {
+			Note string `json:"note"`
+		}
+		if !ok || (c.Request.ContentLength > 0 && !bindJSON(c, &in)) {
+			return
+		}
+		out, err := h.inventory.DecideStockSession(c.Request.Context(), currentStaff(c), id, approve, in.Note)
+		if err != nil {
+			writeServiceError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, out)
+	}
+}

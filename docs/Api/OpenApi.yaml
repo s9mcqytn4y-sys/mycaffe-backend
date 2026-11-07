@@ -941,6 +941,159 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
         "422": {$ref: "#/components/responses/ValidationFailed"}
+  /api/v1/inventory/stock-items:
+    get:
+      tags: [Catalog]
+      operationId: listStockItems
+      summary: Items staff can count or write off, without their balances (inventory.count, blind count, X8)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: Active ingredients and stock-tracked ready-to-serve products
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, kind, name, unit]
+                      properties:
+                        id: {type: string, format: uuid}
+                        kind: {type: string, enum: [ingredient, product]}
+                        name: {type: string}
+                        unit: {type: string}
+        "403": {$ref: "#/components/responses/Forbidden"}
+  /api/v1/inventory/stock-sessions:
+    post:
+      tags: [Catalog]
+      operationId: submitStockSession
+      summary: Record a stock count or waste session (inventory.count, audited, X8)
+      description: >-
+        count lines carry the counted quantity, waste lines the quantity thrown away, in base units. The value is
+        the sum of each line's absolute delta at current cost. A session by the owner, or worth Rp50.000 or less,
+        posts at once; otherwise it is pending until the owner approves or rejects it. Posting applies the delta
+        recorded at counting time, so sales made in between stay deducted.
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind, lines]
+              properties:
+                kind: {type: string, enum: [count, waste]}
+                note: {type: string, maxLength: 500}
+                lines:
+                  type: array
+                  minItems: 1
+                  maxItems: 200
+                  items:
+                    type: object
+                    required: [quantity]
+                    description: Exactly one of ingredient_id or product_id; each item at most once per session
+                    properties:
+                      ingredient_id: {type: string, format: uuid}
+                      product_id: {type: string, format: uuid}
+                      quantity: {type: integer, format: int64, minimum: 0, description: "Counted (count) or wasted (waste, at least 1)"}
+                      reason: {type: string, maxLength: 200}
+      responses:
+        "201":
+          description: The session; status posted or pending
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/StockSession"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "422": {$ref: "#/components/responses/ValidationFailed"}
+    get:
+      tags: [Catalog]
+      operationId: listStockSessions
+      summary: Stock sessions newest first; status=pending is the approval queue of the owner (inventory.manage)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - {name: status, in: query, schema: {type: string, enum: [posted, pending, rejected]}}
+      responses:
+        "200":
+          description: Up to 100 sessions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  stock_sessions:
+                    type: array
+                    items: {$ref: "#/components/schemas/StockSession"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "422": {$ref: "#/components/responses/ValidationFailed"}
+  /api/v1/inventory/stock-sessions/{id}/approve:
+    post:
+      tags: [Catalog]
+      operationId: approveStockSession
+      summary: Approve and post a pending stock session (inventory.manage, audited)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                note: {type: string, maxLength: 500}
+      responses:
+        "200":
+          description: The posted session
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/StockSession"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409":
+          description: The session was already decided
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+  /api/v1/inventory/stock-sessions/{id}/reject:
+    post:
+      tags: [Catalog]
+      operationId: rejectStockSession
+      summary: Reject a pending stock session; stock is left alone (inventory.manage, audited)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                note: {type: string, maxLength: 500}
+      responses:
+        "200":
+          description: The rejected session
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/StockSession"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409":
+          description: The session was already decided
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
   /api/v1/inventory/receipts:
     get:
       tags: [Catalog]
@@ -4747,6 +4900,62 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ValidationErrorResponse"
+  /api/v1/reports/gross-profit:
+    get:
+      tags: [Reports]
+      operationId: getGrossProfitReport
+      summary: Revenue, COGS and gross profit per menu item (X10)
+      description: >-
+        Paid order lines grouped by item and variant. Revenue is the line subtotal after promotions and before
+        the cashier discount and refunds (as in the item sales report). COGS is what was stored at payment;
+        lines paid before ingredient costing count as zero cost and show in lines_without_cogs.
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - $ref: "#/components/parameters/ReportFrom"
+        - $ref: "#/components/parameters/ReportTo"
+        - $ref: "#/components/parameters/ReportFormat"
+      responses:
+        "200":
+          description: "Report (JSON) or CSV download (menu,kuantitas,pendapatan,hpp,laba_kotor,margin_bps,baris_tanpa_hpp,pendapatan_tanpa_hpp)"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [from, to, revenue, cogs, gross_profit, margin_bps, rows]
+                properties:
+                  from: {type: string, format: date}
+                  to: {type: string, format: date}
+                  revenue: {type: integer, format: int64}
+                  cogs: {type: integer, format: int64}
+                  gross_profit: {type: integer, format: int64}
+                  margin_bps: {type: integer, format: int64, description: Gross profit over revenue in basis points}
+                  rows:
+                    type: array
+                    items:
+                      type: object
+                      required: [key, quantity, revenue, cogs, gross_profit, margin_bps, lines_without_cogs, revenue_without_cogs]
+                      properties:
+                        key: {type: string}
+                        quantity: {type: integer, format: int64}
+                        revenue: {type: integer, format: int64}
+                        cogs: {type: integer, format: int64}
+                        gross_profit: {type: integer, format: int64}
+                        margin_bps: {type: integer, format: int64}
+                        lines_without_cogs: {type: integer, format: int64}
+                        revenue_without_cogs: {type: integer, format: int64}
+            text/csv:
+              schema:
+                type: string
+        "403":
+          description: Forbidden - lacks report.finance.read (owner only)
+        "422":
+          description: VALIDATION_FAILED (from, to, format)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationErrorResponse"
   /api/v1/media/uploads:
     post:
       tags: [Media]
@@ -7209,6 +7418,36 @@ components:
         cash_net: {type: integer, format: int64}
         cash_rounding: {type: integer, format: int64, description: "Net cash rounding inside cash_sales (V11); not part of total_amount"}
         outlet_expenses: {type: integer, format: int64, description: "Outlet cash fund expenses in the range (V13), outside the drawers"}
+    StockSession:
+      type: object
+      required: [id, kind, status, value_amount, note, created_by, created_by_name, decision_note, created_at, lines]
+      properties:
+        id: {type: string, format: uuid}
+        kind: {type: string, enum: [count, waste]}
+        status: {type: string, enum: [posted, pending, rejected]}
+        value_amount: {type: integer, format: int64, description: Sum of absolute line deltas at the cost when recorded}
+        note: {type: string}
+        created_by: {type: string, format: uuid}
+        created_by_name: {type: string}
+        decided_by: {type: string, format: uuid}
+        decision_note: {type: string}
+        created_at: {type: string, format: date-time}
+        decided_at: {type: string, format: date-time}
+        lines:
+          type: array
+          items:
+            type: object
+            required: [name, unit, expected_quantity, delta, unit_cost_per_1000, reason]
+            properties:
+              ingredient_id: {type: string, format: uuid}
+              product_id: {type: string, format: uuid}
+              name: {type: string}
+              unit: {type: string}
+              expected_quantity: {type: integer, format: int64, description: Balance on the books when recorded}
+              counted_quantity: {type: integer, format: int64}
+              delta: {type: integer, format: int64}
+              unit_cost_per_1000: {type: integer, format: int64}
+              reason: {type: string}
     ErrorResponse:
       type: object
       required: [error]

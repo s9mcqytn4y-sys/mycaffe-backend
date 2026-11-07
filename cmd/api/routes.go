@@ -40,6 +40,7 @@ type handlerSet struct {
 	display    *handler.DisplayHandler
 	print      *handler.PrintHandler
 	device     *handler.DeviceHandler
+	inventory  *handler.InventoryHandler
 	offline    *handler.OfflineHandler
 	receiptOut *handler.ReceiptDeliveryHandler
 	media      *handler.MediaHandler
@@ -104,6 +105,7 @@ func wireHandlers(workerCtx context.Context, cfg *config.Config, db *sqlx.DB, hu
 	h.approval = handler.NewApprovalHandler(service.NewApprovalService(db, operationalService))
 	catalogService := service.NewCatalogService(db)
 	h.catalog = handler.NewCatalogHandler(catalogService)
+	h.inventory = handler.NewInventoryHandler(service.NewInventoryService(db))
 	h.device = handler.NewDeviceHandler(service.NewDeviceService(db, catalogService))
 
 	shiftService := service.NewShiftService(db)
@@ -296,6 +298,7 @@ func registerStoreAndPOSRoutes(v1 *gin.RouterGroup, h *handlerSet) {
 	reports := v1.Group("/reports", h.auth.RequirePermission(rbac.ReportFinanceRead))
 	reports.GET("/sales", h.report.Sales)
 	reports.GET("/summary", h.report.Summary)
+	reports.GET("/gross-profit", h.report.GrossProfit)
 
 	// Media uploads (B3, K9): presigned PUT to R2, then verify + JPEG variants + link to the product.
 	media := v1.Group("/media", handler.LimitBody(4<<10), h.auth.RequirePermission(rbac.CatalogManage))
@@ -351,10 +354,47 @@ func registerKDSAndCatalogRoutes(v1 *gin.RouterGroup, h *handlerSet) {
 	cat.POST("/products", manage, h.catalog.CreateProduct)
 	cat.PATCH("/products/:id", manage, h.catalog.UpdateProduct)
 	cat.DELETE("/products/:id", manage, h.catalog.ArchiveProduct)
+	cat.PUT("/products/:id/bundle-slots", manage, h.catalog.SetBundleSlots)
 	cat.PATCH("/products/:id/availability", h.auth.RequireStaff(), h.catalog.SetAvailability)
 	cat.POST("/products/:id/variants", manage, h.catalog.CreateVariant)
 	cat.PATCH("/variants/:id", manage, h.catalog.UpdateVariant)
 	cat.DELETE("/variants/:id", manage, h.catalog.ArchiveVariant)
+	// Ingredients and recipes (v0.11 PR 11.3, K2): deducted when an order is paid, COGS per line (X10).
+	inv := v1.Group("/inventory", h.auth.RequirePermission(rbac.InventoryManage))
+	inv.GET("/ingredients", h.inventory.ListIngredients)
+	inv.POST("/ingredients", h.inventory.CreateIngredient)
+	inv.PATCH("/ingredients/:id", h.inventory.UpdateIngredient)
+	inv.GET("/recipes/:kind/:id", h.inventory.GetRecipe)
+	inv.PUT("/recipes/:kind/:id", h.inventory.SetRecipe)
+	inv.PUT("/products/:id/unit-cost", h.inventory.SetProductUnitCost)
+	// Purchasing (v0.11 PR 11.4, X7): suppliers, POs with staged receipts, direct purchases, moving-average cost.
+	inv.GET("/suppliers", h.inventory.ListSuppliers)
+	inv.POST("/suppliers", h.inventory.CreateSupplier)
+	inv.PATCH("/suppliers/:id", h.inventory.UpdateSupplier)
+	inv.GET("/purchase-orders", h.inventory.ListPurchaseOrders)
+	inv.POST("/purchase-orders", h.inventory.CreatePurchaseOrder)
+	inv.GET("/purchase-orders/:id", h.inventory.GetPurchaseOrder)
+	inv.PATCH("/purchase-orders/:id", h.inventory.UpdatePurchaseOrder)
+	inv.POST("/purchase-orders/:id/send", h.inventory.TransitionPurchaseOrder("send"))
+	inv.POST("/purchase-orders/:id/cancel", h.inventory.TransitionPurchaseOrder("cancel"))
+	inv.POST("/purchase-orders/:id/close", h.inventory.TransitionPurchaseOrder("close"))
+	inv.POST("/purchase-orders/:id/receipts", h.inventory.ReceivePurchaseOrder)
+	inv.POST("/purchases", h.inventory.DirectPurchase)
+	inv.GET("/receipts", h.inventory.ListReceipts)
+	// Payables (v0.11 PR 11.5, X7): one per receipt, paid at once or in instalments.
+	inv.GET("/payables", h.inventory.ListPayables)
+	inv.POST("/payables/:id/payments", h.inventory.PayPayable)
+	// Stock counts and waste (v0.11 PR 11.6, X8): staff record, the owner approves sessions above the limit.
+	inv.GET("/stock-sessions", h.inventory.ListStockSessions)
+	inv.POST("/stock-sessions/:id/approve", h.inventory.DecideStockSession(true))
+	inv.POST("/stock-sessions/:id/reject", h.inventory.DecideStockSession(false))
+	count := v1.Group("/inventory", h.auth.RequirePermission(rbac.InventoryCount))
+	count.GET("/stock-items", h.inventory.ListStockItems)
+	count.POST("/stock-sessions", h.inventory.SubmitStockSession)
+	// Promotions (v0.11 PR 11.1, K7): one best promotion per line, taken off the line subtotal.
+	cat.GET("/promotions", manage, h.catalog.ListPromotions)
+	cat.POST("/promotions", manage, h.catalog.CreatePromotion)
+	cat.PATCH("/promotions/:id", manage, h.catalog.UpdatePromotion)
 	cat.POST("/modifier-groups", manage, h.catalog.CreateModifierGroup)
 	cat.GET("/modifier-groups", manage, h.catalog.ListModifierGroups)
 	cat.GET("/modifier-groups/:id", manage, h.catalog.GetModifierGroup)

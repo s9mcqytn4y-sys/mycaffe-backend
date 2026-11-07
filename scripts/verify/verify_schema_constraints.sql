@@ -355,6 +355,63 @@ BEGIN
     IF has_table_privilege('mycaffe_app', 'public.kds_tickets', 'DELETE') THEN
         RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may DELETE kds_tickets!';
     END IF;
+    -- 10F-25. Payables (migration 000047): RLS on; payments are append-only.
+    IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.payables'::regclass)
+       OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.payable_payments'::regclass) THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: payables tables do not have row-level security enabled!';
+    END IF;
+    IF has_table_privilege('mycaffe_app', 'public.payable_payments', 'UPDATE')
+       OR has_table_privilege('mycaffe_app', 'public.payable_payments', 'DELETE')
+       OR has_table_privilege('mycaffe_app', 'public.payables', 'DELETE') THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may rewrite payable payments or delete payables!';
+    END IF;
+    -- 10F-26. Stock sessions (migration 000048): RLS on; lines are append-only, sessions are never deleted.
+    IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.stock_sessions'::regclass)
+       OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.stock_session_lines'::regclass) THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: stock session tables do not have row-level security enabled!';
+    END IF;
+    IF has_table_privilege('mycaffe_app', 'public.stock_session_lines', 'UPDATE')
+       OR has_table_privilege('mycaffe_app', 'public.stock_session_lines', 'DELETE')
+       OR has_table_privilege('mycaffe_app', 'public.stock_sessions', 'DELETE') THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may rewrite stock session lines or delete sessions!';
+    END IF;
+    -- 10F-24. Purchasing (migration 000046): RLS on; receipts are append-only (stock and cost already moved).
+    IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.suppliers'::regclass)
+       OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.purchase_orders'::regclass)
+       OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.purchase_order_lines'::regclass)
+       OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.goods_receipts'::regclass)
+       OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.goods_receipt_lines'::regclass) THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: purchasing tables do not have row-level security enabled!';
+    END IF;
+    IF has_table_privilege('mycaffe_app', 'public.goods_receipts', 'UPDATE')
+       OR has_table_privilege('mycaffe_app', 'public.goods_receipts', 'DELETE')
+       OR has_table_privilege('mycaffe_app', 'public.goods_receipt_lines', 'UPDATE')
+       OR has_table_privilege('mycaffe_app', 'public.goods_receipt_lines', 'DELETE')
+       OR has_table_privilege('mycaffe_app', 'public.suppliers', 'DELETE') THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may rewrite goods receipts or delete suppliers!';
+    END IF;
+    -- 10F-23. Ingredients, recipes, movements (migration 000045): RLS on; the movement ledger is append-only.
+    IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.ingredients'::regclass)
+       OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.recipe_items'::regclass)
+       OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.ingredient_movements'::regclass) THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: inventory tables do not have row-level security enabled!';
+    END IF;
+    IF has_table_privilege('mycaffe_app', 'public.ingredient_movements', 'UPDATE')
+       OR has_table_privilege('mycaffe_app', 'public.ingredient_movements', 'DELETE')
+       OR has_table_privilege('mycaffe_app', 'public.ingredients', 'DELETE') THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may rewrite the ingredient ledger or delete ingredients!';
+    END IF;
+    -- 10F-22. Bundle slots (migration 000044): RLS on (replaced as a whole by the owner, so DELETE is granted).
+    IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.bundle_slots'::regclass) THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: bundle_slots does not have row-level security enabled!';
+    END IF;
+    -- 10F-21. Promotions (migration 000043): RLS on; ended by deactivation, never deleted by the app role.
+    IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.promotions'::regclass) THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: promotions does not have row-level security enabled!';
+    END IF;
+    IF has_table_privilege('mycaffe_app', 'public.promotions', 'DELETE') THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may DELETE promotions!';
+    END IF;
     -- 10F-20. Offline order submissions (migration 000039): RLS on, never deleted by the app role (OF9).
     IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.offline_order_submissions'::regclass) THEN
         RAISE EXCEPTION 'SECURITY FAILURE: offline_order_submissions does not have row-level security enabled!';

@@ -133,20 +133,29 @@ type Order struct {
 }
 
 type OrderItem struct {
-	ID                  uuid.UUID         `json:"id" db:"id"`
-	StoreID             uuid.UUID         `json:"store_id" db:"store_id"`
-	OrderID             uuid.UUID         `json:"order_id" db:"order_id"`
-	ProductID           *uuid.UUID        `json:"product_id,omitempty" db:"product_id"`
-	VariantID           *uuid.UUID        `json:"variant_id,omitempty" db:"variant_id"`
-	SnapshotVariant     string            `json:"snapshot_variant_name,omitempty" db:"snapshot_variant_name"`
-	SnapshotSKU         string            `json:"snapshot_sku,omitempty" db:"snapshot_sku"`
-	ConfigHash          string            `json:"config_hash" db:"config_hash"`
-	SnapshotName        string            `json:"snapshot_name" db:"snapshot_name"`
-	UnitBasePrice       int64             `json:"unit_base_price" db:"unit_base_price"`
-	ModifierTotalPrice  int64             `json:"modifier_total_price" db:"modifier_total_price"`
-	SnapshotPrice       int64             `json:"snapshot_price" db:"snapshot_price"`
-	Quantity            int               `json:"quantity" db:"quantity"`
-	SubtotalAmount      int64             `json:"subtotal_amount" db:"subtotal_amount"`
+	ID                 uuid.UUID  `json:"id" db:"id"`
+	StoreID            uuid.UUID  `json:"store_id" db:"store_id"`
+	OrderID            uuid.UUID  `json:"order_id" db:"order_id"`
+	ProductID          *uuid.UUID `json:"product_id,omitempty" db:"product_id"`
+	VariantID          *uuid.UUID `json:"variant_id,omitempty" db:"variant_id"`
+	SnapshotVariant    string     `json:"snapshot_variant_name,omitempty" db:"snapshot_variant_name"`
+	SnapshotSKU        string     `json:"snapshot_sku,omitempty" db:"snapshot_sku"`
+	ConfigHash         string     `json:"config_hash" db:"config_hash"`
+	SnapshotName       string     `json:"snapshot_name" db:"snapshot_name"`
+	UnitBasePrice      int64      `json:"unit_base_price" db:"unit_base_price"`
+	ModifierTotalPrice int64      `json:"modifier_total_price" db:"modifier_total_price"`
+	SnapshotPrice      int64      `json:"snapshot_price" db:"snapshot_price"`
+	Quantity           int        `json:"quantity" db:"quantity"`
+	SubtotalAmount     int64      `json:"subtotal_amount" db:"subtotal_amount"`
+	// PromotionID took PromoDiscountAmount off SubtotalAmount (K7, PR 11.1).
+	PromotionID         *uuid.UUID `json:"promotion_id,omitempty" db:"promotion_id"`
+	PromoDiscountAmount int64      `json:"promo_discount_amount,omitempty" db:"promo_discount_amount"`
+	SnapshotPromoName   *string    `json:"promo_name,omitempty" db:"snapshot_promo_name"`
+	// Bundle lines (X4): every component of one sold bundle shares BundleGroupID; the bundle price is
+	// allocated over them in proportion to their normal prices.
+	BundleProductID     *uuid.UUID        `json:"bundle_product_id,omitempty" db:"bundle_product_id"`
+	BundleGroupID       *uuid.UUID        `json:"bundle_group_id,omitempty" db:"bundle_group_id"`
+	SnapshotBundleName  *string           `json:"bundle_name,omitempty" db:"snapshot_bundle_name"`
 	RoundID             *uuid.UUID        `json:"round_id,omitempty" db:"round_id"`
 	SnapshotPrepStation string            `json:"snapshot_prep_station,omitempty" db:"snapshot_prep_station"`
 	SelectedOptions     string            `json:"selected_options" db:"selected_options"`

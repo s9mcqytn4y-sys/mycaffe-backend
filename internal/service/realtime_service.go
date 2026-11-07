@@ -265,7 +265,7 @@ func (r outboxRow) messages() []*realtime.EventMessage {
 	}
 	// ADR-007: a new request goes to the owners only; the decision also reaches the waiting cashier.
 	switch r.EventType {
-	case "approval.requested":
+	case "approval.requested", "inventory.low_stock":
 		staff = []string{realtime.ChannelOwner}
 	case "approval.decided":
 		staff = append(staff, realtime.ChannelOwner)

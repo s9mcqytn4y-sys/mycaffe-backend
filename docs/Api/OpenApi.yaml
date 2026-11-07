@@ -272,6 +272,66 @@ paths:
         "422":
           $ref: "#/components/responses/ValidationFailed"
 
+  /api/v1/catalog/products/{id}/bundle-slots:
+    put:
+      tags: [Catalog]
+      operationId: setBundleSlots
+      summary: Replace the parts of a bundle product (catalog.manage, audited, X4)
+      description: >-
+        A bundle is a product with product_type bundle whose default variant carries the bundle price; it is never
+        stocked or prepared itself. When sold, each chosen component becomes its own order line (stock, KDS
+        station, refunds and reports per component) and the bundle price is allocated over the components in
+        proportion to their normal prices; paid add-ons are charged on top. Promotions never apply to bundles.
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [slots]
+              properties:
+                slots:
+                  type: array
+                  minItems: 1
+                  maxItems: 10
+                  items:
+                    type: object
+                    required: [name, quantity, product_ids]
+                    properties:
+                      name: {type: string, maxLength: 50}
+                      quantity: {type: integer, minimum: 1, maximum: 10}
+                      product_ids:
+                        type: array
+                        minItems: 1
+                        maxItems: 50
+                        items: {type: string, format: uuid}
+      responses:
+        "200":
+          description: The new slots
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [slots]
+                properties:
+                  slots:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/BundleSlot"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
   /api/v1/catalog/products/{id}:
     parameters:
       - $ref: "#/components/parameters/ResourceID"
@@ -405,6 +465,773 @@ paths:
         "409":
           $ref: "#/components/responses/Conflict"
 
+  /api/v1/inventory/ingredients:
+    get:
+      tags: [Catalog]
+      operationId: listIngredients
+      summary: Ingredients (inventory.manage); low=true lists only active ones below their minimum
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: low
+          in: query
+          schema: {type: boolean}
+      responses:
+        "200":
+          description: Ingredients
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ingredients]
+                properties:
+                  ingredients:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Ingredient"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      tags: [Catalog]
+      operationId: createIngredient
+      summary: Create an ingredient in g, ml or pcs with an optional opening stock and cost (audited, K2)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IngredientInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ingredient"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+  /api/v1/inventory/ingredients/{id}:
+    patch:
+      tags: [Catalog]
+      operationId: updateIngredient
+      summary: Rename, set minimum or manual cost, or deactivate an ingredient (unit is fixed; audited)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IngredientInput"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ingredient"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+  /api/v1/inventory/recipes/{kind}/{id}:
+    parameters:
+      - name: kind
+        in: path
+        required: true
+        schema: {type: string, enum: [variant, option]}
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+    get:
+      tags: [Catalog]
+      operationId: getRecipe
+      summary: Recipe of a variant or a modifier option (inventory.manage)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: Recipe
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/RecipeItem"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    put:
+      tags: [Catalog]
+      operationId: setRecipe
+      summary: Replace a recipe (empty removes it); ingredients are deducted when an order is paid (audited, X6)
+      description: >-
+        Paid orders deduct the recipes of their variants and options; balances may go negative and never block
+        a sale (X5); crossing the minimum emits inventory.low_stock to the owner channel; each line stores its
+        cost of goods (X10).
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items]
+              properties:
+                items:
+                  type: array
+                  maxItems: 30
+                  items:
+                    $ref: "#/components/schemas/RecipeItem"
+      responses:
+        "200":
+          description: The new recipe
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/RecipeItem"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+  /api/v1/inventory/suppliers:
+    get:
+      tags: [Catalog]
+      operationId: listSuppliers
+      summary: Suppliers, active first (inventory.manage)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: Suppliers
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  suppliers:
+                    type: array
+                    items: {$ref: "#/components/schemas/Supplier"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    post:
+      tags: [Catalog]
+      operationId: createSupplier
+      summary: Create a supplier (audited, X7)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/SupplierInput"}
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Supplier"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "422": {$ref: "#/components/responses/ValidationFailed"}
+  /api/v1/inventory/suppliers/{id}:
+    patch:
+      tags: [Catalog]
+      operationId: updateSupplier
+      summary: Update or deactivate a supplier (audited)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/SupplierInput"}
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Supplier"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "422": {$ref: "#/components/responses/ValidationFailed"}
+  /api/v1/inventory/purchase-orders:
+    get:
+      tags: [Catalog]
+      operationId: listPurchaseOrders
+      summary: Purchase orders, newest first, optionally by status (inventory.manage)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - {name: status, in: query, schema: {type: string, enum: [draft, sent, partial, received, closed, cancelled]}}
+      responses:
+        "200":
+          description: Purchase orders (without lines)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  purchase_orders:
+                    type: array
+                    items: {$ref: "#/components/schemas/PurchaseOrder"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    post:
+      tags: [Catalog]
+      operationId: createPurchaseOrder
+      summary: Create a draft purchase order (audited, X7)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/PurchaseOrderInput"}
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PurchaseOrder"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "422": {$ref: "#/components/responses/ValidationFailed"}
+  /api/v1/inventory/purchase-orders/{id}:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      tags: [Catalog]
+      operationId: getPurchaseOrder
+      summary: A purchase order with its lines and received quantities
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: Purchase order
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PurchaseOrder"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    patch:
+      tags: [Catalog]
+      operationId: updatePurchaseOrder
+      summary: Edit a draft purchase order (lines replace all lines); 409 once sent
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/PurchaseOrderInput"}
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PurchaseOrder"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "422": {$ref: "#/components/responses/ValidationFailed"}
+  /api/v1/inventory/purchase-orders/{id}/{action}:
+    post:
+      tags: [Catalog]
+      operationId: transitionPurchaseOrder
+      summary: send (draft), cancel (draft or sent) or close (partial, stop waiting for the rest); audited
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: action, in: path, required: true, schema: {type: string, enum: [send, cancel, close]}}
+      responses:
+        "200":
+          description: New state
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PurchaseOrder"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+  /api/v1/inventory/purchase-orders/{id}/receipts:
+    post:
+      tags: [Catalog]
+      operationId: receivePurchaseOrder
+      summary: Receive a delivery of a sent or partial PO (audited, X7)
+      description: >-
+        Each line adds quantity x conversion base units to its ingredient or ready-to-serve product and blends
+        its cost (the PO price, or unit_price to correct it) into the moving average; negative balances carry no
+        weight. The PO becomes partial or received. Receipts are append-only.
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [lines]
+              properties:
+                note: {type: string, maxLength: 500}
+                lines:
+                  type: array
+                  items:
+                    type: object
+                    required: [purchase_order_line_id, quantity]
+                    properties:
+                      purchase_order_line_id: {type: string, format: uuid}
+                      quantity: {type: integer, format: int64, minimum: 1, description: At most the quantity not yet received}
+                      unit_price: {type: integer, format: int64, minimum: 0, description: Corrects the PO price}
+      responses:
+        "201":
+          description: Receipt
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/GoodsReceipt"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "422": {$ref: "#/components/responses/ValidationFailed"}
+  /api/v1/inventory/purchases:
+    post:
+      tags: [Catalog]
+      operationId: directPurchase
+      summary: Record goods bought without a PO (supplier_id or supplier_name); stock and moving-average cost at once
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [lines]
+              properties:
+                supplier_id: {type: string, format: uuid}
+                supplier_name: {type: string, maxLength: 100}
+                pay_with: {type: string, enum: [outlet_cash, transfer, cash], description: "Settle at once; omit to leave a payable (PR 11.5)"}
+                payment_reference: {type: string, maxLength: 100}
+                note: {type: string, maxLength: 500}
+                lines:
+                  type: array
+                  items: {$ref: "#/components/schemas/StockLine"}
+      responses:
+        "201":
+          description: Receipt
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/GoodsReceipt"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "422": {$ref: "#/components/responses/ValidationFailed"}
+  /api/v1/inventory/payables:
+    get:
+      tags: [Catalog]
+      operationId: listPayables
+      summary: Supplier payables, open ones by due date first (inventory.manage, X7)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - {name: status, in: query, schema: {type: string, enum: [open, paid]}}
+      responses:
+        "200":
+          description: Payables
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  payables:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, goods_receipt_id, supplier_name, amount, paid_amount, remaining, due_date, overdue, received_at]
+                      properties:
+                        id: {type: string, format: uuid}
+                        goods_receipt_id: {type: string, format: uuid}
+                        purchase_order_number: {type: integer}
+                        supplier_id: {type: string, format: uuid}
+                        supplier_name: {type: string}
+                        amount: {type: integer, format: int64}
+                        paid_amount: {type: integer, format: int64}
+                        remaining: {type: integer, format: int64}
+                        due_date: {type: string, format: date, description: "Receipt date in the store time zone plus the supplier payment terms"}
+                        overdue: {type: boolean}
+                        received_at: {type: string, format: date-time}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "422": {$ref: "#/components/responses/ValidationFailed"}
+  /api/v1/inventory/payables/{id}/payments:
+    post:
+      tags: [Catalog]
+      operationId: payPayable
+      summary: Pay an instalment or the rest of a payable (audited, X7)
+      description: >-
+        outlet_cash writes an outlet fund expense of category ingredients (the balance must cover it, V13);
+        transfer and cash are recorded with an optional reference. Payments are append-only.
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount, method]
+              properties:
+                amount: {type: integer, format: int64, minimum: 1, description: At most what is still owed}
+                method: {type: string, enum: [outlet_cash, transfer, cash]}
+                reference: {type: string, maxLength: 100}
+                note: {type: string, maxLength: 500}
+      responses:
+        "201":
+          description: The payable after the payment
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409":
+          description: OUTLET_INSUFFICIENT_FUNDS
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "422": {$ref: "#/components/responses/ValidationFailed"}
+  /api/v1/inventory/stock-items:
+    get:
+      tags: [Catalog]
+      operationId: listStockItems
+      summary: Items staff can count or write off, without their balances (inventory.count, blind count, X8)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: Active ingredients and stock-tracked ready-to-serve products
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, kind, name, unit]
+                      properties:
+                        id: {type: string, format: uuid}
+                        kind: {type: string, enum: [ingredient, product]}
+                        name: {type: string}
+                        unit: {type: string}
+        "403": {$ref: "#/components/responses/Forbidden"}
+  /api/v1/inventory/stock-sessions:
+    post:
+      tags: [Catalog]
+      operationId: submitStockSession
+      summary: Record a stock count or waste session (inventory.count, audited, X8)
+      description: >-
+        count lines carry the counted quantity, waste lines the quantity thrown away, in base units. The value is
+        the sum of each line's absolute delta at current cost. A session by the owner, or worth Rp50.000 or less,
+        posts at once; otherwise it is pending until the owner approves or rejects it. Posting applies the delta
+        recorded at counting time, so sales made in between stay deducted.
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind, lines]
+              properties:
+                kind: {type: string, enum: [count, waste]}
+                note: {type: string, maxLength: 500}
+                lines:
+                  type: array
+                  minItems: 1
+                  maxItems: 200
+                  items:
+                    type: object
+                    required: [quantity]
+                    description: Exactly one of ingredient_id or product_id; each item at most once per session
+                    properties:
+                      ingredient_id: {type: string, format: uuid}
+                      product_id: {type: string, format: uuid}
+                      quantity: {type: integer, format: int64, minimum: 0, description: "Counted (count) or wasted (waste, at least 1)"}
+                      reason: {type: string, maxLength: 200}
+      responses:
+        "201":
+          description: The session; status posted or pending
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/StockSession"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "422": {$ref: "#/components/responses/ValidationFailed"}
+    get:
+      tags: [Catalog]
+      operationId: listStockSessions
+      summary: Stock sessions newest first; status=pending is the approval queue of the owner (inventory.manage)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - {name: status, in: query, schema: {type: string, enum: [posted, pending, rejected]}}
+      responses:
+        "200":
+          description: Up to 100 sessions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  stock_sessions:
+                    type: array
+                    items: {$ref: "#/components/schemas/StockSession"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "422": {$ref: "#/components/responses/ValidationFailed"}
+  /api/v1/inventory/stock-sessions/{id}/approve:
+    post:
+      tags: [Catalog]
+      operationId: approveStockSession
+      summary: Approve and post a pending stock session (inventory.manage, audited)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                note: {type: string, maxLength: 500}
+      responses:
+        "200":
+          description: The posted session
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/StockSession"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409":
+          description: The session was already decided
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+  /api/v1/inventory/stock-sessions/{id}/reject:
+    post:
+      tags: [Catalog]
+      operationId: rejectStockSession
+      summary: Reject a pending stock session; stock is left alone (inventory.manage, audited)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                note: {type: string, maxLength: 500}
+      responses:
+        "200":
+          description: The rejected session
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/StockSession"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409":
+          description: The session was already decided
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+  /api/v1/inventory/receipts:
+    get:
+      tags: [Catalog]
+      operationId: listReceipts
+      summary: Goods receipts (PO deliveries and direct purchases), newest first
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - {name: purchase_order_id, in: query, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: Receipts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  receipts:
+                    type: array
+                    items: {$ref: "#/components/schemas/GoodsReceipt"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+  /api/v1/inventory/products/{id}/unit-cost:
+    put:
+      tags: [Catalog]
+      operationId: setProductUnitCost
+      summary: Unit cost of a ready-to-serve product for its COGS (X9; purchases keep it from PR 11.4)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [unit_cost]
+              properties:
+                unit_cost: {type: integer, format: int64, minimum: 0}
+      responses:
+        "204":
+          description: Saved
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+  /api/v1/catalog/promotions:
+    get:
+      tags: [Catalog]
+      operationId: listPromotions
+      summary: Promotions of the store, active first (catalog.manage)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: Promotions
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [promotions]
+                properties:
+                  promotions:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Promotion"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      tags: [Catalog]
+      operationId: createPromotion
+      summary: Create an automatic promotion (catalog.manage, audited, K7)
+      description: >-
+        One best running promotion per line, never stacked, taken off the line subtotal; the cashier discount
+        is computed on the subtotal after promotions (X2). The quota counts paid orders. Offline orders use
+        the promotions of their catalog snapshot at the time the order was taken (X3).
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PromotionInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Promotion"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+  /api/v1/catalog/promotions/{id}:
+    patch:
+      tags: [Catalog]
+      operationId: updatePromotion
+      summary: Update or end (is_active=false) a promotion (catalog.manage, audited)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PromotionInput"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Promotion"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
   /api/v1/catalog/modifier-groups:
     get:
       tags: [Catalog]
@@ -4073,6 +4900,62 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ValidationErrorResponse"
+  /api/v1/reports/gross-profit:
+    get:
+      tags: [Reports]
+      operationId: getGrossProfitReport
+      summary: Revenue, COGS and gross profit per menu item (X10)
+      description: >-
+        Paid order lines grouped by item and variant. Revenue is the line subtotal after promotions and before
+        the cashier discount and refunds (as in the item sales report). COGS is what was stored at payment;
+        lines paid before ingredient costing count as zero cost and show in lines_without_cogs.
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - $ref: "#/components/parameters/ReportFrom"
+        - $ref: "#/components/parameters/ReportTo"
+        - $ref: "#/components/parameters/ReportFormat"
+      responses:
+        "200":
+          description: "Report (JSON) or CSV download (menu,kuantitas,pendapatan,hpp,laba_kotor,margin_bps,baris_tanpa_hpp,pendapatan_tanpa_hpp)"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [from, to, revenue, cogs, gross_profit, margin_bps, rows]
+                properties:
+                  from: {type: string, format: date}
+                  to: {type: string, format: date}
+                  revenue: {type: integer, format: int64}
+                  cogs: {type: integer, format: int64}
+                  gross_profit: {type: integer, format: int64}
+                  margin_bps: {type: integer, format: int64, description: Gross profit over revenue in basis points}
+                  rows:
+                    type: array
+                    items:
+                      type: object
+                      required: [key, quantity, revenue, cogs, gross_profit, margin_bps, lines_without_cogs, revenue_without_cogs]
+                      properties:
+                        key: {type: string}
+                        quantity: {type: integer, format: int64}
+                        revenue: {type: integer, format: int64}
+                        cogs: {type: integer, format: int64}
+                        gross_profit: {type: integer, format: int64}
+                        margin_bps: {type: integer, format: int64}
+                        lines_without_cogs: {type: integer, format: int64}
+                        revenue_without_cogs: {type: integer, format: int64}
+            text/csv:
+              schema:
+                type: string
+        "403":
+          description: Forbidden - lacks report.finance.read (owner only)
+        "422":
+          description: VALIDATION_FAILED (from, to, format)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationErrorResponse"
   /api/v1/media/uploads:
     post:
       tags: [Media]
@@ -5246,6 +6129,213 @@ components:
           type: string
         queue_number:
           type: string
+    Ingredient:
+      type: object
+      required: [id, name, unit, stock_quantity, min_stock, cost_per_1000, is_active, low]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        unit: {type: string, enum: [g, ml, pcs]}
+        stock_quantity:
+          type: integer
+          format: int64
+          description: May be negative (X5); corrected by the stock count.
+        min_stock: {type: integer, format: int64}
+        cost_per_1000:
+          type: integer
+          format: int64
+          description: Rupiah per 1000 units (e.g. 300000 = Rp300 per gram)
+        is_active: {type: boolean}
+        low: {type: boolean, description: stock_quantity below min_stock}
+        updated_at: {type: string, format: date-time}
+    IngredientInput:
+      type: object
+      properties:
+        name: {type: string, maxLength: 80}
+        unit: {type: string, enum: [g, ml, pcs], description: Create only}
+        min_stock: {type: integer, format: int64}
+        cost_per_1000: {type: integer, format: int64, description: Manual cost until purchases set it (PR 11.4)}
+        is_active: {type: boolean}
+        opening_quantity: {type: integer, format: int64, description: Create only; recorded as an opening movement}
+        opening_cost: {type: integer, format: int64, description: Total rupiah of the opening quantity; sets cost_per_1000}
+    Supplier:
+      type: object
+      required: [id, name, contact, payment_days, notes, is_active]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        contact: {type: string}
+        payment_days: {type: integer, description: "Payment terms in days (due date of payables, PR 11.5)"}
+        notes: {type: string}
+        is_active: {type: boolean}
+    SupplierInput:
+      type: object
+      properties:
+        name: {type: string, maxLength: 100}
+        contact: {type: string, maxLength: 150}
+        payment_days: {type: integer, minimum: 0, maximum: 180}
+        notes: {type: string, maxLength: 500}
+        is_active: {type: boolean}
+    StockLine:
+      type: object
+      description: >-
+        Buys quantity purchase units at unit_price each; conversion is the base units (g, ml, pcs or product
+        units) in one purchase unit. Exactly one of ingredient_id or product_id (a ready-to-serve product, X9).
+      required: [purchase_unit, conversion, quantity, unit_price]
+      properties:
+        ingredient_id: {type: string, format: uuid}
+        product_id: {type: string, format: uuid}
+        purchase_unit: {type: string, maxLength: 30, example: karton}
+        conversion: {type: integer, format: int64, minimum: 1, example: 12000}
+        quantity: {type: integer, format: int64, minimum: 1}
+        unit_price: {type: integer, format: int64, minimum: 0}
+    PurchaseOrder:
+      type: object
+      required: [id, number, supplier_id, supplier_name, status, notes, total, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        number: {type: integer}
+        supplier_id: {type: string, format: uuid}
+        supplier_name: {type: string}
+        status: {type: string, enum: [draft, sent, partial, received, closed, cancelled]}
+        expected_date: {type: string, format: date}
+        notes: {type: string}
+        total: {type: integer, format: int64}
+        created_at: {type: string, format: date-time}
+        lines:
+          type: array
+          items:
+            allOf:
+              - $ref: "#/components/schemas/StockLine"
+              - type: object
+                properties:
+                  id: {type: string, format: uuid}
+                  item_name: {type: string}
+                  received_quantity: {type: integer, format: int64}
+    PurchaseOrderInput:
+      type: object
+      properties:
+        supplier_id: {type: string, format: uuid}
+        expected_date: {type: string, format: date}
+        notes: {type: string, maxLength: 500}
+        lines:
+          type: array
+          description: Create, or replace all lines of a draft
+          items:
+            $ref: "#/components/schemas/StockLine"
+    GoodsReceipt:
+      type: object
+      required: [id, supplier_name, total_amount, note, received_at]
+      properties:
+        id: {type: string, format: uuid}
+        purchase_order_id: {type: string, format: uuid, description: Absent for a direct purchase}
+        supplier_id: {type: string, format: uuid}
+        supplier_name: {type: string}
+        total_amount: {type: integer, format: int64}
+        note: {type: string}
+        received_at: {type: string, format: date-time}
+    RecipeItem:
+      type: object
+      required: [ingredient_id, quantity]
+      properties:
+        ingredient_id: {type: string, format: uuid}
+        name: {type: string}
+        unit: {type: string}
+        quantity:
+          type: integer
+          format: int64
+          description: Per unit sold; a modifier option may be negative to substitute (X6)
+    BundleSlot:
+      type: object
+      required: [id, name, quantity, display_order, product_ids]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        quantity: {type: integer, minimum: 1, maximum: 10}
+        display_order: {type: integer}
+        product_ids:
+          type: array
+          description: Products the customer may choose for this part
+          items: {type: string, format: uuid}
+    CatalogPromotion:
+      type: object
+      required: [id, name, kind, value, product_ids, category_ids, days_mask]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        kind:
+          type: string
+          enum: [percent, amount]
+        value:
+          type: integer
+          format: int64
+          description: bps for percent (1-10000), rupiah per unit for amount
+        product_ids:
+          type: array
+          items: {type: string, format: uuid}
+        category_ids:
+          type: array
+          items: {type: string, format: uuid}
+        starts_at:
+          type: string
+          format: date-time
+        ends_at:
+          type: string
+          format: date-time
+        days_mask:
+          type: integer
+          description: Weekday bits, bit 0 = Sunday (127 = every day)
+        start_minute:
+          type: integer
+          description: Happy hour start, minutes after midnight in the store time zone
+        end_minute:
+          type: integer
+          description: Happy hour end (exclusive); below start_minute runs past midnight
+        quota:
+          type: integer
+          description: Paid orders allowed; a used-up quota stops the promotion online
+    Promotion:
+      allOf:
+        - $ref: "#/components/schemas/CatalogPromotion"
+        - type: object
+          required: [used_count, is_active, created_at, updated_at]
+          properties:
+            used_count:
+              type: integer
+            is_active:
+              type: boolean
+            created_at:
+              type: string
+              format: date-time
+            updated_at:
+              type: string
+              format: date-time
+    PromotionInput:
+      type: object
+      description: Create (name, kind, value and at least one product or category) or partial update.
+      properties:
+        name: {type: string, maxLength: 80}
+        kind: {type: string, enum: [percent, amount]}
+        value: {type: integer, format: int64}
+        product_ids:
+          type: array
+          items: {type: string, format: uuid}
+        category_ids:
+          type: array
+          items: {type: string, format: uuid}
+        starts_at: {type: string, format: date-time}
+        ends_at: {type: string, format: date-time}
+        clear_period: {type: boolean}
+        days_mask: {type: integer, minimum: 1, maximum: 127}
+        start_minute: {type: integer, minimum: 0, maximum: 1439}
+        end_minute: {type: integer, minimum: 1, maximum: 1440}
+        clear_hours: {type: boolean}
+        quota: {type: integer, minimum: 1}
+        clear_quota: {type: boolean}
+        is_active: {type: boolean}
     Device:
       type: object
       required: [id, name, prefix, created_at]
@@ -6065,7 +7155,7 @@ components:
           maxLength: 1000
         product_type:
           type: string
-          enum: [prepared, ready_to_serve]
+          enum: [prepared, ready_to_serve, bundle]
         prep_station:
           type: string
           enum: [bar, kitchen, none]
@@ -6140,7 +7230,7 @@ components:
                 type: string
               type:
                 type: string
-                enum: [prepared, ready_to_serve]
+                enum: [prepared, ready_to_serve, bundle]
               prep_station:
                 type: string
                 enum: [bar, kitchen, none]
@@ -6328,6 +7418,36 @@ components:
         cash_net: {type: integer, format: int64}
         cash_rounding: {type: integer, format: int64, description: "Net cash rounding inside cash_sales (V11); not part of total_amount"}
         outlet_expenses: {type: integer, format: int64, description: "Outlet cash fund expenses in the range (V13), outside the drawers"}
+    StockSession:
+      type: object
+      required: [id, kind, status, value_amount, note, created_by, created_by_name, decision_note, created_at, lines]
+      properties:
+        id: {type: string, format: uuid}
+        kind: {type: string, enum: [count, waste]}
+        status: {type: string, enum: [posted, pending, rejected]}
+        value_amount: {type: integer, format: int64, description: Sum of absolute line deltas at the cost when recorded}
+        note: {type: string}
+        created_by: {type: string, format: uuid}
+        created_by_name: {type: string}
+        decided_by: {type: string, format: uuid}
+        decision_note: {type: string}
+        created_at: {type: string, format: date-time}
+        decided_at: {type: string, format: date-time}
+        lines:
+          type: array
+          items:
+            type: object
+            required: [name, unit, expected_quantity, delta, unit_cost_per_1000, reason]
+            properties:
+              ingredient_id: {type: string, format: uuid}
+              product_id: {type: string, format: uuid}
+              name: {type: string}
+              unit: {type: string}
+              expected_quantity: {type: integer, format: int64, description: Balance on the books when recorded}
+              counted_quantity: {type: integer, format: int64}
+              delta: {type: integer, format: int64}
+              unit_cost_per_1000: {type: integer, format: int64}
+              reason: {type: string}
     ErrorResponse:
       type: object
       required: [error]
@@ -6561,6 +7681,21 @@ components:
           type: string
           maxLength: 250
           example: Less ice
+        bundle_items:
+          type: array
+          description: For a bundle product, exactly one choice per slot (X4). Each becomes its own order line.
+          items:
+            type: object
+            required: [slot_id, product_id]
+            properties:
+              slot_id: {type: string, format: uuid}
+              product_id: {type: string, format: uuid}
+              variant_id: {type: string, format: uuid}
+              modifiers:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SelectedModifierInput"
+              notes: {type: string}
 
     CreateOrderRequest:
       type: object
@@ -6683,6 +7818,25 @@ components:
           type: integer
           format: int64
           example: 72000
+        promotion_id:
+          type: string
+          format: uuid
+          description: The promotion that took promo_discount_amount off subtotal_amount (K7).
+        promo_discount_amount:
+          type: integer
+          format: int64
+        promo_name:
+          type: string
+        bundle_name:
+          type: string
+          description: The bundle this component line was sold in (X4); lines of one bundle share bundle_group_id.
+        bundle_group_id:
+          type: string
+          format: uuid
+        cogs_amount:
+          type: integer
+          format: int64
+          description: Cost of goods sold of the line, stored when the order is paid (X10); absent before payment.
         options:
           type: array
           items:
@@ -7135,6 +8289,11 @@ components:
         service_bps:
           type: integer
           example: 500
+        promotions:
+          type: array
+          description: Active promotions (K7) for badges; the server decides which one prices a line (quote/order).
+          items:
+            $ref: "#/components/schemas/CatalogPromotion"
         categories:
           type: array
           items:

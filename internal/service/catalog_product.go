@@ -282,7 +282,7 @@ func applyProduct(p *domain.Product, in ProductInput, f fieldErrors) {
 		p.Description = f.text("description", *in.Description, 0, 1000)
 	}
 	if in.ProductType != nil {
-		f.oneOf("product_type", *in.ProductType, domain.ProductTypePrepared, domain.ProductTypeReadyToServe)
+		f.oneOf("product_type", *in.ProductType, domain.ProductTypePrepared, domain.ProductTypeReadyToServe, domain.ProductTypeBundle)
 		p.ProductType = *in.ProductType
 	}
 	if in.PrepStation != nil {
@@ -302,6 +302,13 @@ func applyProduct(p *domain.Product, in ProductInput, f fieldErrors) {
 	if in.StockQuantity != nil {
 		f.intRange("stock_quantity", int64(*in.StockQuantity), 0, 1_000_000)
 		p.StockQuantity = *in.StockQuantity
+	}
+	if p.ProductType == domain.ProductTypeBundle {
+		// A bundle is never stocked or prepared itself: its components are (X4).
+		if p.TrackStock {
+			f.add("track_stock", "paket tidak memakai stok sendiri; stok dihitung per komponen")
+		}
+		p.PrepStation = domain.PrepStationNone
 	}
 	if in.ClearCategory {
 		p.CategoryID = nil

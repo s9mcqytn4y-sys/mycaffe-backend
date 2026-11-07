@@ -286,6 +286,8 @@ type catalogSnapshot struct {
 	CashRoundingStep      int               `json:"cash_rounding_step"`
 	CashierMaxDiscountBPS int64             `json:"cashier_max_discount_bps"`
 	Products              []snapshotProduct `json:"products"`
+	// Promotions travel with the snapshot so an offline order is priced as it was sold (X3).
+	Promotions []CatalogPromotion `json:"promotions"`
 }
 
 func pricingSnapshot(view *CatalogView, settings domain.StoreSettings) catalogSnapshot {
@@ -304,7 +306,8 @@ func pricingSnapshot(view *CatalogView, settings domain.StoreSettings) catalogSn
 	snap := catalogSnapshot{
 		TaxBPS: view.Store.TaxBPS, ServiceBPS: view.Store.ServiceBPS,
 		CashRoundingStep: settings.CashRoundingStep, CashierMaxDiscountBPS: settings.CashierMaxDiscountBPS,
-		Products: make([]snapshotProduct, 0, len(view.Products)),
+		Products:   make([]snapshotProduct, 0, len(view.Products)),
+		Promotions: view.Promotions,
 	}
 	for _, p := range view.Products {
 		sp := snapshotProduct{ID: p.ID, Name: p.Name, PrepStation: p.PrepStation, TrackStock: p.TrackStock,

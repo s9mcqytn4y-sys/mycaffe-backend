@@ -293,6 +293,7 @@ func (s *OfflineSyncService) place(ctx context.Context, tx *sqlx.Tx, storeID, de
 	if err != nil {
 		return nil, err
 	}
+	pricing.at = o.OfflineCreatedAt
 	if o.DiscountBPS > pricing.snap.CashierMaxDiscountBPS {
 		return nil, &ValidationError{Fields: map[string]string{"discount_bps": "melebihi batas diskon kasir; diskon offline tidak bisa disetujui owner"}}
 	}

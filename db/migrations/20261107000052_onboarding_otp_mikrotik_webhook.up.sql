@@ -31,6 +31,20 @@ ALTER TABLE tenant_onboarding_applications
     ADD CONSTRAINT chk_onboarding_otp_attempts
     CHECK (email_otp_attempts >= 0);
 
+ALTER TABLE governance_audit_logs
+    DROP CONSTRAINT IF EXISTS chk_gov_audit_action;
+ALTER TABLE governance_audit_logs
+    ADD CONSTRAINT chk_gov_audit_action CHECK (action IN (
+        'LEGAL_ACCEPTED', 'KYB_UPDATED', 'KYB_REVIEWED',
+        'BYOK_MIDTRANS_UPDATED', 'BYOK_MIDTRANS_VERIFIED', 'BYOK_MIDTRANS_DISABLED',
+        'STORE_CMS_UPDATED', 'NOTIFICATION_CONFIG_UPDATED',
+        'NETWORK_NODE_UPSERTED', 'NETWORK_SIMULATION_RUN',
+        'CLEARANCE_REQUESTED', 'CLEARANCE_CANCELLED', 'CLEARANCE_EXECUTED',
+        'PLATFORM_INVOICE_CREATED', 'PLATFORM_INVOICE_SETTLED',
+        'PLATFORM_INVOICE_WEBHOOK_SETTLED', 'PLATFORM_INVOICE_WEBHOOK_CLOSED',
+        'MIKROTIK_PROFILE_UPDATED', 'MIKROTIK_RSC_GENERATED'
+    ));
+
 -- Allow unverified/trialing tenants to configure Midtrans Sandbox BYOK credentials immediately
 -- upon provisioning (Production BYOK remains strictly gated on kyb_status = 'verified' in service layer).
 UPDATE subscription_plans

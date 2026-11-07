@@ -5,6 +5,18 @@ DROP FUNCTION IF EXISTS resolve_platform_invoice_webhook_context(VARCHAR);
 
 DROP TABLE IF EXISTS store_mikrotik_profiles;
 
+ALTER TABLE governance_audit_logs
+    DROP CONSTRAINT IF EXISTS chk_gov_audit_action;
+ALTER TABLE governance_audit_logs
+    ADD CONSTRAINT chk_gov_audit_action CHECK (action IN (
+        'LEGAL_ACCEPTED', 'KYB_UPDATED', 'KYB_REVIEWED',
+        'BYOK_MIDTRANS_UPDATED', 'BYOK_MIDTRANS_VERIFIED', 'BYOK_MIDTRANS_DISABLED',
+        'STORE_CMS_UPDATED', 'NOTIFICATION_CONFIG_UPDATED',
+        'NETWORK_NODE_UPSERTED', 'NETWORK_SIMULATION_RUN',
+        'CLEARANCE_REQUESTED', 'CLEARANCE_CANCELLED', 'CLEARANCE_EXECUTED',
+        'PLATFORM_INVOICE_CREATED', 'PLATFORM_INVOICE_SETTLED'
+    ));
+
 UPDATE tenant_onboarding_applications
 SET status = 'submitted'
 WHERE status = 'pending_email_otp';

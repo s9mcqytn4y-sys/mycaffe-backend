@@ -1,18 +1,24 @@
 # Competitor Deep Research: InterActive Technologies (`interactive.co.id`)
 
-Tanggal evaluasi: 2026-11-07
+Tanggal evaluasi: 2026-11-08 (Diverifikasi langsung via Playwright MCP pada 5 URL publik interactive.co.id)
 Penyusun: Principal Systems Architect & Product Strategy (AzureDevID)
 Benchmark pembanding sebelumnya: [CompetitorAnalysisMajoo.md](CompetitorAnalysisMajoo.md)
 
 ## 1. Executive Summary
 
-InterActive Technologies Corp (**PT Interaktif Internasional**, berbasis di Surabaya sejak akhir 1990-an/2000-an) adalah pemain POS & hardware F&B/ritel mapan di Indonesia yang mengandalkan strategi **bundling perangkat keras berpemilik + lisensi tahunan per cabang + akuisisi sales lapangan korporat**. Kekuatan utama mereka terletak pada kematangan integrasi perangkat kasir fisik (printer thermal, laci kasir RJ11, Android terminal dual-screen, kiosk mandiri) dan kredibilitas korporasi (PSE Komdigi, ISO, jaringan cabang kota besar).
+InterActive Technologies Corp (**PT Interaktif Internasional**, berbasis di Surabaya sejak akhir 1990-an/2000-an) adalah pemain POS & hardware F&B/ritel mapan di Indonesia yang mengandalkan strategi **bundling perangkat keras + paket freemium pembuka + lisensi berbayar bertingkat per cabang/per perangkat**. Kekuatan utama mereka terletak pada kematangan integrasi perangkat kasir fisik (printer thermal, laci kasir RJ11, Android terminal dual-screen, kiosk mandiri) dan kredibilitas korporasi (PSE Komdigi, ISO, jaringan cabang kota besar).
 
-Namun, arsitektur warisan (*legacy*) mereka menyisakan celah besar bagi kafe independen, coffee shop modern, dan jaringan multi-gerai UMKM:
-1. **Biaya awal (CapEx) tinggi dan lock-in perangkat keras**, berbanding terbalik dengan kebutuhan pemilik kafe yang ingin langsung memakai tablet Android/iPad/laptop yang sudah ada.
-2. **Onboarding lambat berbasis sales call/demo terjadwal**, bukan *self-service instant SaaS onboarding* dengan uji coba transparan.
-3. **Ketergantungan rekonsiliasi pembayaran agregator atau setup EDC manual**, sedangkan MyCaffe by AzureDevID menawarkan **Dual-Lane BYOK Midtrans Core API (0% potongan komisi platform, pencairan 100% langsung ke rekening tenant)** ditambah fallback QRIS Statis/Tunai instan.
-4. **Pengalaman QR Table Order pelanggan yang terasa seperti web katalog lama**, bukan PWA modern cepat tanpa instalasi aplikasi dengan pelacakan pesanan *real-time* via WebSocket.
+Berdasarkan ekstraksi langsung Playwright hari ini pada seluruh halaman publik MyProfit:
+1. **Model Lisensi Resmi InterActive MyProfit**:
+   - **Free For Life (`Rp 0`)**: Cloud server, unlimited transaksi, unlimited cashier print, laporan harian, 2 slot user, QRIS dinamis, closing kasir, paperless receipt email.
+   - **Basic**: Rp 149.000/bln (atau Rp 1.188.000/thn setara Rp 3.300/hari per lokasi). Fitur: Simple inventory, multi branch, multi warehouse, EDC integration, BI report.
+   - **Pro**: Rp 249.000/bln (atau Rp 2.388.000/thn setara Rp 6.650/hari per lokasi). Fitur: Customer self-order QR multiple, dine-in, eat first / pay first, reservasi, Grab Food integration, multi floor.
+   - **Enterprise**: Rp 299.000/bln (atau Rp 2.988.000/thn setara Rp 8.200/hari per lokasi). Fitur: Bill of Material (BOM), Purchasing, Table Management System.
+   - **Add-On License (Per Perangkat / Per Bulan)**: Slot User tambahan (Rp 69k/bln), Kitchen Print Out (Rp 69k/bln), Kitchen Display System / KDS (Rp 69k/bln), Order Queue Monitor / TV (Rp 149k/bln), Complete Inventory (Rp 199k/bln), MyOrder Tablet (Rp 69k/bln), MyOrder Kiosk (Rp 199k/bln).
+2. **Keterbatasan Utama Kompetitor**:
+   - **Android-Centric**: Banyak fitur operasional hanya aktif di ekosistem Android ("berlaku pada aplikasi android", "Pay When Done Eat First on Android"), membatasi fleksibilitas kafe yang memakai iPad / laptop browser.
+   - **Biaya Tersembunyi pada Add-on Device**: Fitur krusial seperti KDS dapur, antrean TV, dan printer dapur dikenakan biaya sewa bulanan tambahan per unit perangkat.
+   - **White-Label Tidak Transparan**: Halaman white-label hanya berupa formulir prospek sales, tanpa transparansi harga dan arsitektur teknis.
 
 ---
 
@@ -56,12 +62,13 @@ Namun, arsitektur warisan (*legacy*) mereka menyisakan celah besar bagi kafe ind
 
 ### 4.2 Perbandingan Skema Harga
 
-| Aspek Biaya | InterActive / Kompetitor Korporat | MyCaffe by AzureDevID |
-|-------------|-----------------------------------|-----------------------|
-| Biaya Langganan Software | Sekitar Rp 250.000 s.d. Rp 500.000+/bulan/outlet (sering ditagih tahunan di muka) | Transparan bulanan atau tahunan (hemat 20%): **Starter UMKM Rp 149.000/bln**, **Pro Cafe & Resto Rp 299.000/bln**, **Enterprise White-Label Rp 599.000/bln** |
-| Komisi per Transaksi QR Order | Sering mengenakan biaya layanan per pesanan atau menahan dana pencairan H+1/H+2 melalui rekening agregator | **0% Komisi Platform per Transaksi**; skema BYOK Midtrans mencairkan dana langsung dari Midtrans ke rekening bank tenant |
-| Perangkat Keras | Paket bundling Rp 4.500.000 s.d. Rp 12.000.000+ | **Open-Standard Hardware**: bebas pakai tablet/HP/printer ESC/POS 58mm/80mm merek apa saja (Epson, Xprinter, Codesoft, VSC, Sunmi) |
-| Uji Coba | Harus mengisi formulir janji temu tim sales | **Self-Service 14-Day Free Trial (`Rp 0`)** dengan persetujuan digital ToS & UU PDP |
+| Aspek Biaya | InterActive MyProfit (Diverifikasi 2026-11-08) | MyCaffe by AzureDevID (Model Free-Core D6) |
+|-------------|-----------------------------------------------|--------------------------------------------|
+| Biaya Langganan Software | **Paket Free Rp 0** (fitur dasar, 2 user, tanpa KDS/TV)<br>**Basic Rp 149.000/bln** (inventori sederhana)<br>**Pro Rp 249.000/bln** (dine-in, QR multiple)<br>**Enterprise Rp 299.000/bln** (BOM, PO, meja) | **Free Core Selamanya (Rp 0)**: 1 outlet, staf & transaksi tanpa batas, QR tamu, POS, KDS dapur, dan 1 antrean TV sudah termasuk tanpa add-on tersembunyi. Upgrade dipicu pertumbuhan nyata (outlet ke-2+, volume pesan). |
+| Biaya Add-On Perangkat | KDS Rp 69k/bln/device, TV Monitor Rp 149k/bln/device, Kitchen Print Rp 69k/bln/device | **Rp 0 / Open Multi-Device**: Bebas buka KDS dapur dan antrean TV di browser smart TV/tablet apa saja tanpa biaya lisensi per layar. |
+| Komisi per Transaksi QR Order | Agregator pembayaran pihak ketiga dengan settlement berjangka | **0% Komisi Platform per Transaksi**: Skema BYOK Midtrans mencairkan dana 100% langsung ke rekening bank merchant. |
+| Perangkat Keras | Bundling hardware khusus / Sunmi OEM | **Open-Standard Hardware**: Bebas pakai tablet/HP/printer thermal ESC/POS 58mm/80mm merek apa saja (Epson, Xprinter, Sunmi, dll). |
+| Uji Coba & Onboarding | Registrasi free online atau sales meeting | **Self-Service Onboarding Instan**: Langsung aktif dengan dokumen hukum UU PDP & ToS terverifikasi SHA-256. |
 
 ### 4.3 Kepatuhan Hukum & Regulasi Indonesia
 - Kompetitor besar berbadan hukum PT memiliki pendaftaran **PSE Lingkup Privat Komdigi**, syarat & ketentuan tertulis, serta pemisahan peran sebagai penyedia perangkat lunak kasir (bukan penyelenggara jasa pembayaran tanpa izin Bank Indonesia).

@@ -66,6 +66,16 @@ func WithShiftRepository(repo *postgres.ShiftRepository) PaymentServiceOption {
 	}
 }
 
+// StoreGatewayResolver resolves an optional tenant-owned BYOK Midtrans client inside Phase 1
+// of WithTenantTx without holding database locks during external HTTP calls (ADR-009).
+type StoreGatewayResolver func(ctx context.Context, tx *sqlx.Tx, storeID uuid.UUID) (GatewayClient, error)
+
+func WithStoreGatewayResolver(fn StoreGatewayResolver) PaymentServiceOption {
+	return func(s *PaymentService) {
+		s.storeGatewayResolver = fn
+	}
+}
+
 func normalizeGatewayClient(client GatewayClient) GatewayClient {
 	if client == nil {
 		return nil
@@ -121,12 +131,19 @@ type PaymentWebhookResult struct {
 }
 
 type PaymentService struct {
-	db             *sqlx.DB
-	paymentRepo    *postgres.PaymentRepository
-	orderRepo      *postgres.OrderRepository
-	shiftRepo      *postgres.ShiftRepository
-	midtransClient GatewayClient
-	nowFunc        func() time.Time
+	db                   *sqlx.DB
+	paymentRepo          *postgres.PaymentRepository
+	orderRepo            *postgres.OrderRepository
+	shiftRepo            *postgres.ShiftRepository
+	midtransClient       GatewayClient
+	storeGatewayResolver StoreGatewayResolver
+	nowFunc              func() time.Time
+}
+
+func (s *PaymentService) SetStoreGatewayResolver(fn StoreGatewayResolver) {
+	if s != nil {
+		s.storeGatewayResolver = fn
+	}
 }
 
 func NewPaymentService(

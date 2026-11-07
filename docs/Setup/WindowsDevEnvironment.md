@@ -9,8 +9,8 @@ cafe transactions (owner decision I1). Everything is driven by `scripts/dev.ps1`
 | ------------- | ------------- | ----------- | ---------- | ---------------- | --------- |
 | **dev** | `go run ./cmd/api` on Windows + PostgreSQL 18 in Docker | `development` | `mycaffe-postgres-dev` (`127.0.0.1:5432`), seed data | this laptop only | daily coding, debugging (VS Code F5), full order/payment simulation |
 | **test** | `dev.ps1 test-int`: throwaway PostgreSQL 18 container | `test` | `mycaffe-pg-integration` (`127.0.0.1:55432`), created and deleted per run | this laptop only | integration tests identical to CI |
-| **demo / staging** | `dev.ps1 demo-up`: whole stack in Docker + Cloudflare Quick Tunnel | `staging` | `mycaffe-demo` volume, seed data | anyone with the `*.trycloudflare.com` URL (HTTPS) | showing the product, testing on tablets/phones, Midtrans sandbox webhooks |
-| **production** | `deploy/docker/docker-compose.prod.yml` on Hostinger KVM 2 | `production` | VPS PostgreSQL | public domain | **blocked**: no VPS/domain yet |
+| **demo / staging** | `dev.ps1 demo-up`: whole stack in Docker + Cloudflare Named Tunnel (`mycaffe-demo`) | `staging` | `mycaffe-demo` volume, seed data | `https://demo.abbdullaziz.online` (HTTPS) | live client demo on tablets/phones, Midtrans Sandbox Core API webhooks |
+| **production** | `deploy/docker/docker-compose.prod.yml` on client Hostinger KVM 2 VPS | `production` | VPS PostgreSQL | client production domain | ready for cutover once client provisions VPS |
 
 Run **one stack at a time** on 8 GB RAM: `dev.ps1 down` before `demo-up` and vice versa.
 
@@ -67,8 +67,7 @@ Browser / tablet (HTTPS)
   change `DEMO_EDGE_SUBNET`, also change `set_real_ip_from` in `deploy/nginx/nginx.demo.conf`.
 - **One origin:** frontend and API share the tunnel hostname, so the `SameSite=Strict` refresh cookie
   works without a domain (decision I3) and no CORS is involved.
-- **WebSocket:** `/ws` is proxied with upgrade headers and a 1-hour read timeout, but returns `503`
-  in `staging` until the Phase 03 WebSocket ticket exists. Cloudflare Quick Tunnels support WebSockets.
+- **WebSocket:** `/ws` is proxied with upgrade headers and a 1-hour read timeout using single-use 30-second tickets from `POST /api/v1/pos/ws-ticket` (staff) or `POST /api/v1/public/guest/ws-ticket` (guest). Cloudflare Named Tunnels support WebSockets natively.
 - **Cafe NAT:** all tablets in one cafe share a public IP, so the strict limit applies only to
   `/login`; refresh, logout and `/me` use the normal API limit.
 
@@ -112,3 +111,19 @@ go run ./cmd/migrate -action=reset-owner-pin -store-slug kopi-senja -owner-email
 
 In containers, override the migrate service entrypoint:
 `docker compose -f deploy/docker/docker-compose.prod.yml run --rm -it --entrypoint /app/mycaffe-migrate migrate -action=bootstrap-store ...`
+
+## 7. Client Monorepo & Mobile Toolchain (`C:\Projects\myCaffe-client`)
+
+Frontend PWA, Android native POS, and iOS hardware bridge live in the sibling repository `C:\Projects\myCaffe-client` (outside this Go backend repository):
+
+- **Java & Android SDK (Windows 11 User Environment)**:
+  - `JAVA_HOME`: `C:\Program Files\Java\jdk-17` (`javac 17.0.12`)
+  - `ANDROID_HOME` / `ANDROID_SDK_ROOT`: `C:\Users\Acer\AppData\Local\Android\Sdk` (`adb`, `emulator`, `build-tools\35.0.0`, `cmdline-tools\latest\bin`, Android Studio `bin` in User `PATH`)
+  - `GRADLE_HOME`: `Gradle 9.5.0`
+  - **Lightweight GPU AVD**: `Medium_Phone` (`hw.ramSize=2048`, `hw.cpu.ncore=4`, `hw.gpu.mode=auto`)
+- **iOS Objective-C Syntax & Archive Pipeline**:
+  - Local syntax & type verification on Windows 11 via Scoop `zig cc` (`pwsh C:\Projects\myCaffe-client\apps\ios\scripts\Verify-ObjCSyntax.ps1`)
+  - Full `.ipa` archive build on GitHub Actions `macos-15` (Xcode 16.2) in `.github/workflows/ios-xcode-build.yml`
+- **Design Tokens & Visual Network Simulator**:
+  - Verify WCAG 2.2 AA contrast & `id-ID`/`en-US` parity: `node C:\Projects\myCaffe-client\packages\design-tokens\verify-tokens.mjs`
+  - Interactive Cloud-to-LAN-to-Hardware simulator: `C:\Projects\myCaffe-client\apps\web\network-topology-simulator.html`

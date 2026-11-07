@@ -102,3 +102,28 @@ func writeReportError(c *gin.Context, err error) {
 	log.Printf("[API] request_id=%s %s %s error: %v", c.GetString(RequestIDHeader), c.Request.Method, c.FullPath(), err)
 	authError(c, http.StatusServiceUnavailable, "SERVICE_TEMPORARILY_UNAVAILABLE", "Layanan sedang bermasalah. Coba lagi.")
 }
+
+// GrossProfit handles GET /api/v1/reports/gross-profit?from=&to=&format=json|csv (COGS per menu item, X10).
+func (h *ReportHandler) GrossProfit(c *gin.Context) {
+	format := c.DefaultQuery("format", "json")
+	if format != "json" && format != "csv" {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"code": "VALIDATION_FAILED", "error": "Periksa kembali isian yang ditandai.", "fields": map[string]string{"format": "harus json atau csv"}})
+		return
+	}
+	report, err := h.svc.GrossProfit(c.Request.Context(), currentStaff(c).Staff.Store.ID, c.Query("from"), c.Query("to"))
+	if err != nil {
+		writeReportError(c, err)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	if format == "json" {
+		c.JSON(http.StatusOK, report)
+		return
+	}
+	records := [][]string{{"menu", "kuantitas", "pendapatan", "hpp", "laba_kotor", "margin_bps", "baris_tanpa_hpp", "pendapatan_tanpa_hpp"}}
+	for _, r := range report.Rows {
+		records = append(records, []string{r.Key, itoa(r.Quantity), itoa(r.Revenue), itoa(r.COGS), itoa(r.GrossProfit), itoa(r.MarginBPS),
+			itoa(r.LinesNoCOGS), itoa(r.RevenueNoCOGS)})
+	}
+	writeCSV(c, fmt.Sprintf("laba-kotor-%s-%s.csv", report.From, report.To), records)
+}

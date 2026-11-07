@@ -136,6 +136,7 @@ func TestSalesChannelsIntegration(t *testing.T) {
 			Price     int64     `json:"price"`
 		} `json:"prices"`
 	}
+	atEnd := t.Cleanup
 	t.Run("OwnerManagesChannelsAndPrices", func(t *testing.T) {
 		if res := call("POST", "/catalog/sales-channels", cashier, map[string]any{"name": "X"}); res.Code != http.StatusForbidden {
 			t.Fatalf("cashier must not manage channels, got %d", res.Code)
@@ -145,7 +146,9 @@ func TestSalesChannelsIntegration(t *testing.T) {
 			t.Fatalf("create channel failed: %d: %s", res.Code, res.Body.String())
 		}
 		_ = json.Unmarshal(res.Body.Bytes(), &channel)
-		t.Cleanup(func() { call("PATCH", "/catalog/sales-channels/"+channel.ID.String(), owner, map[string]any{"is_active": false}) })
+		atEnd(func() { // the parent test's cleanup: later subtests still order on this channel
+			call("PATCH", "/catalog/sales-channels/"+channel.ID.String(), owner, map[string]any{"is_active": false})
+		})
 		if res := call("POST", "/catalog/sales-channels", owner, map[string]any{"name": "GoFood " + suffix}); res.Code != http.StatusConflict {
 			t.Fatalf("a duplicate channel name must be 409, got %d", res.Code)
 		}

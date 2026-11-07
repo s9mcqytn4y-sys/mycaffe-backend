@@ -17,6 +17,13 @@ ALTER TABLE governance_audit_logs
         'PLATFORM_INVOICE_CREATED', 'PLATFORM_INVOICE_SETTLED'
     ));
 
+ALTER TABLE governance_audit_logs
+    DROP CONSTRAINT IF EXISTS chk_gov_audit_actor_type;
+ALTER TABLE governance_audit_logs
+    ADD CONSTRAINT chk_gov_audit_actor_type CHECK (actor_type IN (
+        'tenant_owner', 'tenant_staff', 'platform_admin', 'system'
+    ));
+
 UPDATE tenant_onboarding_applications
 SET status = 'submitted'
 WHERE status = 'pending_email_otp';

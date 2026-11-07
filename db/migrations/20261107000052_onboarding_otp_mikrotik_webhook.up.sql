@@ -42,7 +42,15 @@ ALTER TABLE governance_audit_logs
         'CLEARANCE_REQUESTED', 'CLEARANCE_CANCELLED', 'CLEARANCE_EXECUTED',
         'PLATFORM_INVOICE_CREATED', 'PLATFORM_INVOICE_SETTLED',
         'PLATFORM_INVOICE_WEBHOOK_SETTLED', 'PLATFORM_INVOICE_WEBHOOK_CLOSED',
-        'MIKROTIK_PROFILE_UPDATED', 'MIKROTIK_RSC_GENERATED'
+        'MIKROTIK_PROFILE_UPDATED', 'MIKROTIK_RSC_GENERATED',
+        'ONBOARDING_STORE_PROVISIONED'
+    ));
+
+ALTER TABLE governance_audit_logs
+    DROP CONSTRAINT IF EXISTS chk_gov_audit_actor_type;
+ALTER TABLE governance_audit_logs
+    ADD CONSTRAINT chk_gov_audit_actor_type CHECK (actor_type IN (
+        'tenant_owner', 'tenant_staff', 'platform_admin', 'system', 'payment_webhook'
     ));
 
 -- Allow unverified/trialing tenants to configure Midtrans Sandbox BYOK credentials immediately

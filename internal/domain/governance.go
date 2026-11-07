@@ -41,10 +41,11 @@ const (
 type OnboardingStatus string
 
 const (
-	OnboardingSubmitted   OnboardingStatus = "submitted"
-	OnboardingUnderReview OnboardingStatus = "under_review"
-	OnboardingApproved    OnboardingStatus = "approved"
-	OnboardingRejected    OnboardingStatus = "rejected"
+	OnboardingPendingEmailOTP OnboardingStatus = "pending_email_otp"
+	OnboardingSubmitted       OnboardingStatus = "submitted"
+	OnboardingUnderReview     OnboardingStatus = "under_review"
+	OnboardingApproved        OnboardingStatus = "approved"
+	OnboardingRejected        OnboardingStatus = "rejected"
 )
 
 // KYBStatus aligns 1:1 with chk_store_kyb_status and chk_registry_kyb_status.
@@ -137,6 +138,10 @@ type TenantOnboardingApplication struct {
 	AcceptedTOSSHA256  string             `json:"accepted_tos_sha256" db:"accepted_tos_sha256"`
 	AcceptedPDPSHA256  string             `json:"accepted_pdp_sha256" db:"accepted_pdp_sha256"`
 	Status             OnboardingStatus   `json:"status" db:"status"`
+	EmailOTPExpiresAt  *time.Time         `json:"otp_expires_at,omitempty" db:"email_otp_expires_at"`
+	EmailOTPSentAt     *time.Time         `json:"otp_sent_at,omitempty" db:"email_otp_sent_at"`
+	EmailOTPAttempts   int                `json:"email_otp_attempts" db:"email_otp_attempts"`
+	EmailVerifiedAt    *time.Time         `json:"email_verified_at,omitempty" db:"email_verified_at"`
 	ProvisionedStoreID *uuid.UUID         `json:"provisioned_store_id,omitempty" db:"provisioned_store_id"`
 	ReviewNotes        string             `json:"review_notes" db:"review_notes"`
 	ReviewedAt         *time.Time         `json:"reviewed_at,omitempty" db:"reviewed_at"`
@@ -340,4 +345,81 @@ type PlatformOverview struct {
 	PendingKYBReviews    int                     `json:"pending_kyb_reviews"`
 	ActiveClearanceCount int                     `json:"active_clearance_count"`
 	Tenants              []PlatformTenantSummary `json:"tenants"`
+}
+
+type ProvisionedTableSummary struct {
+	ID          uuid.UUID `json:"id"`
+	TableNumber string    `json:"table_number"`
+	QRToken     string    `json:"qr_token"`
+}
+
+type ProvisionedStoreResult struct {
+	Application    *TenantOnboardingApplication `json:"application"`
+	StoreID        uuid.UUID                    `json:"store_id"`
+	StoreSlug      string                       `json:"store_slug"`
+	OwnerUserID    uuid.UUID                    `json:"owner_user_id"`
+	OwnerEmail     string                       `json:"owner_email"`
+	KYBStatus      KYBStatus                    `json:"kyb_status"`
+	AlreadyExisted bool                         `json:"already_existed"`
+	Tables         []ProvisionedTableSummary    `json:"tables"`
+}
+
+type StoreMikrotikProfile struct {
+	StoreID             uuid.UUID  `json:"store_id" db:"store_id"`
+	RouterModel         string     `json:"router_model" db:"router_model"`
+	WANPrimaryInterface string     `json:"wan_primary_interface" db:"wan_primary_interface"`
+	WANBackupInterface  string     `json:"wan_backup_interface" db:"wan_backup_interface"`
+	POSVLANCIDR         string     `json:"pos_vlan_cidr" db:"pos_vlan_cidr"`
+	StaffVLANCIDR       string     `json:"staff_vlan_cidr" db:"staff_vlan_cidr"`
+	GuestVLANCIDR       string     `json:"guest_vlan_cidr" db:"guest_vlan_cidr"`
+	POSWiFiSSID         string     `json:"pos_wifi_ssid" db:"pos_wifi_ssid"`
+	GuestWiFiSSID       string     `json:"guest_wifi_ssid" db:"guest_wifi_ssid"`
+	GuestRateLimitMbps  int        `json:"guest_rate_limit_mbps" db:"guest_rate_limit_mbps"`
+	POSReservedMbps     int        `json:"pos_reserved_mbps" db:"pos_reserved_mbps"`
+	SFTPPort            int        `json:"sftp_port" db:"sftp_port"`
+	WinboxPort          int        `json:"winbox_port" db:"winbox_port"`
+	WinboxAllowedCIDR   string     `json:"winbox_allowed_cidr" db:"winbox_allowed_cidr"`
+	DNSServers          string     `json:"dns_servers" db:"dns_servers"`
+	GeneratedRscSHA256  string     `json:"generated_rsc_sha256" db:"generated_rsc_sha256"`
+	UpdatedByUserID     *uuid.UUID `json:"updated_by_user_id,omitempty" db:"updated_by_user_id"`
+	UpdatedAt           time.Time  `json:"updated_at" db:"updated_at"`
+}
+
+type WinboxGuideStep struct {
+	StepNumber  int    `json:"step_number"`
+	Title       string `json:"title"`
+	MenuPath    string `json:"menu_path"`
+	Instruction string `json:"instruction"`
+	SafetyCheck string `json:"safety_check"`
+}
+
+type FileZillaSFTPPolicy struct {
+	Protocol               string `json:"protocol"`
+	Port                   int    `json:"port"`
+	AllowedSubnetCIDR      string `json:"allowed_subnet_cidr"`
+	PlainFTPBlocked        bool   `json:"plain_ftp_blocked"`
+	PlainFTPPortBlocked    int    `json:"plain_ftp_port_blocked"`
+	KeyAuthRecommended     bool   `json:"key_auth_recommended"`
+	RecommendedAlternative string `json:"recommended_alternative"`
+	SecurityRationale      string `json:"security_rationale"`
+}
+
+type MikrotikTopologySummary struct {
+	POSSubnetCIDR        string `json:"pos_subnet_cidr"`
+	StaffSubnetCIDR      string `json:"staff_subnet_cidr"`
+	GuestSubnetCIDR      string `json:"guest_subnet_cidr"`
+	StaticDHCPCount      int    `json:"static_dhcp_count"`
+	DualWANFailoverReady bool   `json:"dual_wan_failover_ready"`
+	OfflineSyncMode      string `json:"offline_sync_mode"`
+}
+
+type MikrotikRscBundle struct {
+	Profile             *StoreMikrotikProfile   `json:"profile"`
+	FileName            string                  `json:"file_name"`
+	RscScript           string                  `json:"rsc_script"`
+	ScriptSHA256        string                  `json:"script_sha256"`
+	WinboxSteps         []WinboxGuideStep       `json:"winbox_steps"`
+	FileZillaSFTPPolicy FileZillaSFTPPolicy     `json:"filezilla_sftp_policy"`
+	TopologySummary     MikrotikTopologySummary `json:"topology_summary"`
+	GeneratedAt         time.Time               `json:"generated_at"`
 }

@@ -22,12 +22,22 @@ import (
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/domain"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/handler"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/database"
+	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/mailer"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/midtrans"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/rbac"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/secretbox"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/repository/postgres"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/service"
 )
+
+type captureMailSender struct {
+	sent []mailer.Message
+}
+
+func (m *captureMailSender) Send(_ context.Context, msg mailer.Message) error {
+	m.sent = append(m.sent, msg)
+	return nil
+}
 
 type stubGatewayClient struct {
 	label          string
@@ -127,9 +137,11 @@ func TestGovernanceIntegration(t *testing.T) {
 	defaultGateway := &stubGatewayClient{label: "default-fallback"}
 	platformBillingGateway := &stubGatewayClient{label: "azuredevid-lane1", qrStringToGive: "000201010212-LANE1-SAAS-INVOICE"}
 	byokGatewaysByKey := map[string]*stubGatewayClient{}
+	mailCapture := &captureMailSender{}
 
 	cfg := &config.Config{
 		AppEnv:                       "staging",
+		AppPublicURL:                 "https://demo.abbdullaziz.online",
 		CredentialEncryptionKey:      encKey,
 		PlatformAdminAPIKey:          platformAdminKey,
 		MidtransIsProduction:         false,
@@ -141,6 +153,7 @@ func TestGovernanceIntegration(t *testing.T) {
 		db,
 		cfg,
 		service.WithPlatformGatewayClient(platformBillingGateway),
+		service.WithGovernanceMailer(mailCapture, cfg.AppPublicURL),
 		service.WithGovernanceGatewayBuilder(func(serverKey string, _ bool) service.GatewayClient {
 			gw, ok := byokGatewaysByKey[serverKey]
 			if !ok {
@@ -176,11 +189,14 @@ func TestGovernanceIntegration(t *testing.T) {
 	r := gin.New()
 	v1 := r.Group("/api/v1")
 	v1.POST("/auth/staff/login", ah.Login)
+	v1.POST("/payments/midtrans/webhook", mh.HandleWebhook)
 	v1.POST("/payments/midtrans/webhook/:store_slug", mh.HandleTenantWebhook)
 
 	v1.GET("/public/legal", gh.ListPublicLegalDocuments)
 	v1.GET("/public/plans", gh.ListPublicSubscriptionPlans)
 	v1.POST("/public/onboarding/apply", gh.SubmitOnboardingApplication)
+	v1.POST("/public/onboarding/:id/verify-otp", gh.VerifyOnboardingOTP)
+	v1.POST("/public/onboarding/:id/resend-otp", gh.ResendOnboardingOTP)
 	v1.GET("/public/stores/:slug/cms", gh.GetPublicStoreCMS)
 
 	ownerManage := ah.RequirePermission(rbac.StoreSettingsManage)
@@ -198,6 +214,9 @@ func TestGovernanceIntegration(t *testing.T) {
 	storeGov.GET("/network/nodes", gh.ListNetworkNodes)
 	storeGov.PUT("/network/nodes", gh.UpsertNetworkNode)
 	storeGov.POST("/network/simulate", gh.RunNetworkSimulation)
+	storeGov.GET("/network/mikrotik", gh.GetStoreMikrotikProfile)
+	storeGov.PUT("/network/mikrotik", gh.UpsertStoreMikrotikProfile)
+	storeGov.POST("/network/mikrotik/generate-rsc", gh.GenerateStoreMikrotikRsc)
 	storeGov.GET("/subscription/invoices", gh.ListStoreSubscriptionInvoices)
 	storeGov.POST("/subscription/invoices", gh.CreateStoreSubscriptionInvoice)
 	storeGov.POST("/clearance", gh.RequestAccountClearance)
@@ -207,6 +226,7 @@ func TestGovernanceIntegration(t *testing.T) {
 	platform.GET("/overview", gh.PlatformOverview)
 	platform.GET("/onboarding", gh.ListOnboardingApplications)
 	platform.POST("/onboarding/:id/review", gh.ReviewOnboardingApplication)
+	platform.POST("/onboarding/:id/provision", gh.ProvisionOnboardingApplication)
 	platform.POST("/tenants/:store_id/kyb-review", gh.ReviewStoreKYB)
 	platform.POST("/tenants/:store_id/clearance/:id/execute", gh.ExecuteTenantClearance)
 	platform.GET("/midtrans-readiness", gh.MidtransBusinessReviewReadiness)
@@ -602,9 +622,67 @@ func TestGovernanceIntegration(t *testing.T) {
 				t.Fatalf("simulation %s failed: %d %s", sc, simRes.Code, simRes.Body.String())
 			}
 		}
+
+		// Plain FTP port 21 MUST be blocked by RouterOS/SFTP policy
+		badFTP := call("PUT", "/api/v1/store/network/mikrotik", ownerA, map[string]any{
+			"pos_vlan_cidr":   "192.168.10.0/24",
+			"staff_vlan_cidr": "192.168.20.0/24",
+			"guest_vlan_cidr": "192.168.30.0/23",
+			"sftp_port":       21,
+		})
+		if badFTP.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("expected 422 blocking plain FTP port 21, got %d: %s", badFTP.Code, badFTP.Body.String())
+		}
+
+		// Overlapping Guest & POS VLANs MUST be rejected
+		overlapVLAN := call("PUT", "/api/v1/store/network/mikrotik", ownerA, map[string]any{
+			"pos_vlan_cidr":   "192.168.30.0/24",
+			"staff_vlan_cidr": "192.168.20.0/24",
+			"guest_vlan_cidr": "192.168.30.0/23",
+			"sftp_port":       2222,
+		})
+		if overlapVLAN.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("expected 422 blocking overlapping VLAN CIDRs, got %d: %s", overlapVLAN.Code, overlapVLAN.Body.String())
+		}
+
+		mkSave := call("PUT", "/api/v1/store/network/mikrotik", ownerA, map[string]any{
+			"router_model":          "hAP ax2 (RouterOS v7)",
+			"wan_primary_interface": "ether1-indibiz-fiber",
+			"wan_backup_interface":  "ether2-telkomsel-4g",
+			"pos_vlan_cidr":         "192.168.10.0/24",
+			"staff_vlan_cidr":       "192.168.20.0/24",
+			"guest_vlan_cidr":       "192.168.30.0/23",
+			"pos_wifi_ssid":         "Senopati-POS-Private",
+			"guest_wifi_ssid":       "Senopati-Guest-QR",
+			"guest_rate_limit_mbps": 25,
+			"pos_reserved_mbps":     15,
+			"sftp_port":             2222,
+			"winbox_port":           8291,
+			"winbox_allowed_cidr":   "192.168.10.0/24",
+			"dns_servers":           "1.1.1.1,8.8.8.8",
+		})
+		if mkSave.Code != http.StatusOK {
+			t.Fatalf("expected 200 saving MikroTik profile, got %d: %s", mkSave.Code, mkSave.Body.String())
+		}
+
+		rscRes := call("POST", "/api/v1/store/network/mikrotik/generate-rsc", ownerA, nil)
+		if rscRes.Code != http.StatusOK {
+			t.Fatalf("expected 200 generating MikroTik .rsc bundle, got %d: %s", rscRes.Code, rscRes.Body.String())
+		}
+		var bundle domain.MikrotikRscBundle
+		_ = json.Unmarshal(rscRes.Body.Bytes(), &bundle)
+		if !bundle.FileZillaSFTPPolicy.PlainFTPBlocked || bundle.FileZillaSFTPPolicy.PlainFTPPortBlocked != 21 {
+			t.Fatalf("expected FileZilla policy to block plain FTP port 21: %+v", bundle.FileZillaSFTPPolicy)
+		}
+		if !strings.Contains(bundle.RscScript, "set ftp disabled=yes") ||
+			!strings.Contains(bundle.RscScript, "AA:BB:CC:11:22:33") ||
+			!strings.Contains(bundle.RscScript, "Block Guest WiFi -> POS") ||
+			len(bundle.WinboxSteps) < 6 {
+			t.Fatalf("generated .rsc missing required hardening or static DHCP lease: len(steps)=%d", len(bundle.WinboxSteps))
+		}
 	})
 
-	t.Run("Lane1PlatformSubscriptionInvoice", func(t *testing.T) {
+	t.Run("Lane1PlatformSubscriptionInvoiceAndWebhook200OK", func(t *testing.T) {
 		invRes := call("POST", "/api/v1/store/subscription/invoices", ownerA, map[string]string{
 			"plan_code":     "pro_cafe",
 			"billing_cycle": "monthly",
@@ -619,6 +697,151 @@ func TestGovernanceIntegration(t *testing.T) {
 		}
 		if platformBillingGateway.chargeCalls != 1 {
 			t.Fatalf("expected Lane 1 platformBillingGateway to receive 1 call, got %d", platformBillingGateway.chargeCalls)
+		}
+
+		// Settle Lane 1 Platform Invoice via /api/v1/payments/midtrans/webhook (fixes Screenshot 2 404!)
+		grossStr := fmt.Sprintf("%d.00", inv.AmountIDR)
+		provOrderID := inv.ID.String()
+		platWebhook := map[string]any{
+			"transaction_status": "settlement",
+			"transaction_id":     "tx-lane1-sub-" + provOrderID[:8],
+			"status_code":        "200",
+			"order_id":           provOrderID,
+			"gross_amount":       grossStr,
+			"fraud_status":       "accept",
+			"payment_type":       "qris",
+			"currency":           "IDR",
+			"signature_key":      signMidtransWebhook(provOrderID, "200", grossStr, defaultFallbackKey),
+		}
+		wh1 := call("POST", "/api/v1/payments/midtrans/webhook", nil, platWebhook)
+		if wh1.Code != http.StatusOK || !strings.Contains(wh1.Body.String(), `"lane":"platform_subscription"`) {
+			t.Fatalf("expected 200 OK settling Lane 1 platform invoice webhook, got %d: %s", wh1.Code, wh1.Body.String())
+		}
+
+		// Idempotent replay MUST also return 200 OK with duplicate=true
+		wh2 := call("POST", "/api/v1/payments/midtrans/webhook", nil, platWebhook)
+		if wh2.Code != http.StatusOK || !strings.Contains(wh2.Body.String(), `"duplicate":true`) {
+			t.Fatalf("expected 200 OK duplicate=true on replayed Lane 1 webhook, got %d: %s", wh2.Code, wh2.Body.String())
+		}
+	})
+
+	t.Run("OnboardingEmailOTPGateAndUnverifiedStoreProvisioning", func(t *testing.T) {
+		// 1. Provisioning BEFORE email OTP verification MUST be blocked at PostgreSQL kernel boundary (422)
+		prematureProv := call("POST", "/api/v1/platform/onboarding/"+onboardingAppID.String()+"/provision", superadmin, map[string]any{
+			"initial_owner_pin": "583924",
+			"table_count":       3,
+			"review_notes":      "Coba aktifkan sebelum OTP",
+		})
+		if prematureProv.Code != http.StatusUnprocessableEntity || !strings.Contains(prematureProv.Body.String(), "EMAIL_OTP_UNVERIFIED") {
+			t.Fatalf("expected 422 EMAIL_OTP_UNVERIFIED before OTP verification, got %d: %s", prematureProv.Code, prematureProv.Body.String())
+		}
+
+		// 2. Immediate resend within 60s cooldown MUST return 429
+		cooldownRes := call("POST", "/api/v1/public/onboarding/"+onboardingAppID.String()+"/resend-otp", nil, map[string]any{})
+		if cooldownRes.Code != http.StatusTooManyRequests {
+			t.Fatalf("expected 429 OTP_RESEND_COOLDOWN, got %d: %s", cooldownRes.Code, cooldownRes.Body.String())
+		}
+
+		// 3. Extract the 6-digit OTP rendered into captureMailSender
+		if len(mailCapture.sent) == 0 {
+			t.Fatalf("expected onboarding OTP email to be dispatched via mailer.Sender")
+		}
+		var capturedOTP string
+		for _, line := range strings.Split(mailCapture.sent[0].Text, "\n") {
+			trimmed := strings.TrimSpace(line)
+			if len(trimmed) == 6 && trimmed[0] >= '0' && trimmed[0] <= '9' {
+				capturedOTP = trimmed
+				break
+			}
+		}
+		if len(capturedOTP) != 6 {
+			t.Fatalf("failed to locate 6-digit OTP in rendered plain-text email:\n%s", mailCapture.sent[0].Text)
+		}
+
+		// Wrong OTP rejected with 422
+		wrongCode := "000000"
+		if capturedOTP == "000000" {
+			wrongCode = "999999"
+		}
+		badOTP := call("POST", "/api/v1/public/onboarding/"+onboardingAppID.String()+"/verify-otp", nil, map[string]string{
+			"otp_code": wrongCode,
+		})
+		if badOTP.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("expected 422 on wrong OTP, got %d: %s", badOTP.Code, badOTP.Body.String())
+		}
+
+		// Correct 6-digit OTP verifies email and transitions status -> submitted
+		okOTP := call("POST", "/api/v1/public/onboarding/"+onboardingAppID.String()+"/verify-otp", nil, map[string]string{
+			"otp_code": capturedOTP,
+		})
+		if okOTP.Code != http.StatusOK || !strings.Contains(okOTP.Body.String(), `"status":"submitted"`) {
+			t.Fatalf("expected 200 OK status=submitted after valid OTP, got %d: %s", okOTP.Code, okOTP.Body.String())
+		}
+
+		// 4. Superadmin provisions the unverified store (kyb_status = 'unverified') with 3 QR tables
+		provPin := "583924"
+		provRes := call("POST", "/api/v1/platform/onboarding/"+onboardingAppID.String()+"/provision", superadmin, map[string]any{
+			"initial_owner_pin": provPin,
+			"table_count":       3,
+			"review_notes":      "Aktivasi akun unverified untuk sandbox testing",
+		})
+		if provRes.Code != http.StatusCreated {
+			t.Fatalf("expected 201 Created provisioning store, got %d: %s", provRes.Code, provRes.Body.String())
+		}
+		var provOut domain.ProvisionedStoreResult
+		_ = json.Unmarshal(provRes.Body.Bytes(), &provOut)
+		if provOut.KYBStatus != domain.KYBUnverified || len(provOut.Tables) != 3 {
+			t.Fatalf("expected kyb_status=unverified and 3 QR tables, got kyb=%s tables=%d", provOut.KYBStatus, len(provOut.Tables))
+		}
+
+		// Idempotent second provision call returns 200 OK already_existed=true
+		provReplay := call("POST", "/api/v1/platform/onboarding/"+onboardingAppID.String()+"/provision", superadmin, map[string]any{
+			"initial_owner_pin": provPin,
+			"table_count":       3,
+		})
+		if provReplay.Code != http.StatusOK || !strings.Contains(provReplay.Body.String(), `"already_existed":true`) {
+			t.Fatalf("expected 200 OK already_existed=true on replay, got %d: %s", provReplay.Code, provReplay.Body.String())
+		}
+
+		// 5. Log in as Owner of the newly provisioned UNVERIFIED store & input Sandbox Midtrans BYOK credentials!
+		loginNew := call("POST", "/api/v1/auth/staff/login", nil, map[string]string{
+			"store_slug": provOut.StoreSlug,
+			"email":      provOut.OwnerEmail,
+			"pin":        provPin,
+		})
+		if loginNew.Code != http.StatusOK {
+			t.Fatalf("newly provisioned owner login failed: %d %s", loginNew.Code, loginNew.Body.String())
+		}
+		var newTok struct {
+			AccessToken string `json:"access_token"`
+		}
+		_ = json.Unmarshal(loginNew.Body.Bytes(), &newTok)
+		unverifiedOwner := map[string]string{"Authorization": "Bearer " + newTok.AccessToken}
+
+		// Unverified store MAY input Midtrans Sandbox credentials (200 OK)
+		sandboxSave := call("PUT", "/api/v1/store/payment-credentials", unverifiedOwner, map[string]any{
+			"environment":                  "sandbox",
+			"merchant_id":                  "G357841497",
+			"client_key":                   "SB-Mid-client-UnverifiedTenantSandbox",
+			"server_key":                   "SB-Mid-server-UnverifiedTenantSandbox",
+			"is_enabled":                   true,
+			"fallback_static_qris_enabled": true,
+			"verify_live":                  true,
+		})
+		if sandboxSave.Code != http.StatusOK {
+			t.Fatalf("expected 200 OK saving Midtrans Sandbox BYOK on unverified tenant, got %d: %s", sandboxSave.Code, sandboxSave.Body.String())
+		}
+
+		// Unverified store MUST NOT save Midtrans Production credentials (422)
+		prodBlocked := call("PUT", "/api/v1/store/payment-credentials", unverifiedOwner, map[string]any{
+			"environment": "production",
+			"merchant_id": "G357841497",
+			"client_key":  "Mid-client-UnverifiedProdBlocked",
+			"server_key":  "Mid-server-UnverifiedProdBlocked",
+			"is_enabled":  false,
+		})
+		if prodBlocked.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("expected 422 blocking Production BYOK on unverified KYB store, got %d: %s", prodBlocked.Code, prodBlocked.Body.String())
 		}
 	})
 

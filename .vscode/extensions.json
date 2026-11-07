@@ -1,23 +1,8 @@
 {
-    "recommendations": [
-        "golang.go",
-        "google.google-antigravity",
-        "anthropic.claude-code",
-        "mtxr.sqltools",
-        "mtxr.sqltools-driver-pg",
-        "esbenp.prettier-vscode",
-        "usernamehw.errorlens",
-        "eamodio.gitlens",
-        "davidanson.vscode-markdownlint",
-        "yzhang.markdown-all-in-one",
-        "mikestead.dotenv",
-        "humao.rest-client",
-        "editorconfig.editorconfig",
-        "dracula-theme.theme-dracula",
-        "pkief.material-icon-theme",
-        "skeinllc.anti-slop"
-    ],
-    "unwantedRecommendations": [
-        "ms-mssql.mssql"
-    ]
+  "recommendations": [
+    "golang.go",
+    "redhat.vscode-yaml",
+    "ms-azuretools.vscode-docker",
+    "editorconfig.editorconfig"
+  ]
 }

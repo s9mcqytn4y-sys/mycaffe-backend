@@ -592,8 +592,23 @@ BEGIN
        OR has_table_privilege('mycaffe_app', 'public.governance_audit_logs', 'DELETE')
        OR has_table_privilege('mycaffe_app', 'public.store_payment_credentials', 'DELETE')
        OR has_table_privilege('mycaffe_app', 'public.platform_invoices', 'DELETE')
-       OR has_table_privilege('mycaffe_app', 'public.tenant_clearance_requests', 'DELETE') THEN
+       OR has_table_privilege('mycaffe_app', 'public.tenant_clearance_requests', 'DELETE')
+       OR has_table_privilege('mycaffe_app', 'public.store_mikrotik_profiles', 'DELETE') THEN
         RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app has forbidden UPDATE/DELETE on immutable governance/BYOK tables!';
+    END IF;
+    IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.store_mikrotik_profiles'::regclass) THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: store_mikrotik_profiles must have row-level security enabled!';
+    END IF;
+    IF NOT has_function_privilege('mycaffe_app', 'public.resolve_platform_invoice_webhook_context(character varying)', 'EXECUTE')
+       OR NOT has_function_privilege('mycaffe_app', 'public.provision_store_from_onboarding(uuid, uuid, uuid, text, text)', 'EXECUTE') THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: onboarding/webhook SECURITY DEFINER functions are not executable by mycaffe_app!';
+    END IF;
+    IF EXISTS (
+        SELECT 1 FROM pg_proc p, aclexplode(p.proacl) a
+        WHERE p.proname IN ('resolve_platform_invoice_webhook_context', 'provision_store_from_onboarding')
+          AND a.grantee = 0 AND a.privilege_type = 'EXECUTE'
+    ) THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: onboarding/webhook SECURITY DEFINER functions are executable by PUBLIC!';
     END IF;
 
     RAISE NOTICE 'SUCCESS: Row-Level Security (RLS) on stores/orders/payments/notifications and DELETE privilege revocation verified.';

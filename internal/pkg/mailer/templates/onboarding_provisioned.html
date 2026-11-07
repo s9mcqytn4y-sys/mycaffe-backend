@@ -1,0 +1,7 @@
+{{define "subject"}}Gerai {{.StoreName}} Telah Aktif di MyCaffe{{end}}
+{{define "preheader"}}Akun Owner gerai {{.StoreSlug}} siap digunakan untuk konfigurasi menu, meja QR, dan Midtrans Sandbox.{{end}}
+{{define "html_body"}}<h1 style="margin:0 0 16px 0;font-size:22px;line-height:30px;color:#2C1810;">Selamat datang, {{.RecipientName}}!</h1>
+<p style="margin:0 0 16px 0;">Ruang kerja gerai <strong>{{.StoreName}}</strong> (kode login gerai: <code>{{.StoreSlug}}</code>) telah berhasil diprovisi pada platform <strong>MyCaffe by AzureDevID</strong> dengan status awal <strong>KYB Belum Terverifikasi (Mode Sandbox Aktif)</strong>.</p>
+{{if .ActionURL}}{{template "button" .}}{{end}}
+<p style="margin:0 0 16px 0;font-size:14px;line-height:22px;">Anda sudah dapat masuk ke POS &amp; Backoffice menggunakan email terdaftar dan PIN Owner awal Anda untuk mengatur katalog menu, mencetak meja QR, menguji kredensial <strong>Midtrans Sandbox BYOK</strong>, serta mengunduh skrip jaringan <strong>MikroTik RouterOS v7 (.rsc)</strong> sementara tim kami memverifikasi dokumen legalitas usaha Anda.</p>
+<p style="margin:0;font-size:14px;line-height:22px;color:#6B5B52;">Segera ubah PIN awal Anda pada menu Pengaturan Staf setelah berhasil masuk pertama kali.</p>{{end}}

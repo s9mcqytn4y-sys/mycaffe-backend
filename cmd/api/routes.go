@@ -86,7 +86,11 @@ func wireHandlers(workerCtx context.Context, cfg *config.Config, db *sqlx.DB, hu
 	orderService := service.NewOrderService(db, orderRepo)
 
 	paymentRepo := postgres.NewPaymentRepository()
-	governanceService := service.NewGovernanceService(db, cfg)
+	governanceService := service.NewGovernanceService(
+		db,
+		cfg,
+		service.WithGovernanceMailer(mailSender, cfg.AppPublicURL),
+	)
 	paymentService := service.NewPaymentService(
 		db,
 		paymentRepo,
@@ -95,6 +99,9 @@ func wireHandlers(workerCtx context.Context, cfg *config.Config, db *sqlx.DB, hu
 		service.WithStoreGatewayResolver(governanceService.ResolveStoreGatewayClientTx),
 	)
 	h.offline = handler.NewOfflineHandler(service.NewOfflineSyncService(db, orderService, paymentService))
+	if cfg.PlatformMidtransServerKey != "" {
+		h.midtrans.SetPlatformClient(midtrans.NewClientWithKey(cfg.PlatformMidtransServerKey, cfg.PlatformMidtransIsProduction))
+	}
 	h.midtrans.SetPaymentService(paymentService)
 	h.midtrans.SetGovernanceService(governanceService)
 	h.governance = handler.NewGovernanceHandler(governanceService, cfg.PlatformAdminAPIKey)
@@ -431,10 +438,12 @@ func registerKDSAndCatalogRoutes(v1 *gin.RouterGroup, h *handlerSet) {
 }
 
 func registerGovernanceRoutes(v1 *gin.RouterGroup, h *handlerSet) {
-	// Public SaaS Legal, Pricing, Onboarding & Storefront CMS (ADR-009)
+	// Public SaaS Legal, Pricing, Onboarding + Email OTP & Storefront CMS (ADR-009)
 	v1.GET("/public/legal", h.governance.ListPublicLegalDocuments)
 	v1.GET("/public/plans", h.governance.ListPublicSubscriptionPlans)
 	v1.POST("/public/onboarding/apply", handler.LimitBody(64<<10), h.governance.SubmitOnboardingApplication)
+	v1.POST("/public/onboarding/:id/verify-otp", handler.LimitBody(4<<10), h.governance.VerifyOnboardingOTP)
+	v1.POST("/public/onboarding/:id/resend-otp", handler.LimitBody(4<<10), h.governance.ResendOnboardingOTP)
 	v1.GET("/public/stores/:slug/cms", h.governance.GetPublicStoreCMS)
 
 	// Tenant Owner Self-Service Governance (strictly scoped via WithTenantTx + RLS)
@@ -453,6 +462,9 @@ func registerGovernanceRoutes(v1 *gin.RouterGroup, h *handlerSet) {
 	storeGov.GET("/network/nodes", h.governance.ListNetworkNodes)
 	storeGov.PUT("/network/nodes", h.governance.UpsertNetworkNode)
 	storeGov.POST("/network/simulate", h.governance.RunNetworkSimulation)
+	storeGov.GET("/network/mikrotik", h.governance.GetStoreMikrotikProfile)
+	storeGov.PUT("/network/mikrotik", h.governance.UpsertStoreMikrotikProfile)
+	storeGov.POST("/network/mikrotik/generate-rsc", h.governance.GenerateStoreMikrotikRsc)
 	storeGov.GET("/subscription/invoices", h.governance.ListStoreSubscriptionInvoices)
 	storeGov.POST("/subscription/invoices", h.governance.CreateStoreSubscriptionInvoice)
 	storeGov.POST("/clearance", h.governance.RequestAccountClearance)
@@ -463,6 +475,7 @@ func registerGovernanceRoutes(v1 *gin.RouterGroup, h *handlerSet) {
 	platform.GET("/overview", h.governance.PlatformOverview)
 	platform.GET("/onboarding", h.governance.ListOnboardingApplications)
 	platform.POST("/onboarding/:id/review", h.governance.ReviewOnboardingApplication)
+	platform.POST("/onboarding/:id/provision", h.governance.ProvisionOnboardingApplication)
 	platform.POST("/tenants/:store_id/kyb-review", h.governance.ReviewStoreKYB)
 	platform.POST("/tenants/:store_id/clearance/:id/execute", h.governance.ExecuteTenantClearance)
 	platform.GET("/midtrans-readiness", h.governance.MidtransBusinessReviewReadiness)

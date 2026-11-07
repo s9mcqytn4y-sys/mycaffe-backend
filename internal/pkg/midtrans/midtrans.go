@@ -20,12 +20,20 @@ import (
 )
 
 type Client struct {
-	serverKey string
-	env       midtrans.EnvironmentType
+	serverKey              string
+	env                    midtrans.EnvironmentType
+	defaultNotificationURL string
 }
 
 func NewClient(cfg *config.Config) *Client {
-	return NewClientWithKey(cfg.MidtransServerKey, cfg.MidtransIsProduction)
+	c := NewClientWithKey(cfg.MidtransServerKey, cfg.MidtransIsProduction)
+	if cfg != nil {
+		base := strings.TrimRight(strings.TrimSpace(cfg.AppPublicURL), "/")
+		if strings.HasPrefix(strings.ToLower(base), "https://") {
+			c.defaultNotificationURL = base + "/api/v1/payments/midtrans/webhook"
+		}
+	}
+	return c
 }
 
 // NewClientWithKey constructs an isolated Midtrans Core API client for either Platform Billing
@@ -42,6 +50,17 @@ func NewClientWithKey(serverKey string, isProduction bool) *Client {
 	}
 }
 
+// WithDefaultNotificationURL returns a shallow copy of the Client configured to send
+// X-Override-Notification on every ChargeCoreAPI call unless overridden per request.
+func (c *Client) WithDefaultNotificationURL(notificationURL string) *Client {
+	if c == nil {
+		return nil
+	}
+	cp := *c
+	cp.defaultNotificationURL = strings.TrimSpace(notificationURL)
+	return &cp
+}
+
 // IsConfigured reports whether a non-empty server key is loaded.
 func (c *Client) IsConfigured() bool {
 	return c != nil && strings.TrimSpace(c.serverKey) != ""
@@ -54,12 +73,13 @@ func (c *Client) IsProduction() bool {
 
 // ChargeRequest represents one immutable Midtrans payment attempt.
 type ChargeRequest struct {
-	OrderID        string
-	Amount         int64
-	Method         domain.PaymentMethod
-	Bank           string
-	IdempotencyKey string // UUID v4 (36 characters), stable for this payment attempt.
-	CallbackURL    string
+	OrderID         string
+	Amount          int64
+	Method          domain.PaymentMethod
+	Bank            string
+	IdempotencyKey  string // UUID v4 (36 characters), stable for this payment attempt.
+	CallbackURL     string
+	NotificationURL string // Optional X-Override-Notification webhook URL.
 }
 
 // newCoreAPIClient creates a per-call SDK client so mutable SDK options are never shared
@@ -136,6 +156,13 @@ func (c *Client) ChargeCoreAPI(ctx context.Context, input ChargeRequest) (*corea
 
 	client := c.newCoreAPIClient()
 	client.Options.SetPaymentIdempotencyKey(input.IdempotencyKey)
+	notifURL := strings.TrimSpace(input.NotificationURL)
+	if notifURL == "" {
+		notifURL = strings.TrimSpace(c.defaultNotificationURL)
+	}
+	if notifURL != "" {
+		client.Options.SetPaymentOverrideNotification(notifURL)
+	}
 	resp, midtransErr := client.ChargeTransaction(req)
 	if midtransErr != nil {
 		return nil, fmt.Errorf("midtrans charge failed (status %d): %s", midtransErr.StatusCode, midtransErr.Message)

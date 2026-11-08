@@ -417,15 +417,15 @@ func validateWhatsAppConfig(cfg *Config) error {
 		}
 		return nil
 	case "bridge":
-		if cfg.AppEnv == "production" {
-			return errors.New("[SECURITY FAIL-CLOSED] WHATSAPP_DRIVER=bridge (unofficial whatsmeow) is not allowed in production; use cloud")
-		}
-		u, err := url.Parse(cfg.WhatsAppBridgeURL)
+		u, err := url.Parse(strings.TrimSpace(cfg.WhatsAppBridgeURL))
 		if err != nil || u.Scheme == "" || u.Host == "" {
 			return errors.New("WHATSAPP_DRIVER=bridge requires a valid absolute WHATSAPP_BRIDGE_URL")
 		}
 		if len(cfg.WhatsAppBridgeToken) < 32 {
 			return errors.New("WHATSAPP_DRIVER=bridge requires WHATSAPP_BRIDGE_TOKEN of at least 32 characters")
+		}
+		if cfg.AppEnv == "production" && containsPlaceholderPattern(cfg.WhatsAppBridgeToken) {
+			return errors.New("[SECURITY FAIL-CLOSED] production WHATSAPP_BRIDGE_TOKEN cannot contain placeholder credentials")
 		}
 		return nil
 	}

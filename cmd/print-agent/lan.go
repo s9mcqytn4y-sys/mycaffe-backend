@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/printfmt"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/pkg/printfmt"
 )
 
 // LAN fallback (decision W18): while the internet is down the POS device sends its kitchen ticket straight

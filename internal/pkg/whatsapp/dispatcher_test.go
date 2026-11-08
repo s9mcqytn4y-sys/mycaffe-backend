@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/sms"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/whatsapp"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/pkg/sms"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/pkg/whatsapp"
 )
 
 type mockSender struct {

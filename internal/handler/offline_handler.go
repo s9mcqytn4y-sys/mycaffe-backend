@@ -5,7 +5,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/service"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/service"
 )
 
 // OfflineHandler serves offline order sync for registered devices and the owner's review queue

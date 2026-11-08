@@ -12,12 +12,12 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 	"github.com/midtrans/midtrans-go/coreapi"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/config"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/domain"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/database"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/rbac"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/repository/postgres"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/service"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/config"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/domain"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/pkg/database"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/pkg/rbac"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/repository/postgres"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/service"
 )
 
 // TestGatewayRefunds covers RF1-a/b/f (PR 8.5b): a Direct Refund request leaves money untouched until

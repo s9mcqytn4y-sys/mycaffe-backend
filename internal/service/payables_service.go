@@ -11,8 +11,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/domain"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/repository/postgres"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/domain"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/repository/postgres"
 )
 
 // Supplier payables (PR 11.5, decision X7). Every goods receipt is owed to its supplier from the store-local

@@ -14,12 +14,12 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/config"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/handler"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/database"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/rbac"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/repository/postgres"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/service"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/config"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/handler"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/pkg/database"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/pkg/rbac"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/repository/postgres"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/service"
 )
 
 // TestPayablesIntegration covers v0.11 PR 11.5 (X7): a receipt owed to its supplier after the payment terms,

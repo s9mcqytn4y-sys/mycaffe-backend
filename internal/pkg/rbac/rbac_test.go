@@ -4,9 +4,9 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/domain"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/auth"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/rbac"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/domain"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/pkg/auth"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/pkg/rbac"
 )
 
 // The role enum, JWT role validation and the RBAC matrix must stay in lock-step (ADR-003 D7).

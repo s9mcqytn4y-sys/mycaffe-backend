@@ -5,9 +5,9 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/domain"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/rbac"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/realtime"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/domain"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/pkg/rbac"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/realtime"
 )
 
 // ADR-007 RA5: a new approval request reaches only the owner channel; the decision also reaches the

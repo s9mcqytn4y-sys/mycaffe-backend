@@ -10,7 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/repository/postgres"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/repository/postgres"
 )
 
 // Purchasing (K2, PR 11.4, decisions X7 and X9): suppliers, purchase orders with staged receipts, and direct

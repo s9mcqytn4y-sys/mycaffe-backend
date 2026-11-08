@@ -1,4 +1,4 @@
-module github.com/s9mcqytn4y-sys/mycaffe-backend
+module github.com/s9mcqytn4y-sys/cassy-backend
 
 go 1.27.3
 

@@ -9,10 +9,10 @@ import (
 	"errors"
 	"fmt"
 	"github.com/jmoiron/sqlx"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/repository/postgres"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/repository/postgres"
 
 	"github.com/google/uuid"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/domain"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/domain"
 )
 
 var errUnknownCatalogVersion = errors.New("catalog_version tidak dikenal server")

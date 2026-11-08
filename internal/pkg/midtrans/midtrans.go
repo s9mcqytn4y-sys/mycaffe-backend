@@ -15,8 +15,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/midtrans/midtrans-go"
 	"github.com/midtrans/midtrans-go/coreapi"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/config"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/domain"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/config"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/domain"
 )
 
 type Client struct {

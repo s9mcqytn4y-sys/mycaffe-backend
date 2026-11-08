@@ -12,7 +12,7 @@ import (
 	"github.com/getsentry/sentry-go"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/metrics"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/pkg/metrics"
 )
 
 const RequestIDHeader = "X-Request-ID"

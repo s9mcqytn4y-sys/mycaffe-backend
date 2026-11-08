@@ -14,9 +14,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/domain"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/database"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/repository/postgres"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/domain"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/pkg/database"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/repository/postgres"
 )
 
 // Guest QR ordering (iteration 5b): one session per device (Q6), pay-first only (T2), caps of QR5.

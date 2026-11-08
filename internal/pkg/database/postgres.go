@@ -9,7 +9,7 @@ import (
 	"github.com/google/uuid"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/jmoiron/sqlx"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/config"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/config"
 )
 
 // BuildSafeDatabaseURL constructs a PostgreSQL connection URI that safely percent-encodes

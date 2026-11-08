@@ -6,7 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/service"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/service"
 )
 
 // TableHandler serves tables, table sessions and QR resolution (iteration 5a).

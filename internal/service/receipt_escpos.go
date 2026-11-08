@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/printfmt"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/pkg/printfmt"
 )
 
 // ESC/POS rendering for 58 mm (32 columns) and 80 mm (48 columns) thermal printers, sent as raw bytes

@@ -11,11 +11,11 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/config"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/domain"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/database"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/repository/postgres"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/service"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/config"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/domain"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/pkg/database"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/repository/postgres"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/service"
 )
 
 // TestMultiPaymentAndRounding covers decisions V11/V12: several direct tenders on one bill, a pending

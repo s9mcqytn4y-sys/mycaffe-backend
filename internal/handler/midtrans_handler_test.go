@@ -12,10 +12,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/config"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/handler"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/midtrans"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/realtime"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/config"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/handler"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/pkg/midtrans"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/realtime"
 )
 
 func setupTestWebhookRouter(serverKey string) *gin.Engine {

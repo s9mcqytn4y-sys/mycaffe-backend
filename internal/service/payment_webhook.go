@@ -12,9 +12,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 	"github.com/midtrans/midtrans-go/coreapi"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/domain"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/database"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/midtrans"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/domain"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/pkg/database"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/pkg/midtrans"
 )
 
 // ProcessMidtransWebhook persists a verified notification in the durable inbox and

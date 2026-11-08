@@ -6,7 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/service"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/service"
 )
 
 // InventoryHandler serves ingredients, recipes and product unit costs (v0.11 PR 11.3, inventory.manage).

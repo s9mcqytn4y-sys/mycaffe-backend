@@ -10,9 +10,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/domain"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/rbac"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/repository/postgres"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/domain"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/pkg/rbac"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/repository/postgres"
 )
 
 // Order discounts (PR 8.6, V12): one order-level discount on an unpaid pay-first order, taken off the

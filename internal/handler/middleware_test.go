@@ -13,8 +13,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus/testutil"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/metrics"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/service"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/pkg/metrics"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/service"
 )
 
 func captureLogs(t *testing.T) *bytes.Buffer {

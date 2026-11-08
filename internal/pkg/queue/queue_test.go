@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/queue"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/pkg/queue"
 )
 
 func TestCalculator_ZeroOrdersAhead(t *testing.T) {

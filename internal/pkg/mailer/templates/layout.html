@@ -5,6 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light">
 <title>{{template "subject" .}}</title>
+<style>
+  body { margin:0; padding:0; background-color:#FAF6F1; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; color:#2C1A12; }
+  table { border-collapse:collapse; }
+  a { color:#8A4F22; text-decoration:none; }
+</style>
 </head>
 <body style="margin:0;padding:0;background-color:#FAF6F1;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#2C1A12;">
 <div style="display:none;max-height:0;overflow:hidden;opacity:0;">{{template "preheader" .}}</div>
@@ -24,8 +29,8 @@
         </tr>
         <tr>
           <td style="padding:20px 4px 0 4px;font-size:12px;line-height:18px;color:#7C6656;">
-            Email ini dikirim secara otomatis oleh <strong>Cassy POS</strong> (dioperasikan oleh PT Azure Dev Indonesia). Mohon tidak membalas email ini{{if .ReplyTo}}; silakan hubungi {{.ReplyTo}} bila memerlukan bantuan{{end}}.<br>
-            &copy; {{.Year}} {{.StoreName}} &bull; Didukung oleh AzureDevID
+            Email ini dikirim secara otomatis oleh <strong>Cassy POS</strong> by AzureDevID (Usaha Perorangan). Mohon tidak membalas email ini{{if .ReplyTo}}; silakan hubungi {{.ReplyTo}} bila memerlukan bantuan{{end}}.<br>
+            &copy; {{.Year}} {{.StoreName}} &bull; Didukung oleh Cassy POS by AzureDevID (Usaha Perorangan)
           </td>
         </tr>
       </table>

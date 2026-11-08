@@ -10,10 +10,10 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/config"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/database"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/sms"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/realtime"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/config"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/pkg/database"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/pkg/sms"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/realtime"
 )
 
 type recordingPublisher struct {

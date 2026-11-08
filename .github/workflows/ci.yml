@@ -31,9 +31,10 @@ jobs:
           cache: true
 
       - name: Secret Scan (Gitleaks with Checksum Verification)
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          curl -sSL -O https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz
-          curl -sSL -O https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_checksums.txt
+          gh release download v8.24.3 --repo gitleaks/gitleaks --pattern "gitleaks_8.24.3_linux_x64.tar.gz" --pattern "gitleaks_8.24.3_checksums.txt"
           sha256sum --ignore-missing --check gitleaks_8.24.3_checksums.txt
           sudo tar -xz -C /usr/local/bin -f gitleaks_8.24.3_linux_x64.tar.gz gitleaks
           rm -f gitleaks_8.24.3_*
@@ -97,8 +98,10 @@ jobs:
       # P0-06: fail on CRITICAL OS/Go-module CVEs that have a fix; HIGH is reported only.
       # Pinned binary with a hard-coded checksum instead of trivy-action (compromised in March 2026).
       - name: Scan Image for Vulnerabilities (Trivy v0.76.0, checksum-pinned)
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          curl -sSL -o trivy.tgz https://github.com/aquasecurity/trivy/releases/download/v0.76.0/trivy_0.76.0_Linux-64bit.tar.gz
+          gh release download v0.76.0 --repo aquasecurity/trivy --pattern "trivy_0.76.0_Linux-64bit.tar.gz" -O trivy.tgz
           echo "e24b1c51293c1b15e4ba8d45bbc7891ba053f90278ec2698f3562c993e145fe7  trivy.tgz" | sha256sum --check
           sudo tar -xz -C /usr/local/bin -f trivy.tgz trivy
           rm -f trivy.tgz

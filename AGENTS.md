@@ -84,3 +84,24 @@ This workspace is `mycaffe-backend`. Treat it as the backend repository. The fro
 
 ## Communication
 Respond to the owner in Bahasa Indonesia unless English is needed for code/API terminology. Be direct about risks, trade-offs, assumptions, and unverified facts. Distinguish implemented behavior from a proposal using the four-tier classification (*Implemented & Tested*, *Guarded / Fail-Closed*, *Planned*, *Blocked by Dependency*).
+
+## Ecosystem Directory Map (7 Locations)
+1. `C:\Projects\myCaffe-backend`: Core Backend Engine (Go 1.24, PostgreSQL 18 RLS, KDS Hub, Midtrans Core API).
+2. `C:\Projects\mycaffe-wt-sc`: Git Worktree for loyalty stamp card program (`feat/v011-stamp-card`).
+3. `C:\Projects\MyCaffeClient`: Client monorepo root (`com.azuredevid.cassy`).
+4. `C:\Projects\MyCaffeClient\apps\android`: Cassy POS Native Tablet App (Jetpack Compose, CameraX, Port 9100 ESC/POS).
+5. `C:\Projects\MyCaffeClient\apps\web`: Guest QR Table Ordering & Owner Backoffice PWA (Next.js 15).
+6. `C:\Projects\MyCaffeClient\apps\ios`: iOS hardware HAL and native receipt printer bridge.
+7. `C:\Users\Acer\OneDrive\Documents\AzureDevId`: Brand identity assets, legal licenses, and security recovery keys.
+
+<!-- antislop:start -->
+## antislop
+For UI, copy, people, mobile layout, or code comments work, read `antislop.md` (core) and then the skill for the task:
+- UI / visual: `skills/antislop-ui/SKILL.md`
+- Copy & text: `skills/antislop-copywriting/SKILL.md`
+- People: `skills/antislop-human/SKILL.md`
+- Mobile / responsive: `skills/antislop-layoutmobile/SKILL.md`
+- Code comments: `skills/antislop-code/SKILL.md`
+Before starting, ask the user when antislop applies: during the work, or after it is done.
+<!-- antislop:end -->
+

@@ -23,24 +23,43 @@ const (
 	TemplateReceipt          = "receipt"
 )
 
+// ReceiptItem represents an itemized line in a digital receipt.
+type ReceiptItem struct {
+	Name          string
+	Details       string
+	Quantity      int
+	SubtotalLabel string
+}
+
 // Data is the template input. Fields a template does not use are ignored.
 type Data struct {
-	StoreName      string
-	StoreSlug      string
-	ReplyTo        string
-	RecipientName  string
-	RecipientEmail string
-	ActorName      string
-	StaffName      string
-	RoleLabel      string
-	ActionURL      string
-	ActionLabel    string
-	ExpiresIn      string
-	ExpiresAt      string
-	EventAt        string
-	OrderNumber    string
-	TotalLabel     string
-	Year           int
+	StoreName          string
+	StoreSlug          string
+	ReplyTo            string
+	RecipientName      string
+	RecipientEmail     string
+	ActorName          string
+	StaffName          string
+	RoleLabel          string
+	ActionURL          string
+	ActionLabel        string
+	ExpiresIn          string
+	ExpiresAt          string
+	EventAt            string
+	OrderNumber        string
+	TotalLabel         string
+	Year               int
+
+	// Rich Receipt fields
+	IssuedAt           string
+	PaymentMethod      string
+	ReferenceID        string
+	CashierName        string
+	Items              []ReceiptItem
+	SubtotalItemsLabel string
+	DiscountLabel      string
+	ServiceFeeLabel    string
+	TaxLabel           string
 }
 
 type Rendered struct {

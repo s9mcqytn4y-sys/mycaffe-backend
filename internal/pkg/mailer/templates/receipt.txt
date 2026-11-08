@@ -1,10 +1,12 @@
-Terima kasih sudah mampir ke {{.StoreName}}.
+========================================
+STRUK DIGITAL {{.StoreName}}
+Pesanan: {{.OrderNumber}}
+Waktu  : {{.IssuedAt}}
+Metode : {{.PaymentMethod}}
+========================================
+Total Pembayaran: {{.TotalLabel}}
 
-Struk pesanan {{.OrderNumber}} (total {{.TotalLabel}}):
+Lihat dan unduh struk digital resmi Anda:
 {{.ActionURL}}
 
-Tautan berlaku sampai {{.ExpiresAt}}.
-Tidak merasa memesan? Abaikan email ini.
-
---
-{{.StoreName}} (MyCaffe). Email otomatis, mohon tidak dibalas.
+© {{.Year}} {{.StoreName}} • Didukung oleh Cassy by AzureDevID

@@ -183,6 +183,7 @@ func registerRoutes(router *gin.Engine, h *handlerSet) {
 		registerKDSAndCatalogRoutes(v1, h)
 		if h.governance != nil {
 			registerGovernanceRoutes(v1, h)
+			registerMobileBootstrapRoutes(v1, h)
 		}
 	}
 
@@ -479,4 +480,11 @@ func registerGovernanceRoutes(v1 *gin.RouterGroup, h *handlerSet) {
 	platform.POST("/tenants/:store_id/kyb-review", h.governance.ReviewStoreKYB)
 	platform.POST("/tenants/:store_id/clearance/:id/execute", h.governance.ExecuteTenantClearance)
 	platform.GET("/midtrans-readiness", h.governance.MidtransBusinessReviewReadiness)
+}
+
+func registerMobileBootstrapRoutes(v1 *gin.RouterGroup, h *handlerSet) {
+	// Mobile Native Tablet POS & KDS bootstrap handshake.
+	// Requires standard staff bearer authentication (accessible to any valid role).
+	mobile := v1.Group("/mobile", h.auth.RequireStaff())
+	mobile.GET("/bootstrap", h.governance.MobileBootstrap)
 }

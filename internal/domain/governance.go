@@ -423,3 +423,77 @@ type MikrotikRscBundle struct {
 	TopologySummary     MikrotikTopologySummary `json:"topology_summary"`
 	GeneratedAt         time.Time               `json:"generated_at"`
 }
+
+// StoreMobileProfile aligns 1:1 with store_mobile_profiles table (Migration 53).
+type StoreMobileProfile struct {
+	StoreID                 uuid.UUID  `json:"store_id" db:"store_id"`
+	AppBrandDisplayName     string     `json:"app_brand_display_name" db:"app_brand_display_name"`
+	AppMonogramText         string     `json:"app_monogram_text" db:"app_monogram_text"`
+	AppTechnicalBundleID    string     `json:"app_technical_bundle_id" db:"app_technical_bundle_id"`
+	POSTabletOrientation    string     `json:"pos_tablet_orientation" db:"pos_tablet_orientation"`
+	POSAutoLockSeconds      int        `json:"pos_auto_lock_seconds" db:"pos_auto_lock_seconds"`
+	KDSAutoRefreshSeconds   int        `json:"kds_auto_refresh_seconds" db:"kds_auto_refresh_seconds"`
+	KDSSoundAlertEnabled    bool       `json:"kds_sound_alert_enabled" db:"kds_sound_alert_enabled"`
+	CashDrawerKickOnCash    bool       `json:"cash_drawer_kick_on_cash" db:"cash_drawer_kick_on_cash"`
+	DefaultPrinterInterface string     `json:"default_printer_interface" db:"default_printer_interface"`
+	DefaultPrinterPort      int        `json:"default_printer_port" db:"default_printer_port"`
+	OfflineSyncIntervalSec  int        `json:"offline_sync_interval_sec" db:"offline_sync_interval_sec"`
+	UpdatedByUserID         *uuid.UUID `json:"updated_by_user_id,omitempty" db:"updated_by_user_id"`
+	UpdatedAt               time.Time  `json:"updated_at" db:"updated_at"`
+}
+
+// MobileBootstrapResponse models the consolidated tablet POS & KDS bootstrap handshake.
+type MobileBootstrapResponse struct {
+	StoreID        uuid.UUID                `json:"store_id"`
+	StoreSlug      string                   `json:"store_slug"`
+	StoreName      string                   `json:"store_name"`
+	AppBrand       MobileAppBrandInfo       `json:"app_brand"`
+	POSLayout      MobilePOSLayoutInfo      `json:"pos_layout"`
+	Hardware       MobileHardwareInfo       `json:"hardware"`
+	PaymentGateway MobilePaymentGatewayInfo `json:"payment_gateway"`
+	StaffSession   MobileStaffSessionInfo   `json:"staff_session"`
+}
+
+type MobileAppBrandInfo struct {
+	DisplayName       string `json:"display_name"`
+	MonogramText      string `json:"monogram_text"`
+	BundleID          string `json:"bundle_id"`
+	VectorMonogramURL string `json:"vector_monogram_url"`
+	VectorLogoURL     string `json:"vector_logo_url"`
+	VectorIconURL     string `json:"vector_icon_url"`
+}
+
+type MobilePOSLayoutInfo struct {
+	TabletOrientation      string `json:"tablet_orientation"`
+	LayoutMode             string `json:"layout_mode"`
+	AutoLockSeconds        int    `json:"auto_lock_seconds"`
+	TabularNumbersEnforced bool   `json:"tabular_numbers_enforced"`
+	MinTouchTargetPx       int    `json:"min_touch_target_px"`
+}
+
+type MobileHardwareInfo struct {
+	DefaultPrinterInterface string `json:"default_printer_interface"`
+	DefaultPrinterPort      int    `json:"default_printer_port"`
+	CashDrawerKickOnCash    bool   `json:"cash_drawer_kick_on_cash"`
+	CashDrawerPulseHex      string `json:"cash_drawer_pulse_hex"`
+	KDSAutoRefreshSeconds   int    `json:"kds_auto_refresh_seconds"`
+	KDSSoundAlertEnabled    bool   `json:"kds_sound_alert_enabled"`
+}
+
+type MobilePaymentGatewayInfo struct {
+	Provider                  string `json:"provider"`
+	Environment               string `json:"environment"`
+	ClientKey                 string `json:"client_key"`
+	MerchantID                string `json:"merchant_id"`
+	IsEnabled                 bool   `json:"is_enabled"`
+	ValidationStatus          string `json:"validation_status"`
+	FallbackStaticQRISEnabled bool   `json:"fallback_static_qris_enabled"`
+}
+
+type MobileStaffSessionInfo struct {
+	UserID      uuid.UUID `json:"user_id"`
+	FullName    string    `json:"full_name"`
+	Role        string    `json:"role"`
+	Email       string    `json:"email"`
+	Permissions []string  `json:"permissions"`
+}

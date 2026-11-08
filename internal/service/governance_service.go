@@ -2160,3 +2160,127 @@ func (s *GovernanceService) EvaluateMidtransBusinessReviewReadiness(ctx context.
 		EvaluatedAt: s.nowFunc().UTC(),
 	}, nil
 }
+
+// GetMobileBootstrap synthesizes tablet POS and KDS runtime bootstrap configuration.
+// Accessible by any authenticated staff member (owner, cashier, barista, kitchen).
+func (s *GovernanceService) GetMobileBootstrap(ctx context.Context, actor *AuthenticatedStaff) (*domain.MobileBootstrapResponse, error) {
+	if s == nil {
+		return nil, errors.New("governance service unavailable")
+	}
+	if actor == nil || actor.Staff.UserID == uuid.Nil {
+		return nil, ErrInvalidSession
+	}
+	storeID := actor.Staff.Store.ID
+	storeSlug := actor.Staff.Store.Slug
+	storeName := actor.Staff.Store.Name
+
+	profile := domain.StoreMobileProfile{
+		StoreID:                 storeID,
+		AppBrandDisplayName:     "Cassy",
+		AppMonogramText:         "CS",
+		AppTechnicalBundleID:    "com.azuredevid.cassy",
+		POSTabletOrientation:    "landscape_primary",
+		POSAutoLockSeconds:      300,
+		KDSAutoRefreshSeconds:   5,
+		KDSSoundAlertEnabled:    true,
+		CashDrawerKickOnCash:    true,
+		DefaultPrinterInterface: "lan_tcp",
+		DefaultPrinterPort:      9100,
+		OfflineSyncIntervalSec:  60,
+		UpdatedAt:               s.nowFunc().UTC(),
+	}
+
+	var paymentInfo domain.MobilePaymentGatewayInfo
+	paymentInfo.Provider = "midtrans"
+	paymentInfo.Environment = "sandbox"
+	paymentInfo.ValidationStatus = "unverified"
+	paymentInfo.FallbackStaticQRISEnabled = true
+
+	err := database.WithTenantTx(ctx, s.db, storeID, func(tx *sqlx.Tx) error {
+		// 1. Fetch store_mobile_profiles (Migration 53)
+		var p domain.StoreMobileProfile
+		pErr := tx.GetContext(ctx, &p, `
+			SELECT store_id, app_brand_display_name, app_monogram_text, app_technical_bundle_id,
+			       pos_tablet_orientation, pos_auto_lock_seconds, kds_auto_refresh_seconds,
+			       kds_sound_alert_enabled, cash_drawer_kick_on_cash, default_printer_interface,
+			       default_printer_port, offline_sync_interval_sec, updated_by_user_id, updated_at
+			FROM store_mobile_profiles
+			WHERE store_id = $1
+		`, storeID)
+		if pErr == nil {
+			profile = p
+		} else if !errors.Is(pErr, sql.ErrNoRows) {
+			return pErr
+		}
+
+		// 2. Fetch payment credentials
+		var cred domain.StorePaymentCredential
+		cErr := tx.GetContext(ctx, &cred, `
+			SELECT store_id, provider, environment, merchant_id, client_key,
+			       validation_status, is_enabled, fallback_static_qris_enabled
+			FROM store_payment_credentials
+			WHERE store_id = $1
+		`, storeID)
+		if cErr == nil {
+			paymentInfo.Provider = cred.Provider
+			paymentInfo.Environment = cred.Environment
+			paymentInfo.ClientKey = cred.ClientKey
+			paymentInfo.MerchantID = cred.MerchantID
+			paymentInfo.IsEnabled = cred.IsEnabled
+			paymentInfo.ValidationStatus = cred.ValidationStatus
+			paymentInfo.FallbackStaticQRISEnabled = cred.FallbackStaticQRISEnabled
+		} else if !errors.Is(cErr, sql.ErrNoRows) {
+			return cErr
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	perms := make([]string, len(actor.Permissions))
+	for i, p := range actor.Permissions {
+		perms[i] = string(p)
+	}
+
+	cdnBase := "https://cdn.abbdullaziz.online"
+	res := &domain.MobileBootstrapResponse{
+		StoreID:   storeID,
+		StoreSlug: storeSlug,
+		StoreName: storeName,
+		AppBrand: domain.MobileAppBrandInfo{
+			DisplayName:       profile.AppBrandDisplayName,
+			MonogramText:      profile.AppMonogramText,
+			BundleID:          profile.AppTechnicalBundleID,
+			VectorMonogramURL: cdnBase + "/brand/cassy/CassyMonogramVector.svg",
+			VectorLogoURL:     cdnBase + "/brand/cassy/CassyLogoLightVector.svg",
+			VectorIconURL:     cdnBase + "/brand/cassy/CassyAppIconDarkSquircle.svg",
+		},
+		POSLayout: domain.MobilePOSLayoutInfo{
+			TabletOrientation:      profile.POSTabletOrientation,
+			LayoutMode:             "master_detail_toast",
+			AutoLockSeconds:        profile.POSAutoLockSeconds,
+			TabularNumbersEnforced: true,
+			MinTouchTargetPx:       48,
+		},
+		Hardware: domain.MobileHardwareInfo{
+			DefaultPrinterInterface: profile.DefaultPrinterInterface,
+			DefaultPrinterPort:      profile.DefaultPrinterPort,
+			CashDrawerKickOnCash:    profile.CashDrawerKickOnCash,
+			CashDrawerPulseHex:      "1B700019FA",
+			KDSAutoRefreshSeconds:   profile.KDSAutoRefreshSeconds,
+			KDSSoundAlertEnabled:    profile.KDSSoundAlertEnabled,
+		},
+		PaymentGateway: paymentInfo,
+		StaffSession: domain.MobileStaffSessionInfo{
+			UserID:      actor.Staff.UserID,
+			FullName:    actor.Staff.FullName,
+			Role:        string(actor.Staff.Role),
+			Email:       "",
+			Permissions: perms,
+		},
+	}
+
+	return res, nil
+}

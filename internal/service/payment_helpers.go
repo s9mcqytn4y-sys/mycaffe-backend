@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -10,13 +11,14 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
 	"github.com/midtrans/midtrans-go/coreapi"
 	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/domain"
 )
 
 func isDirectCashierMethod(method domain.PaymentMethod) bool {
 	switch method {
-	case domain.PaymentMethodCash, domain.PaymentMethodStaticQRIS, domain.PaymentMethodEDC:
+	case domain.PaymentMethodCash, domain.PaymentMethodStaticQRIS, domain.PaymentMethodEDC, domain.PaymentMethodPlatform:
 		return true
 	default:
 		return false
@@ -115,6 +117,8 @@ func directCashierAuditDetails(method domain.PaymentMethod, orderNumber, reconci
 		return "STATIC_QRIS_RECONCILE", fmt.Sprintf("Static QRIS manually reconciled for order %s (ref: %s)", orderNumber, reconciliationRef)
 	case domain.PaymentMethodEDC:
 		return "EDC_RECONCILE", fmt.Sprintf("EDC terminal payment reconciled for order %s (ref: %s)", orderNumber, reconciliationRef)
+	case domain.PaymentMethodPlatform:
+		return "PLATFORM_PAYMENT_RECORDED", fmt.Sprintf("Delivery-app order %s paid by the platform (ref: %s)", orderNumber, reconciliationRef)
 	default:
 		return "STATIC_QRIS_RECONCILE", fmt.Sprintf("Direct cashier tender for order %s", orderNumber)
 	}
@@ -238,6 +242,19 @@ func parseMidtransExpiryTime(raw string) *time.Time {
 	if t, err := time.ParseInLocation("2006-01-02 15:04:05", trimmed, wib); err == nil {
 		utc := t.UTC()
 		return &utc
+	}
+	return nil
+}
+
+// checkChannelPaymentTx keeps the platform method and channel orders together (X14): a channel order is paid
+// only by its platform, and the platform method pays nothing else.
+func checkChannelPaymentTx(ctx context.Context, tx *sqlx.Tx, storeID, orderID uuid.UUID, method domain.PaymentMethod) error {
+	var channel bool
+	if err := tx.GetContext(ctx, &channel, `SELECT sales_channel_id IS NOT NULL FROM orders WHERE store_id = $1 AND id = $2`, storeID, orderID); err != nil {
+		return err
+	}
+	if channel != (method == domain.PaymentMethodPlatform) {
+		return fmt.Errorf("%w: platform pays channel orders only, and channel orders only take platform", ErrUnsupportedPaymentMethod)
 	}
 	return nil
 }

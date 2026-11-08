@@ -1,11 +1,13 @@
 # Roadmap, Iterations & Checklist
 
-Reviewed 2026-11-04 against `staging` after release **v0.6.0** (`main` `dc7e408`: go-live steps 0, A,
-B1–B4). Next step: **v0.7 Demo-ready**; see [PrdV2Brainstorm.md](../Product/PrdV2Brainstorm.md) §3,
-[FrontendIntegrationContract.md](FrontendIntegrationContract.md) §5 and
-[DemoReadinessChecklist.md](../Setup/DemoReadinessChecklist.md). Status uses the four-tier classification from `AGENTS.md`; a module counts as done
-only when its route, authorization, tests, and docs exist. MVP scope: **one cafe (single tenant)**,
-multi-tenant schema kept for future branches (owner decision M3). Audit tickets and their status:
+Reviewed 2026-11-07 against `staging` through migration **000051** (v0.8 money & operations, v0.9 cafe floor,
+v0.10 per-device offline sync, v0.11 promotions/bundles/inventory/purchasing/sales-channels, and v0.12
+multi-tenant SaaS governance & BYOK). Master QR Table Order release plan:
+[ReleasePlanQrTableOrderV1.md](../Product/ReleasePlanQrTableOrderV1.md); competitor benchmarks:
+[CompetitorAnalysisMajoo.md](../Product/CompetitorAnalysisMajoo.md) and
+[CompetitorAnalysisInterActive.md](../Product/CompetitorAnalysisInterActive.md); SaaS governance ADR:
+[Adr009MultiTenantSaasGovernanceAndByok.md](Adr009MultiTenantSaasGovernanceAndByok.md). Status uses the four-tier classification from `AGENTS.md`; a module counts as done
+only when its route, authorization, tests, and docs exist. Audit tickets and their status:
 [AuditBacklog.md](../Engineering/AuditBacklog.md).
 
 **Owner direction (2026-11-04, V1–V15): the freeze is lifted.** Release train v0.8 money & operations →
@@ -86,29 +88,30 @@ guest); Midtrans webhook. Metrics on the internal `METRICS_ADDR` only.
 | B3 | **Media C4**: presigned PUT to `mycaffe-media`, magic bytes, size, EXIF strip, JPEG variants (K9 deviation) | `product.image_url` only from verified objects; implemented (migration 000022) | R8 |
 | B4 | **RF1 staged**: RF1-c manual cash/transfer, RF1-e window per role (implemented, migration 000023); RF1-f `refund_pending` moves with RF1-a/b Midtrans refund, a separate PR after sandbox test | per decision register RF1 | P1-01 |
 
-Frozen until go-live: ADR-005 offline cash sync (P0-10), inventory C5 (P1-07..P1-10, P2-06),
-promotions & bundles (K7), loyalty (K6), static QRIS fallback (K8), delivery channels.
+Previously frozen items now **Implemented & Tested**:
+- **v0.10 Per-Device Offline Cash Sync (ADR-005)**: device registration/revocation, offline PIN verifier, versioned catalog snapshot, `/api/v1/device/offline-orders/sync`, owner conflict review queue (migrations 000038-000041).
+- **v0.11 Promotions, Bundles, Inventory & Delivery Channels**: automatic best line promotion, product bundles, ingredients & recipes with automatic COGS deduction, suppliers & staged purchase orders, payables & instalments, stock count/waste approval, and POS delivery sales channels (migrations 000042-000049).
+- **v0.12 Multi-Tenant SaaS Governance, Dual-Lane BYOK Midtrans & Self-Maintain Topology (ADR-009)**: legal documents & UU PDP consent, self-service tenant onboarding, store KYB profiles, Lane 1 platform subscription invoices vs Lane 2 AES-256-GCM BYOK Midtrans credentials + per-store webhook verification, storefront CMS & `id-ID`/`en-US` i18n, custom SMTP/WhatsApp configs, self-maintain LAN/ESC-POS hardware nodes & visual network simulator, tax-safe account clearance, and AzureDevID Superadmin console (migration 000051).
 
-## Production readiness (prepare now, cut over when the client buys domain + VPS)
+## Production readiness (prepare now, cut over when the client buys VPS)
 
 | Item | Status |
 | ------ | -------- |
-| CI runs every integration test on PostgreSQL 18 (P0-01) | Implemented |
-| Immutable GHCR images with provenance + SBOM, Trivy gate, GitHub Release on `v*` tags (P0-06) | Implemented; Release path first runs on the next tag |
+| CI runs every integration test on PostgreSQL 18 (P0-01) | Implemented & Tested |
+| Immutable GHCR images with provenance + SBOM, Trivy gate, GitHub Release on `v*` tags (P0-06) | Implemented & Tested |
 | Deploy by digest with pre-deploy backup and automatic rollback (P0-05) | Implemented; first VPS run pending |
-| Hourly encrypted R2 backups, retention tiers, `mycaffe_backup` role, restore drill script (P0-02) | Implemented; **drill on the production VPS pending** |
-| JSON logs with request id, internal Prometheus metrics (P0-03) | Implemented |
+| Hourly encrypted R2 backups, retention tiers, `mycaffe_backup` role, restore drill script (P0-02) | Implemented; drill on first production VPS pending |
+| JSON logs with request id, internal Prometheus metrics, Sentry Free Plan PII-scrubbed capture (P0-03, R6) | Implemented & Tested |
 | Grafana Cloud metrics and tested alert rules (P0-04) | Implemented; Grafana Cloud account pending (owner) |
-| Nginx TLS bootstrap, HSTS, request id, rate limits; internal-only DB network | Implemented |
-| Real client IP + Named Cloudflare Tunnel + VPS firewall (P0-07, IN1) | Implemented (config, PR 8.8); first live run on the first client VPS |
-| Outbox dead-letter and purge (P0-08) | Implemented (v0.8 PR 8.1); cron runs once a VPS exists |
+| Nginx TLS bootstrap, HSTS, request id, rate limits; internal-only DB network | Implemented & Tested |
+| Domain `abbdullaziz.online`, Cloudflare DNS/WAF, Named Tunnel `mycaffe-demo` (`demo.abbdullaziz.online`), R2 CDN (`cdn.abbdullaziz.online`) | Implemented & Tested |
+| Outbox dead-letter and purge (P0-08) | Implemented & Tested (v0.8 PR 8.1) |
 | Provisioning and incident runbook (P0-09) | Implemented ([OperationsRunbook.md](../Setup/OperationsRunbook.md)) |
-| Hostinger SMTP + SPF/DKIM/DMARC runbook | Documented ([Email.md](../Setup/Email.md)); blocked (no domain) |
-| Operator bootstrap (`bootstrap-store`) + `DEFAULT_STORE_SLUG` | Implemented |
-| Promote `staging` → `main` with a merge commit + semver tag | Owner approves each promotion |
+| Dual-Lane Midtrans Sandbox Core API + Tenant BYOK AES-256-GCM + Static QRIS Fallback | Implemented & Tested (ADR-009) |
+| Unified Client Monorepo (`myCaffe-client`: Web PWA, Android Jetpack Compose ESC/POS, iOS Obj-C Bridge + Xcode CI) | Implemented & Tested |
 
-## Open blockers (owner)
+## Open external dependencies (owner)
 
-1. Buy domain + Hostinger KVM 2 + mailbox → unblocks Named Tunnel, SMTP, restore drill on the VPS.
-2. Grafana Cloud stack ([Monitoring.md](../Setup/Monitoring.md) §2).
-3. Midtrans production keys → unblocks live payments.
+1. Client production Hostinger KVM 2 VPS provisioning -> triggers first immutable GHCR production deployment and R2 restore drill.
+2. Midtrans Production Business Review approval -> unblocks switching Lane 1 (`PLATFORM_MIDTRANS_IS_PRODUCTION=true`) from Sandbox to Production.
+3. Komdigi PSE Lingkup Privat certificate via OSS RBA SSO PB-UMKU -> updates `pse_registration_no` on corporate legal footer.

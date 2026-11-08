@@ -18,9 +18,11 @@ import (
 const MaxWebhookBodyBytes = 64 * 1024 // 64 KB maximum payload size
 
 type MidtransHandler struct {
-	midtransClient *midtrans.Client
-	realtimeHub    *realtime.Hub
-	paymentService *service.PaymentService
+	midtransClient    *midtrans.Client
+	platformClient    *midtrans.Client
+	realtimeHub       *realtime.Hub
+	paymentService    *service.PaymentService
+	governanceService *service.GovernanceService
 }
 
 func NewMidtransHandler(client *midtrans.Client, hub *realtime.Hub) *MidtransHandler {
@@ -30,8 +32,16 @@ func NewMidtransHandler(client *midtrans.Client, hub *realtime.Hub) *MidtransHan
 	}
 }
 
+func (h *MidtransHandler) SetPlatformClient(client *midtrans.Client) {
+	h.platformClient = client
+}
+
 func (h *MidtransHandler) SetPaymentService(paymentService *service.PaymentService) {
 	h.paymentService = paymentService
+}
+
+func (h *MidtransHandler) SetGovernanceService(governanceService *service.GovernanceService) {
+	h.governanceService = governanceService
 }
 
 type MidtransNotificationPayload struct {
@@ -79,7 +89,7 @@ func (h *MidtransHandler) HandleWebhook(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "missing required notification fields"})
 		return
 	}
-	if h.midtransClient == nil {
+	if h.midtransClient == nil && h.platformClient == nil {
 		c.Header("Retry-After", "60")
 		c.JSON(http.StatusServiceUnavailable, gin.H{"status": "deferred", "message": "payment gateway verifier is not ready"})
 		return
@@ -91,12 +101,89 @@ func (h *MidtransHandler) HandleWebhook(c *gin.Context) {
 		return
 	}
 
-	// 2. Verify SHA-512(order_id + status_code + gross_amount + server_key).
-	if !h.midtransClient.VerifySignature(notif.OrderID, notif.StatusCode, notif.GrossAmount, notif.SignatureKey) {
+	// 2. Verify SHA-512(order_id + status_code + gross_amount + server_key) against either
+	// the default store client or the dedicated Lane 1 Platform client.
+	sigValid := false
+	if h.midtransClient != nil && h.midtransClient.VerifySignature(notif.OrderID, notif.StatusCode, notif.GrossAmount, notif.SignatureKey) {
+		sigValid = true
+	}
+	if !sigValid && h.platformClient != nil && h.platformClient.VerifySignature(notif.OrderID, notif.StatusCode, notif.GrossAmount, notif.SignatureKey) {
+		sigValid = true
+	}
+	if !sigValid {
 		log.Printf("[SECURITY] Invalid Midtrans signature received for provider order ID: %s", trimmedOrderID)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid signature key"})
 		return
 	}
+
+	h.processVerifiedNotification(c, body, notif, trimmedOrderID)
+}
+
+// HandleTenantWebhook processes Midtrans Core API notifications signed with a specific tenant's
+// BYOK Server Key (POST /api/v1/payments/midtrans/webhook/:store_slug).
+func (h *MidtransHandler) HandleTenantWebhook(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, MaxWebhookBodyBytes)
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "payload too large or unreadable"})
+		return
+	}
+
+	var notif MidtransNotificationPayload
+	if err := json.Unmarshal(body, &notif); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid json payload"})
+		return
+	}
+	if notif.OrderID == "" || notif.StatusCode == "" || notif.GrossAmount == "" ||
+		notif.SignatureKey == "" || notif.TransactionStatus == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "missing required notification fields"})
+		return
+	}
+	trimmedOrderID := strings.TrimSpace(notif.OrderID)
+	if len(trimmedOrderID) < 3 || len(trimmedOrderID) > 100 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid order_id length"})
+		return
+	}
+	if h.governanceService == nil {
+		c.Header("Retry-After", "60")
+		c.JSON(http.StatusServiceUnavailable, gin.H{"status": "deferred", "message": "tenant gateway verifier is not ready"})
+		return
+	}
+
+	storeSlug := strings.ToLower(strings.TrimSpace(c.Param("store_slug")))
+	if storeSlug == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "store_slug is required"})
+		return
+	}
+
+	verified, err := h.governanceService.VerifyTenantWebhookSignature(
+		c.Request.Context(),
+		storeSlug,
+		notif.OrderID,
+		notif.StatusCode,
+		notif.GrossAmount,
+		notif.SignatureKey,
+	)
+	if err != nil {
+		if errors.Is(err, service.ErrGovernanceNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "tenant BYOK payment webhook is not enabled"})
+			return
+		}
+		log.Printf("[WEBHOOK ERROR] store_slug=%s provider_order_id=%s verify_error=%v", storeSlug, trimmedOrderID, err)
+		c.Header("Retry-After", "60")
+		c.JSON(http.StatusServiceUnavailable, gin.H{"status": "deferred", "message": "tenant gateway verifier temporarily unavailable"})
+		return
+	}
+	if !verified {
+		log.Printf("[SECURITY] Invalid tenant BYOK Midtrans signature store_slug=%s provider_order_id=%s", storeSlug, trimmedOrderID)
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid signature key"})
+		return
+	}
+
+	h.processVerifiedNotification(c, body, notif, trimmedOrderID)
+}
+
+func (h *MidtransHandler) processVerifiedNotification(c *gin.Context, body []byte, notif MidtransNotificationPayload, trimmedOrderID string) {
 
 	if !strings.EqualFold(strings.TrimSpace(notif.Currency), "IDR") {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported currency: only IDR is accepted"})
@@ -115,6 +202,42 @@ func (h *MidtransHandler) HandleWebhook(c *gin.Context) {
 	if mappedStatus == "paid" && notif.StatusCode != "200" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "paid notification must have status_code 200"})
 		return
+	}
+
+	webhookInput := service.MidtransWebhookInput{
+		OrderID:           notif.OrderID,
+		TransactionID:     notif.TransactionID,
+		StatusCode:        notif.StatusCode,
+		TransactionStatus: notif.TransactionStatus,
+		GrossAmount:       notif.GrossAmount,
+		FraudStatus:       notif.FraudStatus,
+		PaymentType:       notif.PaymentType,
+		Currency:          notif.Currency,
+	}
+
+	// Route Lane 1 Platform Subscription Invoices first when the order_id belongs to platform_invoices.
+	if h.governanceService != nil {
+		platRes, platErr := h.governanceService.ProcessPlatformInvoiceWebhook(c.Request.Context(), webhookInput)
+		if platErr == nil {
+			c.JSON(http.StatusOK, gin.H{
+				"status":         "ok",
+				"lane":           "platform_subscription",
+				"invoice_status": platRes.Status,
+				"duplicate":      platRes.Duplicate,
+				"ignored":        platRes.Ignored,
+			})
+			return
+		}
+		if errors.Is(platErr, service.ErrInvalidMidtransWebhook) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid platform invoice payment notification"})
+			return
+		}
+		if !errors.Is(platErr, service.ErrGovernanceNotFound) {
+			log.Printf("[WEBHOOK ERROR] lane=platform provider_order_id=%s amount=%d error=%v", trimmedOrderID, grossAmountIDR, platErr)
+			c.Header("Retry-After", "60")
+			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "deferred", "message": "platform invoice notification could not be committed; provider retry requested"})
+			return
+		}
 	}
 
 	// Only require durable service availability after the payload has passed
@@ -140,16 +263,7 @@ func (h *MidtransHandler) HandleWebhook(c *gin.Context) {
 		return
 	}
 
-	result, err := h.paymentService.ProcessMidtransWebhook(c.Request.Context(), service.MidtransWebhookInput{
-		OrderID:           notif.OrderID,
-		TransactionID:     notif.TransactionID,
-		StatusCode:        notif.StatusCode,
-		TransactionStatus: notif.TransactionStatus,
-		GrossAmount:       notif.GrossAmount,
-		FraudStatus:       notif.FraudStatus,
-		PaymentType:       notif.PaymentType,
-		Currency:          notif.Currency,
-	}, string(sanitizedBytes))
+	result, err := h.paymentService.ProcessMidtransWebhook(c.Request.Context(), webhookInput, string(sanitizedBytes))
 	if err != nil {
 		if errors.Is(err, service.ErrInvalidMidtransWebhook) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payment notification"})

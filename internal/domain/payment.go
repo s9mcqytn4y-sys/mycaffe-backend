@@ -150,6 +150,7 @@ const (
 	PaymentMethodCStore       PaymentMethod = "cstore"
 	PaymentMethodCash         PaymentMethod = "cash"
 	PaymentMethodEDC          PaymentMethod = "edc"
+	PaymentMethodPlatform     PaymentMethod = "platform" // delivery-app channel orders, paid by the platform (X14)
 )
 
 func ValidPaymentMethods() []PaymentMethod {
@@ -163,6 +164,7 @@ func ValidPaymentMethods() []PaymentMethod {
 		PaymentMethodCStore,
 		PaymentMethodCash,
 		PaymentMethodEDC,
+		PaymentMethodPlatform,
 	}
 }
 

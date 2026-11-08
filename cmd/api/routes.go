@@ -44,6 +44,7 @@ type handlerSet struct {
 	offline    *handler.OfflineHandler
 	receiptOut *handler.ReceiptDeliveryHandler
 	media      *handler.MediaHandler
+	governance *handler.GovernanceHandler
 }
 
 // wireHandlers constructs domain repositories, services, background workers, and HTTP handlers.
@@ -85,9 +86,25 @@ func wireHandlers(workerCtx context.Context, cfg *config.Config, db *sqlx.DB, hu
 	orderService := service.NewOrderService(db, orderRepo)
 
 	paymentRepo := postgres.NewPaymentRepository()
-	paymentService := service.NewPaymentService(db, paymentRepo, orderRepo, midtransClient)
+	governanceService := service.NewGovernanceService(
+		db,
+		cfg,
+		service.WithGovernanceMailer(mailSender, cfg.AppPublicURL),
+	)
+	paymentService := service.NewPaymentService(
+		db,
+		paymentRepo,
+		orderRepo,
+		midtransClient,
+		service.WithStoreGatewayResolver(governanceService.ResolveStoreGatewayClientTx),
+	)
 	h.offline = handler.NewOfflineHandler(service.NewOfflineSyncService(db, orderService, paymentService))
+	if cfg.PlatformMidtransServerKey != "" {
+		h.midtrans.SetPlatformClient(midtrans.NewClientWithKey(cfg.PlatformMidtransServerKey, cfg.PlatformMidtransIsProduction))
+	}
 	h.midtrans.SetPaymentService(paymentService)
+	h.midtrans.SetGovernanceService(governanceService)
+	h.governance = handler.NewGovernanceHandler(governanceService, cfg.PlatformAdminAPIKey)
 
 	h.pos = handler.NewPOSHandler(orderService, paymentService, service.NewSettingsService(db))
 	operationalService := service.NewOperationalService(
@@ -157,12 +174,17 @@ func registerRoutes(router *gin.Engine, h *handlerSet) {
 	v1 := router.Group("/api/v1")
 	v1.GET("/health", h.health.Check)
 	v1.POST("/payments/midtrans/webhook", h.midtrans.HandleWebhook)
+	v1.POST("/payments/midtrans/webhook/:store_slug", h.midtrans.HandleTenantWebhook)
 
 	if h.auth != nil {
 		registerStaffAuthRoutes(v1, h)
 		registerStoreAndPOSRoutes(v1, h)
 		registerTableAndGuestRoutes(v1, h)
 		registerKDSAndCatalogRoutes(v1, h)
+		if h.governance != nil {
+			registerGovernanceRoutes(v1, h)
+			registerMobileBootstrapRoutes(v1, h)
+		}
 	}
 
 	// Health check endpoints for Docker / LB probes
@@ -217,6 +239,7 @@ func registerStoreAndPOSRoutes(v1 *gin.RouterGroup, h *handlerSet) {
 	pos := v1.Group("/pos")
 	pos.POST("/orders", h.auth.RequirePermission(rbac.OrderPOSCreate), h.pos.CreateOrder)
 	pos.POST("/orders/quote", h.auth.RequirePermission(rbac.OrderPOSCreate), h.pos.QuoteOrder)
+	pos.GET("/sales-channels", h.auth.RequirePermission(rbac.OrderPOSCreate), h.catalog.ListSalesChannels(true))
 	pos.POST("/orders/:id/payments", h.auth.RequireStaff(), h.pos.InitiatePayment)
 	pos.GET("/catalog", h.auth.RequireStaff(), h.catalog.StaffCatalog)
 
@@ -299,6 +322,7 @@ func registerStoreAndPOSRoutes(v1 *gin.RouterGroup, h *handlerSet) {
 	reports.GET("/sales", h.report.Sales)
 	reports.GET("/summary", h.report.Summary)
 	reports.GET("/gross-profit", h.report.GrossProfit)
+	reports.GET("/channels", h.report.Channels)
 
 	// Media uploads (B3, K9): presigned PUT to R2, then verify + JPEG variants + link to the product.
 	media := v1.Group("/media", handler.LimitBody(4<<10), h.auth.RequirePermission(rbac.CatalogManage))
@@ -395,6 +419,11 @@ func registerKDSAndCatalogRoutes(v1 *gin.RouterGroup, h *handlerSet) {
 	cat.GET("/promotions", manage, h.catalog.ListPromotions)
 	cat.POST("/promotions", manage, h.catalog.CreatePromotion)
 	cat.PATCH("/promotions/:id", manage, h.catalog.UpdatePromotion)
+	// Sales channels (v0.11.1 PR 11.7, X12-X15): delivery-app orders typed in at the POS at channel prices.
+	cat.GET("/sales-channels", manage, h.catalog.ListSalesChannels(false))
+	cat.POST("/sales-channels", manage, h.catalog.CreateSalesChannel)
+	cat.PATCH("/sales-channels/:id", manage, h.catalog.UpdateSalesChannel)
+	cat.PUT("/sales-channels/:id/prices", manage, h.catalog.SetChannelPrices)
 	cat.POST("/modifier-groups", manage, h.catalog.CreateModifierGroup)
 	cat.GET("/modifier-groups", manage, h.catalog.ListModifierGroups)
 	cat.GET("/modifier-groups/:id", manage, h.catalog.GetModifierGroup)
@@ -407,4 +436,55 @@ func registerKDSAndCatalogRoutes(v1 *gin.RouterGroup, h *handlerSet) {
 	cat.DELETE("/modifier-groups/:id/options/:option_id", manage, h.catalog.ArchiveModifierOption)
 	cat.POST("/modifier-options/:id/child-groups", manage, h.catalog.AttachChildGroupToOption)
 	cat.DELETE("/modifier-options/:id/child-groups/:group_id", manage, h.catalog.DetachChildGroupFromOption)
+}
+
+func registerGovernanceRoutes(v1 *gin.RouterGroup, h *handlerSet) {
+	// Public SaaS Legal, Pricing, Onboarding + Email OTP & Storefront CMS (ADR-009)
+	v1.GET("/public/legal", h.governance.ListPublicLegalDocuments)
+	v1.GET("/public/plans", h.governance.ListPublicSubscriptionPlans)
+	v1.POST("/public/onboarding/apply", handler.LimitBody(64<<10), h.governance.SubmitOnboardingApplication)
+	v1.POST("/public/onboarding/:id/verify-otp", handler.LimitBody(4<<10), h.governance.VerifyOnboardingOTP)
+	v1.POST("/public/onboarding/:id/resend-otp", handler.LimitBody(4<<10), h.governance.ResendOnboardingOTP)
+	v1.GET("/public/stores/:slug/cms", h.governance.GetPublicStoreCMS)
+
+	// Tenant Owner Self-Service Governance (strictly scoped via WithTenantTx + RLS)
+	ownerManage := h.auth.RequirePermission(rbac.StoreSettingsManage)
+	storeGov := v1.Group("/store", ownerManage)
+	storeGov.GET("/legal/acceptances", h.governance.ListTenantLegalAcceptances)
+	storeGov.POST("/legal/:id/accept", h.governance.AcceptLegalDocument)
+	storeGov.GET("/kyb", h.governance.GetStoreKYB)
+	storeGov.PUT("/kyb", h.governance.UpsertStoreKYB)
+	storeGov.GET("/payment-credentials", h.governance.GetStorePaymentCredentials)
+	storeGov.PUT("/payment-credentials", h.governance.UpsertStorePaymentCredentials)
+	storeGov.GET("/cms", h.governance.GetStoreCMS)
+	storeGov.PUT("/cms", h.governance.UpsertStoreCMS)
+	storeGov.GET("/notifications", h.governance.GetStoreNotifications)
+	storeGov.PUT("/notifications", h.governance.UpsertStoreNotifications)
+	storeGov.GET("/network/nodes", h.governance.ListNetworkNodes)
+	storeGov.PUT("/network/nodes", h.governance.UpsertNetworkNode)
+	storeGov.POST("/network/simulate", h.governance.RunNetworkSimulation)
+	storeGov.GET("/network/mikrotik", h.governance.GetStoreMikrotikProfile)
+	storeGov.PUT("/network/mikrotik", h.governance.UpsertStoreMikrotikProfile)
+	storeGov.POST("/network/mikrotik/generate-rsc", h.governance.GenerateStoreMikrotikRsc)
+	storeGov.GET("/subscription/invoices", h.governance.ListStoreSubscriptionInvoices)
+	storeGov.POST("/subscription/invoices", h.governance.CreateStoreSubscriptionInvoice)
+	storeGov.POST("/clearance", h.governance.RequestAccountClearance)
+	storeGov.POST("/clearance/:id/cancel", h.governance.CancelAccountClearance)
+
+	// AzureDevID Platform Superadmin Console (constant-time X-Platform-Admin-Key, fails closed 503 if unset)
+	platform := v1.Group("/platform", h.governance.RequirePlatformAdmin())
+	platform.GET("/overview", h.governance.PlatformOverview)
+	platform.GET("/onboarding", h.governance.ListOnboardingApplications)
+	platform.POST("/onboarding/:id/review", h.governance.ReviewOnboardingApplication)
+	platform.POST("/onboarding/:id/provision", h.governance.ProvisionOnboardingApplication)
+	platform.POST("/tenants/:store_id/kyb-review", h.governance.ReviewStoreKYB)
+	platform.POST("/tenants/:store_id/clearance/:id/execute", h.governance.ExecuteTenantClearance)
+	platform.GET("/midtrans-readiness", h.governance.MidtransBusinessReviewReadiness)
+}
+
+func registerMobileBootstrapRoutes(v1 *gin.RouterGroup, h *handlerSet) {
+	// Mobile Native Tablet POS & KDS bootstrap handshake.
+	// Requires standard staff bearer authentication (accessible to any valid role).
+	mobile := v1.Group("/mobile", h.auth.RequireStaff())
+	mobile.GET("/bootstrap", h.governance.MobileBootstrap)
 }

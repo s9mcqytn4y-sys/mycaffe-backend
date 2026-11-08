@@ -375,6 +375,14 @@ BEGIN
        OR has_table_privilege('mycaffe_app', 'public.stock_sessions', 'DELETE') THEN
         RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may rewrite stock session lines or delete sessions!';
     END IF;
+    -- 10F-27. Sales channels (migration 000049): RLS on; channels are never deleted.
+    IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.sales_channels'::regclass)
+       OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.channel_prices'::regclass) THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: sales channel tables do not have row-level security enabled!';
+    END IF;
+    IF has_table_privilege('mycaffe_app', 'public.sales_channels', 'DELETE') THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may delete sales channels!';
+    END IF;
     -- 10F-24. Purchasing (migration 000046): RLS on; receipts are append-only (stock and cost already moved).
     IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.suppliers'::regclass)
        OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.purchase_orders'::regclass)
@@ -563,6 +571,44 @@ BEGIN
         WHERE p.proname = 'list_stores_with_due_table_timers' AND a.grantee = 0 AND a.privilege_type = 'EXECUTE'
     ) THEN
         RAISE EXCEPTION 'SECURITY FAILURE: list_stores_with_due_table_timers is executable by PUBLIC!';
+    END IF;
+
+    -- Platform SaaS Governance & BYOK tables (migration 000051): RLS on all tenant-owned tables,
+    -- append-only legal acceptances & governance audit logs, and zero DELETE privileges for mycaffe_app.
+    IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.tenant_legal_acceptances'::regclass)
+       OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.store_kyb_profiles'::regclass)
+       OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.platform_invoices'::regclass)
+       OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.tenant_clearance_requests'::regclass)
+       OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.store_payment_credentials'::regclass)
+       OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.store_cms_configs'::regclass)
+       OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.store_notification_configs'::regclass)
+       OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.store_network_nodes'::regclass)
+       OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.governance_audit_logs'::regclass) THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: platform SaaS governance tenant tables must have row-level security enabled!';
+    END IF;
+    IF has_table_privilege('mycaffe_app', 'public.tenant_legal_acceptances', 'UPDATE')
+       OR has_table_privilege('mycaffe_app', 'public.tenant_legal_acceptances', 'DELETE')
+       OR has_table_privilege('mycaffe_app', 'public.governance_audit_logs', 'UPDATE')
+       OR has_table_privilege('mycaffe_app', 'public.governance_audit_logs', 'DELETE')
+       OR has_table_privilege('mycaffe_app', 'public.store_payment_credentials', 'DELETE')
+       OR has_table_privilege('mycaffe_app', 'public.platform_invoices', 'DELETE')
+       OR has_table_privilege('mycaffe_app', 'public.tenant_clearance_requests', 'DELETE')
+       OR has_table_privilege('mycaffe_app', 'public.store_mikrotik_profiles', 'DELETE') THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app has forbidden UPDATE/DELETE on immutable governance/BYOK tables!';
+    END IF;
+    IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.store_mikrotik_profiles'::regclass) THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: store_mikrotik_profiles must have row-level security enabled!';
+    END IF;
+    IF NOT has_function_privilege('mycaffe_app', 'public.resolve_platform_invoice_webhook_context(character varying)', 'EXECUTE')
+       OR NOT has_function_privilege('mycaffe_app', 'public.provision_store_from_onboarding(uuid, uuid, uuid, text, text)', 'EXECUTE') THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: onboarding/webhook SECURITY DEFINER functions are not executable by mycaffe_app!';
+    END IF;
+    IF EXISTS (
+        SELECT 1 FROM pg_proc p, aclexplode(p.proacl) a
+        WHERE p.proname IN ('resolve_platform_invoice_webhook_context', 'provision_store_from_onboarding')
+          AND a.grantee = 0 AND a.privilege_type = 'EXECUTE'
+    ) THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: onboarding/webhook SECURITY DEFINER functions are executable by PUBLIC!';
     END IF;
 
     RAISE NOTICE 'SUCCESS: Row-Level Security (RLS) on stores/orders/payments/notifications and DELETE privilege revocation verified.';

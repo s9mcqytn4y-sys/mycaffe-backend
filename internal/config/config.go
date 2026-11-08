@@ -69,11 +69,21 @@ type Config struct {
 	// (owner decision Q3, single-tenant MVP). Multi-branch deployments leave it empty.
 	DefaultStoreSlug string
 
-	// Midtrans Core API
+	// Midtrans Core API (Default Store / Tenant Fallback)
 	MidtransMerchantID   string
 	MidtransServerKey    string
 	MidtransClientKey    string
 	MidtransIsProduction bool
+
+	// Multi-Tenant SaaS Governance & Dual-Lane Billing (ADR-009)
+	// CredentialEncryptionKey seals tenant BYOK Midtrans, SMTP, and WhatsApp secrets via AES-256-GCM.
+	CredentialEncryptionKey string
+	// PlatformAdminAPIKey guards /api/v1/platform/* Superadmin endpoints (fails closed 503 if empty).
+	PlatformAdminAPIKey string
+	// PlatformMidtrans* powers Lane 1 (AzureDevID SaaS Subscription Invoices), isolated from tenant F&B funds.
+	PlatformMidtransServerKey    string
+	PlatformMidtransClientKey    string
+	PlatformMidtransIsProduction bool
 
 	// Cloudflare R2 / Storage
 	StorageDriver       string
@@ -98,6 +108,12 @@ func LoadConfig() (*Config, error) {
 	isProd, err := strconv.ParseBool(midtransProdStr)
 	if err != nil {
 		return nil, fmt.Errorf("invalid boolean for MIDTRANS_IS_PRODUCTION: %w", err)
+	}
+
+	platformMidtransProdStr := getEnv("PLATFORM_MIDTRANS_IS_PRODUCTION", "false")
+	platformIsProd, err := strconv.ParseBool(platformMidtransProdStr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid boolean for PLATFORM_MIDTRANS_IS_PRODUCTION: %w", err)
 	}
 
 	// Strict integer parsing for JWT_EXPIRED_HOURS
@@ -169,59 +185,64 @@ func LoadConfig() (*Config, error) {
 	}
 
 	cfg := &Config{
-		AppEnv:                   appEnv,
-		Port:                     getEnv("PORT", "8080"),
-		MetricsAddr:              getEnv("METRICS_ADDR", "127.0.0.1:9091"),
-		FrontendURL:              frontendURL,
-		AllowedOrigins:           allowedOrigins,
-		TrustedProxies:           splitCSV(getEnv("TRUSTED_PROXIES", "")),
-		DatabaseURL:              getEnv("DATABASE_URL", ""),
-		DatabaseMigrationURL:     getEnv("DATABASE_MIGRATION_URL", getEnv("DATABASE_URL", "")),
-		DBAppUser:                getEnv("DB_APP_USER", "mycaffe_app"),
-		DBAppPassword:            getEnv("DB_APP_PASSWORD", ""),
-		JWTSecret:                getEnv("JWT_SECRET_KEY", ""),
-		JWTExpiryHours:           jwtHours,
-		StaffAccessTokenTTL:      staffAccessTTL,
-		StaffRefreshTokenTTL:     staffRefreshTTL,
-		StaffSessionIdleTimeout:  staffIdle,
-		StaffMaxSessions:         staffMaxSessions,
-		StaffPINMaxFailures:      staffPINMaxFailures,
-		StaffPINLockout:          staffPINLockout,
-		EmailDriver:              emailDriver,
-		SMSDriver:                smsDriver,
-		SMSEmailTo:               strings.TrimSpace(getEnv("SMS_EMAIL_TO", getEnv("EMAIL_FROM_ADDRESS", getEnv("SMTP_USERNAME", "")))),
-		SMSWebhookURL:            strings.TrimSpace(getEnv("SMS_WEBHOOK_URL", "")),
-		SMSWebhookToken:          strings.TrimSpace(getEnv("SMS_WEBHOOK_TOKEN", "")),
-		WhatsAppAPIVersion:       strings.TrimSpace(getEnv("WHATSAPP_API_VERSION", "v21.0")),
-		WhatsAppPhoneNumberID:    strings.TrimSpace(getEnv("WHATSAPP_PHONE_NUMBER_ID", "")),
-		WhatsAppAccessToken:      strings.TrimSpace(getEnv("WHATSAPP_ACCESS_TOKEN", "")),
-		WhatsAppReceiptTemplate:  strings.TrimSpace(getEnv("WHATSAPP_RECEIPT_TEMPLATE", "struk_digital")),
-		WhatsAppTemplateLanguage: strings.TrimSpace(getEnv("WHATSAPP_TEMPLATE_LANGUAGE", "id")),
-		WhatsAppDriver:           strings.ToLower(strings.TrimSpace(getEnv("WHATSAPP_DRIVER", ""))),
-		WhatsAppBridgeURL:        strings.TrimSpace(getEnv("WHATSAPP_BRIDGE_URL", "")),
-		WhatsAppBridgeToken:      strings.TrimSpace(getEnv("WHATSAPP_BRIDGE_TOKEN", "")),
-		SMTPHost:                 getEnv("SMTP_HOST", ""),
-		SMTPPort:                 smtpPort,
-		SMTPUsername:             getEnv("SMTP_USERNAME", ""),
-		SMTPPassword:             getEnv("SMTP_PASSWORD", ""),
-		SMTPTLSMode:              smtpTLSMode,
-		EmailFromEmail:           getEnv("EMAIL_FROM_ADDRESS", getEnv("SMTP_USERNAME", "")),
-		EmailFromName:            getEnv("EMAIL_FROM_NAME", "MyCaffe"),
-		AppPublicURL:             strings.TrimRight(getEnv("APP_PUBLIC_URL", frontendURL), "/"),
-		DefaultStoreSlug:         strings.ToLower(strings.TrimSpace(getEnv("DEFAULT_STORE_SLUG", ""))),
-		MidtransMerchantID:       getEnv("MIDTRANS_MERCHANT_ID", ""),
-		MidtransServerKey:        getEnv("MIDTRANS_SERVER_KEY", ""),
-		MidtransClientKey:        getEnv("MIDTRANS_CLIENT_KEY", ""),
-		MidtransIsProduction:     isProd,
-		StorageDriver:            getEnv("STORAGE_DRIVER", "local"),
-		R2AccountID:              getEnv("R2_ACCOUNT_ID", ""),
-		R2AccessKeyID:            getEnv("R2_ACCESS_KEY_ID", ""),
-		R2SecretAccessKey:        getEnv("R2_SECRET_ACCESS_KEY", ""),
-		R2BucketName:             getEnv("R2_BUCKET_NAME", ""),
-		R2PrivateBucketName:      getEnv("R2_PRIVATE_BUCKET_NAME", ""),
-		R2PublicURL:              getEnv("R2_PUBLIC_URL", ""),
-		SentryDSN:                getEnv("SENTRY_DSN", ""),
-		SentryEnvironment:        getEnv("SENTRY_ENVIRONMENT", appEnv),
+		AppEnv:                       appEnv,
+		Port:                         getEnv("PORT", "8080"),
+		MetricsAddr:                  getEnv("METRICS_ADDR", "127.0.0.1:9091"),
+		FrontendURL:                  frontendURL,
+		AllowedOrigins:               allowedOrigins,
+		TrustedProxies:               splitCSV(getEnv("TRUSTED_PROXIES", "")),
+		DatabaseURL:                  getEnv("DATABASE_URL", ""),
+		DatabaseMigrationURL:         getEnv("DATABASE_MIGRATION_URL", getEnv("DATABASE_URL", "")),
+		DBAppUser:                    getEnv("DB_APP_USER", "mycaffe_app"),
+		DBAppPassword:                getEnv("DB_APP_PASSWORD", ""),
+		JWTSecret:                    getEnv("JWT_SECRET_KEY", ""),
+		JWTExpiryHours:               jwtHours,
+		StaffAccessTokenTTL:          staffAccessTTL,
+		StaffRefreshTokenTTL:         staffRefreshTTL,
+		StaffSessionIdleTimeout:      staffIdle,
+		StaffMaxSessions:             staffMaxSessions,
+		StaffPINMaxFailures:          staffPINMaxFailures,
+		StaffPINLockout:              staffPINLockout,
+		EmailDriver:                  emailDriver,
+		SMSDriver:                    smsDriver,
+		SMSEmailTo:                   strings.TrimSpace(getEnv("SMS_EMAIL_TO", getEnv("EMAIL_FROM_ADDRESS", getEnv("SMTP_USERNAME", "")))),
+		SMSWebhookURL:                strings.TrimSpace(getEnv("SMS_WEBHOOK_URL", "")),
+		SMSWebhookToken:              strings.TrimSpace(getEnv("SMS_WEBHOOK_TOKEN", "")),
+		WhatsAppAPIVersion:           strings.TrimSpace(getEnv("WHATSAPP_API_VERSION", "v21.0")),
+		WhatsAppPhoneNumberID:        strings.TrimSpace(getEnv("WHATSAPP_PHONE_NUMBER_ID", "")),
+		WhatsAppAccessToken:          strings.TrimSpace(getEnv("WHATSAPP_ACCESS_TOKEN", "")),
+		WhatsAppReceiptTemplate:      strings.TrimSpace(getEnv("WHATSAPP_RECEIPT_TEMPLATE", "struk_digital")),
+		WhatsAppTemplateLanguage:     strings.TrimSpace(getEnv("WHATSAPP_TEMPLATE_LANGUAGE", "id")),
+		WhatsAppDriver:               strings.ToLower(strings.TrimSpace(getEnv("WHATSAPP_DRIVER", ""))),
+		WhatsAppBridgeURL:            strings.TrimSpace(getEnv("WHATSAPP_BRIDGE_URL", "")),
+		WhatsAppBridgeToken:          strings.TrimSpace(getEnv("WHATSAPP_BRIDGE_TOKEN", "")),
+		SMTPHost:                     getEnv("SMTP_HOST", ""),
+		SMTPPort:                     smtpPort,
+		SMTPUsername:                 getEnv("SMTP_USERNAME", ""),
+		SMTPPassword:                 getEnv("SMTP_PASSWORD", ""),
+		SMTPTLSMode:                  smtpTLSMode,
+		EmailFromEmail:               getEnv("EMAIL_FROM_ADDRESS", getEnv("SMTP_USERNAME", "")),
+		EmailFromName:                getEnv("EMAIL_FROM_NAME", "MyCaffe"),
+		AppPublicURL:                 strings.TrimRight(getEnv("APP_PUBLIC_URL", frontendURL), "/"),
+		DefaultStoreSlug:             strings.ToLower(strings.TrimSpace(getEnv("DEFAULT_STORE_SLUG", ""))),
+		MidtransMerchantID:           getEnv("MIDTRANS_MERCHANT_ID", ""),
+		MidtransServerKey:            getEnv("MIDTRANS_SERVER_KEY", ""),
+		MidtransClientKey:            getEnv("MIDTRANS_CLIENT_KEY", ""),
+		MidtransIsProduction:         isProd,
+		CredentialEncryptionKey:      strings.TrimSpace(getEnv("CREDENTIAL_ENCRYPTION_KEY", "")),
+		PlatformAdminAPIKey:          strings.TrimSpace(getEnv("PLATFORM_ADMIN_API_KEY", "")),
+		PlatformMidtransServerKey:    strings.TrimSpace(getEnv("PLATFORM_MIDTRANS_SERVER_KEY", getEnv("MIDTRANS_SERVER_KEY", ""))),
+		PlatformMidtransClientKey:    strings.TrimSpace(getEnv("PLATFORM_MIDTRANS_CLIENT_KEY", getEnv("MIDTRANS_CLIENT_KEY", ""))),
+		PlatformMidtransIsProduction: platformIsProd,
+		StorageDriver:                getEnv("STORAGE_DRIVER", "local"),
+		R2AccountID:                  getEnv("R2_ACCOUNT_ID", ""),
+		R2AccessKeyID:                getEnv("R2_ACCESS_KEY_ID", ""),
+		R2SecretAccessKey:            getEnv("R2_SECRET_ACCESS_KEY", ""),
+		R2BucketName:                 getEnv("R2_BUCKET_NAME", ""),
+		R2PrivateBucketName:          getEnv("R2_PRIVATE_BUCKET_NAME", ""),
+		R2PublicURL:                  getEnv("R2_PUBLIC_URL", ""),
+		SentryDSN:                    getEnv("SENTRY_DSN", ""),
+		SentryEnvironment:            getEnv("SENTRY_ENVIRONMENT", appEnv),
 	}
 
 	if err := ValidateConfig(cfg); err != nil {
@@ -318,6 +339,16 @@ func ValidateConfig(cfg *Config) error {
 		}
 		if len(cfg.JWTSecret) < 32 {
 			return fmt.Errorf("[SECURITY FAIL-CLOSED] %s requires a strong JWT_SECRET_KEY of at least 32 characters", cfg.AppEnv)
+		}
+		if cfg.CredentialEncryptionKey != "" {
+			if containsPlaceholderPattern(cfg.CredentialEncryptionKey) || len(cfg.CredentialEncryptionKey) < 32 {
+				return fmt.Errorf("[SECURITY FAIL-CLOSED] %s CREDENTIAL_ENCRYPTION_KEY must be non-placeholder and at least 32 characters", cfg.AppEnv)
+			}
+		}
+		if cfg.PlatformAdminAPIKey != "" {
+			if containsPlaceholderPattern(cfg.PlatformAdminAPIKey) || len(cfg.PlatformAdminAPIKey) < 32 {
+				return fmt.Errorf("[SECURITY FAIL-CLOSED] %s PLATFORM_ADMIN_API_KEY must be non-placeholder and at least 32 characters", cfg.AppEnv)
+			}
 		}
 	}
 

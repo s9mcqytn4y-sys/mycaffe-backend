@@ -5,8 +5,8 @@ nama konvensi GitHub. Dokumen yang hanya bernilai historis ada di `Archive/` dan
 
 | Folder | Isi | Mulai dari |
 |--------|-----|-----------|
-| `Product/` | Merek, kebutuhan per peran, modul, assessment owner, PRD v0.9 lantai kafe, rencana analytics | [PrdV09CafeFloor.md](Product/PrdV09CafeFloor.md) |
-| `Architecture/` | ADR, keputusan owner, roadmap, kontrak API/DB, risiko keamanan | [Roadmap.md](Architecture/Roadmap.md), [DecisionRegister.md](Architecture/DecisionRegister.md) |
+| `Product/` | Merek, kebutuhan per peran, modul, analisis kompetitor (`InterActive`, `Majoo`), rencana rilis QR Table Order v1.0 | [ReleasePlanQrTableOrderV1.md](Product/ReleasePlanQrTableOrderV1.md), [CompetitorAnalysisInterActive.md](Product/CompetitorAnalysisInterActive.md) |
+| `Architecture/` | ADR (ADR-001 s.d. ADR-009), keputusan owner, roadmap, kontrak API/DB, risiko keamanan | [Roadmap.md](Architecture/Roadmap.md), [Adr009MultiTenantSaasGovernanceAndByok.md](Architecture/Adr009MultiTenantSaasGovernanceAndByok.md) |
 | `Api/` | Kontrak OpenAPI (sumber kebenaran endpoint) | [OpenApi.yaml](Api/OpenApi.yaml), [FrontendIntegrationContract.md](Architecture/FrontendIntegrationContract.md) |
 | `Engineering/` | Backlog audit, workflow Git dan rilis, gaya Go, audit dependensi | [AuditBacklog.md](Engineering/AuditBacklog.md) |
 | `Setup/` | Dev Windows, demo, deploy, runbook operasi, backup, email, monitoring, R2, tooling AI | [DemoReadinessChecklist.md](Setup/DemoReadinessChecklist.md) |

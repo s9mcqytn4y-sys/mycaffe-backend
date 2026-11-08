@@ -15,12 +15,14 @@ var templateFS embed.FS
 
 // Template names. Each has templates/<name>.html (subject, preheader, html_body) and <name>.txt.
 const (
-	TemplateStaffInvite      = "staff_invite"
-	TemplatePINReset         = "pin_reset"
-	TemplatePINChanged       = "pin_changed"
-	TemplateAccountLocked    = "account_locked"
-	TemplateOwnerPINAttempts = "owner_pin_attempts"
-	TemplateReceipt          = "receipt"
+	TemplateStaffInvite           = "staff_invite"
+	TemplatePINReset              = "pin_reset"
+	TemplatePINChanged            = "pin_changed"
+	TemplateAccountLocked         = "account_locked"
+	TemplateOwnerPINAttempts      = "owner_pin_attempts"
+	TemplateReceipt               = "receipt"
+	TemplateOnboardingOTP         = "onboarding_otp"
+	TemplateOnboardingProvisioned = "onboarding_provisioned"
 )
 
 // Data is the template input. Fields a template does not use are ignored.
@@ -35,6 +37,8 @@ type Data struct {
 	RoleLabel      string
 	ActionURL      string
 	ActionLabel    string
+	OTPCode        string
+	PlanLabel      string
 	ExpiresIn      string
 	ExpiresAt      string
 	EventAt        string

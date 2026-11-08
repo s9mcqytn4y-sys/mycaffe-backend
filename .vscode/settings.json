@@ -1,133 +1,18 @@
 {
-    "workbench.colorTheme": "Dracula Theme",
-    "workbench.iconTheme": "material-icon-theme",
-    "workbench.editor.showTabs": "multiple",
-    "workbench.editor.tabSizing": "fit",
-    "workbench.editor.wrapTabs": true,
-    "workbench.tree.indent": 18,
-    "workbench.tree.renderIndentGuides": "always",
-    "update.showReleaseNotes": false,
-
-    "editor.fontFamily": "'Fira Code', 'Cascadia Code', 'JetBrains Mono', Consolas, 'Courier New', monospace",
-    "editor.fontLigatures": true,
-    "editor.fontSize": 14,
-    "editor.lineHeight": 22,
-    "editor.tabSize": 4,
-    "editor.insertSpaces": false,
-    "editor.detectIndentation": true,
-    "editor.formatOnSave": true,
-    "editor.renderWhitespace": "selection",
-    "editor.bracketPairColorization.enabled": true,
-    "editor.guides.bracketPairs": "active",
-    "editor.guides.indentation": true,
-    "editor.suggestSelection": "first",
-    "editor.codeActionsOnSave": {
-        "source.organizeImports": "always"
-    },
-
-    "[go]": {
-        "editor.defaultFormatter": "golang.go",
-        "editor.insertSpaces": false,
-        "editor.tabSize": 4,
-        "editor.formatOnSave": true
-    },
-    "[sql]": {
-        "editor.tabSize": 4,
-        "editor.insertSpaces": true
-    },
-    "[json]": {
-        "editor.defaultFormatter": "esbenp.prettier-vscode",
-        "editor.insertSpaces": true,
-        "editor.tabSize": 2
-    },
-    "[jsonc]": {
-        "editor.defaultFormatter": "esbenp.prettier-vscode",
-        "editor.insertSpaces": true,
-        "editor.tabSize": 2
-    },
-    "[yaml]": {
-        "editor.insertSpaces": true,
-        "editor.tabSize": 2
-    },
-    "[markdown]": {
-        "editor.defaultFormatter": "yzhang.markdown-all-in-one",
-        "editor.wordWrap": "on"
-    },
-    "[dockerfile]": {
-        "editor.tabSize": 4,
-        "editor.insertSpaces": true
-    },
-
-    "go.useLanguageServer": true,
-    "go.lintTool": "golangci-lint",
-    "go.lintOnSave": "package",
-    "go.formatTool": "gofmt",
-    "go.toolsManagement.autoUpdate": true,
-    "go.testFlags": [
-        "-v",
-        "-race"
-    ],
-    "go.testTimeout": "60s",
-    "gopls": {
-        "ui.semanticTokens": true,
-        "ui.completion.usePlaceholders": true,
-        "analyses": {
-            "unusedparams": true,
-            "shadow": true,
-            "nilness": true
-        }
-    },
-
-    "claudeCode.preferredLocation": "sidebar",
-    "claudeCode.initialPermissionMode": "default",
-    "claudeCode.allowDangerouslySkipPermissions": false,
-    "claudeCode.autosave": true,
-    "claudeCode.respectGitIgnore": true,
-    "claudeCode.useCtrlEnterToSend": true,
-    "claudeCode.enableNewConversationShortcut": true,
-
-    "errorlens.enabled": true,
-    "errorlens.fontSize": "12px",
-
-    "terminal.integrated.defaultProfile.windows": "PowerShell",
-    "terminal.integrated.profiles.windows": {
-        "PowerShell": {
-            "source": "PowerShell",
-            "icon": "terminal-powershell",
-            "args": ["-NoLogo"]
-        }
-    },
-    "terminal.integrated.fontFamily": "'Cascadia Code', 'Fira Code', Consolas",
-    "terminal.integrated.fontSize": 13,
-
-    "powershell.startAutomatically": false,
-    "powershell.integratedConsole.showOnStartup": false,
-    "powershell.developer.editorServicesLogLevel": "Normal",
-    "powershell.codeFormatting.preset": "OTBS",
-
-    "files.associations": {
-        ".env*": "dotenv",
-        "*.sql": "sql",
-        "Dockerfile*": "dockerfile",
-        "docker-compose*.yml": "dockercompose",
-        "*.jsonc": "jsonc"
-    },
-    "files.exclude": {
-        "**/.git": true,
-        "**/.DS_Store": true,
-        "**/Thumbs.db": true
-    },
-    "files.watcherExclude": {
-        "**/.git/objects/**": true,
-        "**/.git/subtree-cache/**": true,
-        "**/node_modules/**": true,
-        "**/bin/**": true,
-        "**/.gemini/**": true,
-        "**/.wrangler/**": true,
-        "**/.agents/**": true,
-        "**/.claude/**": true
-    },
-    "files.trimTrailingWhitespace": true,
-    "files.insertFinalNewline": true,
-    "files.eol": "\n"
+  "go.useLanguageServer": true,
+  "go.lintOnSave": "package",
+  "go.formatTool": "gofmt",
+  "editor.formatOnSave": true,
+  "files.eol": "\n",
+  "files.trimTrailingWhitespace": true,
+  "files.insertFinalNewline": true,
+  "files.exclude": {
+    "**/.git": true,
+    "**/bin": true,
+    "**/coverage.out": true
+  },
+  "search.exclude": {
+    "**/vendor": true,
+    "**/bin": true
+  }
 }

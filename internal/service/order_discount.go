@@ -103,7 +103,13 @@ func (s *OperationalService) ApplyDiscount(ctx context.Context, actor *Authentic
 			(order.PaymentStatus != domain.OrderPaymentStatusUnpaid && order.PaymentStatus != domain.OrderPaymentStatusFailed && order.PaymentStatus != domain.OrderPaymentStatusExpired) {
 			return ErrOrderNotDiscountable
 		}
-		var pending bool
+		var pending, channel bool
+		if err := tx.GetContext(ctx, &channel, `SELECT sales_channel_id IS NOT NULL FROM orders WHERE store_id = $1 AND id = $2`, storeID, order.ID); err != nil {
+			return err
+		}
+		if channel { // X15: the channel price is final
+			return ErrOrderNotDiscountable
+		}
 		if err := tx.GetContext(ctx, &pending, `SELECT EXISTS (SELECT 1 FROM payments WHERE store_id = $1 AND order_id = $2
 			AND status IN ('pending', 'authorized', 'paid', 'partially_refunded'))`, storeID, order.ID); err != nil {
 			return err

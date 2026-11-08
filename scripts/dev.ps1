@@ -162,7 +162,8 @@ switch ($Command) {
             $env:DB_APP_USER = 'mycaffe_app'
             $env:DB_APP_PASSWORD = 'it_app'
             Invoke-Native go @('run', './cmd/migrate', '-action=up')
-            Invoke-Native go @('run', './cmd/migrate', '-action=seed')
+            Invoke-Native go @('run', './cmd/migrate', '-action=seed', '-seed-file=db/seeds/development.sql')
+            Invoke-Native go @('run', './cmd/migrate', '-action=seed', '-seed-file=db/seeds/test_fixtures.sql')
             $env:TEST_APP_DATABASE_URL = "postgres://mycaffe_app:it_app@127.0.0.1:$TestPort/mycaffe_test?sslmode=disable"
             $env:TEST_MIGRATOR_DATABASE_URL = $migrator
             Invoke-Native go @('test', '-race', '-count=1', './...')

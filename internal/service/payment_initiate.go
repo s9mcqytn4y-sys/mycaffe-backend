@@ -55,13 +55,13 @@ func (s *PaymentService) InitiatePayment(
 		if input.ActorUserID == nil || *input.ActorUserID == uuid.Nil {
 			return nil, ErrUnauthorizedCashierTender
 		}
-		if (input.Method == domain.PaymentMethodStaticQRIS || input.Method == domain.PaymentMethodEDC) && input.ReconciliationRef == "" {
+		if (input.Method == domain.PaymentMethodStaticQRIS || input.Method == domain.PaymentMethodEDC || input.Method == domain.PaymentMethodPlatform) && input.ReconciliationRef == "" {
 			return nil, ErrReconciliationRefRequired
 		}
 		return s.initiateDirectCashierPayment(ctx, trustedStoreID, input)
 	}
 
-	if s.midtransClient == nil {
+	if s.midtransClient == nil && s.storeGatewayResolver == nil {
 		return nil, errors.New("midtrans gateway client is not configured")
 	}
 	if input.Method == domain.PaymentMethodBankTransfer {
@@ -104,7 +104,7 @@ func (s *PaymentService) directCashierPaymentTx(ctx context.Context, tx *sqlx.Tx
 		if !store.IsActive || store.DeletedAt != nil {
 			return ErrStoreInactive
 		}
-		if !isPaymentMethodEnabled(store.EnabledPaymentMethods, input.Method) {
+		if input.Method != domain.PaymentMethodPlatform && !isPaymentMethodEnabled(store.EnabledPaymentMethods, input.Method) {
 			return fmt.Errorf("%w: %s", ErrPaymentMethodNotEnabled, input.Method)
 		}
 
@@ -162,6 +162,9 @@ func (s *PaymentService) directCashierPaymentTx(ctx context.Context, tx *sqlx.Tx
 
 		order, splits, err := s.orderRepo.GetOrderByIDForUpdate(ctx, tx, trustedStoreID, input.OrderID)
 		if err != nil {
+			return err
+		}
+		if err := checkChannelPaymentTx(ctx, tx, trustedStoreID, order.ID, input.Method); err != nil {
 			return err
 		}
 		if order.BillingMode == domain.BillingModeOpenTab {
@@ -380,6 +383,7 @@ func (s *PaymentService) initiateMidtransGatewayPayment(
 		phase1Split                   *domain.PaymentSplit
 		immediateReplay               bool
 		reconcileExistingBeforeCharge bool
+		gwClient                      = s.midtransClient
 	)
 
 	// Phase 1: Short database transaction to check idempotency and persist/lock the pending attempt.
@@ -391,8 +395,20 @@ func (s *PaymentService) initiateMidtransGatewayPayment(
 		if !store.IsActive || store.DeletedAt != nil {
 			return ErrStoreInactive
 		}
-		if !isPaymentMethodEnabled(store.EnabledPaymentMethods, input.Method) {
+		if input.Method != domain.PaymentMethodPlatform && !isPaymentMethodEnabled(store.EnabledPaymentMethods, input.Method) {
 			return fmt.Errorf("%w: %s", ErrPaymentMethodNotEnabled, input.Method)
+		}
+		if s.storeGatewayResolver != nil {
+			customClient, resolveErr := s.storeGatewayResolver(ctx, tx, trustedStoreID)
+			if resolveErr != nil {
+				return resolveErr
+			}
+			if normalized := normalizeGatewayClient(customClient); normalized != nil {
+				gwClient = normalized
+			}
+		}
+		if gwClient == nil {
+			return errors.New("midtrans gateway client is not configured")
 		}
 
 		existing, err := s.paymentRepo.GetPaymentByIdempotencyKeyForUpdate(ctx, tx, trustedStoreID, input.IdempotencyKey)
@@ -429,6 +445,9 @@ func (s *PaymentService) initiateMidtransGatewayPayment(
 
 		order, splits, err := s.orderRepo.GetOrderByIDForUpdate(ctx, tx, trustedStoreID, input.OrderID)
 		if err != nil {
+			return err
+		}
+		if err := checkChannelPaymentTx(ctx, tx, trustedStoreID, order.ID, input.Method); err != nil {
 			return err
 		}
 		if order.BillingMode == domain.BillingModeOpenTab {
@@ -573,14 +592,14 @@ func (s *PaymentService) initiateMidtransGatewayPayment(
 	)
 
 	if reconcileExistingBeforeCharge {
-		statusResp, err = s.midtransClient.CheckTransaction(ctx, phase1Payment.ProviderOrderID)
+		statusResp, err = gwClient.CheckTransaction(ctx, phase1Payment.ProviderOrderID)
 		if err == nil && statusResp != nil && (statusResp.StatusCode == "200" || statusResp.StatusCode == "201") {
 			recoveredByStatus = true
 		}
 	}
 
 	if !recoveredByStatus {
-		chargeResp, chargeErr = s.midtransClient.ChargeCoreAPI(ctx, midtrans.ChargeRequest{
+		chargeResp, chargeErr = gwClient.ChargeCoreAPI(ctx, midtrans.ChargeRequest{
 			OrderID:        phase1Payment.ProviderOrderID,
 			Amount:         phase1Payment.Amount,
 			Method:         phase1Payment.Method,
@@ -591,7 +610,7 @@ func (s *PaymentService) initiateMidtransGatewayPayment(
 		if chargeErr != nil {
 			// Fallback CheckTransaction per specification: determine whether the charge actually
 			// reached Midtrans before the network error/timeout occurred.
-			fallbackStatus, checkErr := s.midtransClient.CheckTransaction(ctx, phase1Payment.ProviderOrderID)
+			fallbackStatus, checkErr := gwClient.CheckTransaction(ctx, phase1Payment.ProviderOrderID)
 			if checkErr == nil && fallbackStatus != nil && (fallbackStatus.StatusCode == "200" || fallbackStatus.StatusCode == "201") {
 				statusResp = fallbackStatus
 				recoveredByStatus = true

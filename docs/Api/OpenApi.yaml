@@ -941,6 +941,120 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
         "422": {$ref: "#/components/responses/ValidationFailed"}
+  /api/v1/catalog/sales-channels:
+    get:
+      tags: [Catalog]
+      operationId: listSalesChannels
+      summary: All sales channels with their prices (catalog.manage, X12)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: Channels, active first
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sales_channels:
+                    type: array
+                    items: {$ref: "#/components/schemas/SalesChannel"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    post:
+      tags: [Catalog]
+      operationId: createSalesChannel
+      summary: Create a delivery-app sales channel (catalog.manage, audited, X12)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/SalesChannelInput"}
+      responses:
+        "201":
+          description: The channel
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/SalesChannel"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409":
+          description: The name is already used in this store
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "422": {$ref: "#/components/responses/ValidationFailed"}
+  /api/v1/catalog/sales-channels/{id}:
+    patch:
+      tags: [Catalog]
+      operationId: updateSalesChannel
+      summary: Rename, change the commission of, or retire a sales channel (catalog.manage, audited)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/SalesChannelInput"}
+      responses:
+        "200":
+          description: The channel
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/SalesChannel"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409":
+          description: The name is already used in this store
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "422": {$ref: "#/components/responses/ValidationFailed"}
+  /api/v1/catalog/sales-channels/{id}/prices:
+    put:
+      tags: [Catalog]
+      operationId: setChannelPrices
+      summary: Set or remove channel prices per variant (catalog.manage, audited, X13)
+      description: >-
+        Each entry sets the channel price of one variant; a null price removes it so the variant sells at its
+        normal price on the channel. Variants not listed are left as they are. Modifier prices never change per channel.
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [prices]
+              properties:
+                prices:
+                  type: array
+                  minItems: 1
+                  maxItems: 500
+                  items:
+                    type: object
+                    required: [variant_id]
+                    properties:
+                      variant_id: {type: string, format: uuid}
+                      price: {type: [integer, "null"], format: int64, minimum: 0, description: null removes the channel price}
+      responses:
+        "200":
+          description: The channel with its prices
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/SalesChannel"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "422": {$ref: "#/components/responses/ValidationFailed"}
   /api/v1/inventory/stock-items:
     get:
       tags: [Catalog]
@@ -1786,6 +1900,26 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /api/v1/pos/sales-channels:
+    get:
+      tags: [Orders]
+      operationId: listPosSalesChannels
+      summary: Active sales channels with their prices, for the POS channel picker (order.pos.create, X12)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: Active channels
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sales_channels:
+                    type: array
+                    items: {$ref: "#/components/schemas/SalesChannel"}
+        "403": {$ref: "#/components/responses/Forbidden"}
   /api/v1/pos/orders/quote:
     post:
       tags: [Orders]
@@ -4900,6 +5034,55 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ValidationErrorResponse"
+  /api/v1/reports/channels:
+    get:
+      tags: [Reports]
+      operationId: getChannelReport
+      summary: Paid orders per sales channel with commission and net (X14)
+      description: >-
+        Direct orders (counter, table, QR) are the row "Langsung". Commission is the estimate fixed when the
+        order was created (channel commission_bps of its total); net = gross - refunded - commission.
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - $ref: "#/components/parameters/ReportFrom"
+        - $ref: "#/components/parameters/ReportTo"
+        - $ref: "#/components/parameters/ReportFormat"
+      responses:
+        "200":
+          description: "Report (JSON) or CSV download (kanal,jumlah_order,kotor,refund,komisi,bersih)"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [from, to, rows]
+                properties:
+                  from: {type: string, format: date}
+                  to: {type: string, format: date}
+                  rows:
+                    type: array
+                    items:
+                      type: object
+                      required: [channel, orders, gross, refunded, commission, net]
+                      properties:
+                        channel: {type: string}
+                        orders: {type: integer, format: int64}
+                        gross: {type: integer, format: int64}
+                        refunded: {type: integer, format: int64}
+                        commission: {type: integer, format: int64}
+                        net: {type: integer, format: int64}
+            text/csv:
+              schema:
+                type: string
+        "403":
+          description: Forbidden - lacks report.finance.read (owner only)
+        "422":
+          description: VALIDATION_FAILED (from, to, format)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationErrorResponse"
   /api/v1/reports/gross-profit:
     get:
       tags: [Reports]
@@ -5853,8 +6036,477 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /api/v1/payments/midtrans/webhook/{store_slug}:
+    post:
+      security: []
+      tags: [Payments]
+      operationId: handleTenantMidtransWebhook
+      summary: Tenant-specific BYOK Midtrans Core API webhook notification (ADR-009)
+      x-implementation-status: implemented
+      parameters:
+        - name: store_slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Notification verified against tenant BYOK SHA-512 key and processed idempotently
+        "401":
+          description: Invalid SHA-512 signature key
+        "404":
+          description: Store not found or BYOK webhook not enabled
+
+  /api/v1/public/legal:
+    get:
+      security: []
+      tags: [SaaS Governance]
+      operationId: listPublicLegalDocuments
+      summary: List active ToS, UU PDP Privacy Policy, Tenant DPA, and Refund Policy documents
+      x-implementation-status: implemented
+      parameters:
+        - name: locale
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [id-ID, en-US]
+            default: id-ID
+      responses:
+        "200":
+          description: Active legal documents with SHA-256 hashes
+
+  /api/v1/public/plans:
+    get:
+      security: []
+      tags: [SaaS Governance]
+      operationId: listPublicSubscriptionPlans
+      summary: List SaaS subscription plans in integer IDR (0% transaction commission)
+      x-implementation-status: implemented
+      responses:
+        "200":
+          description: Active subscription plans
+
+  /api/v1/public/onboarding/apply:
+    post:
+      security: []
+      tags: [SaaS Governance]
+      operationId: submitOnboardingApplication
+      summary: Submit an idempotent self-service tenant onboarding application and dispatch a 6-digit Email OTP
+      x-implementation-status: implemented
+      responses:
+        "201":
+          description: Application recorded in pending_email_otp status (NIB/NPWP masked)
+        "200":
+          description: Idempotent replay
+
+  /api/v1/public/onboarding/{id}/verify-otp:
+    post:
+      security: []
+      tags: [SaaS Governance]
+      operationId: verifyOnboardingEmailOTP
+      summary: Verify the 6-digit Email OTP for an onboarding application (constant-time SHA-256, max 5 attempts)
+      x-implementation-status: implemented
+      parameters:
+        - $ref: "#/components/parameters/ResourceID"
+      responses:
+        "200":
+          description: Email verified and application moved to submitted status
+        "422":
+          description: Invalid or expired OTP code
+        "429":
+          description: Maximum OTP verification attempts exceeded
+
+  /api/v1/public/onboarding/{id}/resend-otp:
+    post:
+      security: []
+      tags: [SaaS Governance]
+      operationId: resendOnboardingEmailOTP
+      summary: Issue and send a fresh 6-digit Email OTP after a 60-second cooldown
+      x-implementation-status: implemented
+      parameters:
+        - $ref: "#/components/parameters/ResourceID"
+      responses:
+        "200":
+          description: Fresh OTP dispatched
+        "409":
+          description: Email already verified
+        "429":
+          description: Cooldown active (60 seconds)
+
+  /api/v1/public/stores/{slug}/cms:
+    get:
+      security: []
+      tags: [SaaS Governance]
+      operationId: getPublicStoreCMS
+      summary: Public storefront theme tokens, hero copy, and supported locales (id-ID / en-US)
+      x-implementation-status: implemented
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Storefront CMS configuration
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/store/legal/acceptances:
+    get:
+      tags: [SaaS Governance]
+      operationId: listTenantLegalAcceptances
+      summary: List recorded legal acceptances for the authenticated store (owner)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: Recorded acceptances
+
+  /api/v1/store/legal/{id}/accept:
+    post:
+      tags: [SaaS Governance]
+      operationId: acceptLegalDocument
+      summary: Record owner acceptance of an active legal document version (owner)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - $ref: "#/components/parameters/ResourceID"
+      responses:
+        "201":
+          description: Legal consent recorded
+
+  /api/v1/store/kyb:
+    get:
+      tags: [SaaS Governance]
+      operationId: getStoreKYB
+      summary: Get business verification (KYB) and subscription profile for the store (owner)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: Store KYB profile
+    put:
+      tags: [SaaS Governance]
+      operationId: upsertStoreKYB
+      summary: Update store legal entity, masked NIB/NPWP, PSE number, and selected plan (owner)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: Updated KYB profile
+
+  /api/v1/store/payment-credentials:
+    get:
+      tags: [SaaS Governance]
+      operationId: getStorePaymentCredentials
+      summary: Get masked BYOK Midtrans configuration for the store (owner)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: Masked BYOK Midtrans credential metadata (ciphertext never returned)
+    put:
+      tags: [SaaS Governance]
+      operationId: upsertStorePaymentCredentials
+      summary: Seal BYOK Midtrans Server Key with AES-256-GCM bound to store_id AAD (owner)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: Stored and validated BYOK credential metadata
+
+  /api/v1/store/cms:
+    get:
+      tags: [SaaS Governance]
+      operationId: getStoreCMS
+      summary: Get storefront CMS, brand hex colors, WCAG high-contrast flag, and i18n copy (owner)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: Store CMS configuration
+    put:
+      tags: [SaaS Governance]
+      operationId: upsertStoreCMS
+      summary: Update storefront CMS, brand colors, custom domain, and bilingual copy (owner)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: Updated Store CMS configuration
+
+  /api/v1/store/notifications:
+    get:
+      tags: [SaaS Governance]
+      operationId: getStoreNotifications
+      summary: Get masked BYO-SMTP and WhatsApp notification configuration (owner)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: Store notification configuration
+    put:
+      tags: [SaaS Governance]
+      operationId: upsertStoreNotifications
+      summary: Seal custom SMTP password and WhatsApp API token with AES-256-GCM (owner)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: Updated notification configuration
+
+  /api/v1/store/network/nodes:
+    get:
+      tags: [SaaS Governance]
+      operationId: listStoreNetworkNodes
+      summary: List self-maintained local LAN/hardware devices (ESC/POS, drawer, KDS, Queue TV, IoT)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: Registered store hardware/network nodes
+    put:
+      tags: [SaaS Governance]
+      operationId: upsertStoreNetworkNode
+      summary: Register or update a local IP/port/protocol hardware node (owner)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: Upserted network node
+
+  /api/v1/store/network/simulate:
+    post:
+      tags: [SaaS Governance]
+      operationId: simulateStoreNetwork
+      summary: Run live DB probe and fault-injection topology simulation (healthy, wan_offline, printer_paper_out, lan_ip_conflict, midtrans_review)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: Topology simulation diagnostic report
+
+  /api/v1/store/network/mikrotik:
+    get:
+      tags: [SaaS Governance]
+      operationId: getStoreMikrotikProfile
+      summary: Get tenant MikroTik RouterOS v7 VLAN, Dual-WAN, QoS, Winbox, and SFTP profile (owner)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: Store MikroTik RouterOS v7 profile
+    put:
+      tags: [SaaS Governance]
+      operationId: upsertStoreMikrotikProfile
+      summary: Save validated non-overlapping VLAN CIDRs, Winbox subnet lock, and SFTP-only port (blocks plain FTP port 21)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: Saved MikroTik RouterOS v7 profile
+        "422":
+          description: Overlapping VLAN subnet or forbidden plain FTP port 21
+
+  /api/v1/store/network/mikrotik/generate-rsc:
+    post:
+      tags: [SaaS Governance]
+      operationId: generateStoreMikrotikRsc
+      summary: Generate downloadable MikroTik RouterOS v7 (.rsc) automation script, Winbox Safe Mode steps, and FileZilla SFTP policy
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: Generated .rsc script bundle with SHA-256 digest and Winbox guide
+
+  /api/v1/store/subscription/invoices:
+    get:
+      tags: [SaaS Governance]
+      operationId: listStoreSubscriptionInvoices
+      summary: List Lane 1 SaaS subscription invoices for the store (owner)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: Store SaaS invoices
+    post:
+      tags: [SaaS Governance]
+      operationId: createStoreSubscriptionInvoice
+      summary: Create a Lane 1 AzureDevID SaaS subscription invoice (monthly/annual)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "201":
+          description: Created platform subscription invoice
+
+  /api/v1/store/clearance:
+    post:
+      tags: [SaaS Governance]
+      operationId: requestAccountClearance
+      summary: Request tax-safe account clearance (blocks if open shift or active orders exist; 7-day cooling-off, 10-year UU KUP ledger retention)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "201":
+          description: Clearance request initiated
+        "409":
+          description: Open shift, active order, or existing clearance in progress
+
+  /api/v1/store/clearance/{id}/cancel:
+    post:
+      tags: [SaaS Governance]
+      operationId: cancelAccountClearance
+      summary: Cancel a cooling-off account clearance request (owner)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - $ref: "#/components/parameters/ResourceID"
+      responses:
+        "200":
+          description: Clearance cancelled
+
+  /api/v1/platform/overview:
+    get:
+      tags: [Platform Superadmin]
+      operationId: getPlatformOverview
+      summary: AzureDevID Superadmin multi-tenant overview & registry
+      x-implementation-status: implemented
+      security:
+        - PlatformAdminKey: []
+      responses:
+        "200":
+          description: Tenant summary counts and registry
+        "401":
+          description: Invalid X-Platform-Admin-Key
+        "503":
+          description: PLATFORM_ADMIN_UNCONFIGURED
+
+  /api/v1/platform/onboarding:
+    get:
+      tags: [Platform Superadmin]
+      operationId: listPlatformOnboarding
+      summary: List tenant onboarding applications
+      x-implementation-status: implemented
+      security:
+        - PlatformAdminKey: []
+      responses:
+        "200":
+          description: Onboarding applications
+
+  /api/v1/platform/onboarding/{id}/review:
+    post:
+      tags: [Platform Superadmin]
+      operationId: reviewPlatformOnboarding
+      summary: Review and transition an onboarding application (under_review, approved, rejected)
+      x-implementation-status: implemented
+      security:
+        - PlatformAdminKey: []
+      parameters:
+        - $ref: "#/components/parameters/ResourceID"
+      responses:
+        "200":
+          description: Updated onboarding application
+
+  /api/v1/platform/onboarding/{id}/provision:
+    post:
+      tags: [Platform Superadmin]
+      operationId: provisionPlatformOnboarding
+      summary: Provision an unverified tenant store, owner account, cash drawer, and QR tables from an OTP-verified onboarding application
+      x-implementation-status: implemented
+      security:
+        - PlatformAdminKey: []
+      parameters:
+        - $ref: "#/components/parameters/ResourceID"
+      responses:
+        "201":
+          description: New tenant store provisioned (kyb_status=unverified)
+        "200":
+          description: Idempotent replay returning existing provisioned store
+        "409":
+          description: Store slug conflict
+        "422":
+          description: Email OTP unverified or weak initial owner PIN
+
+  /api/v1/platform/tenants/{store_id}/kyb-review:
+    post:
+      tags: [Platform Superadmin]
+      operationId: reviewTenantKYB
+      summary: Verify or update a tenant's KYB and subscription status
+      x-implementation-status: implemented
+      security:
+        - PlatformAdminKey: []
+      parameters:
+        - name: store_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Updated KYB profile
+
+  /api/v1/platform/tenants/{store_id}/clearance/{id}/execute:
+    post:
+      tags: [Platform Superadmin]
+      operationId: executeTenantClearance
+      summary: Execute tenant account clearance (wipes BYOK & notification secrets, retains 10-year financial ledger)
+      x-implementation-status: implemented
+      security:
+        - PlatformAdminKey: []
+      parameters:
+        - name: store_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/ResourceID"
+      responses:
+        "200":
+          description: Executed clearance record
+
+  /api/v1/platform/midtrans-readiness:
+    get:
+      tags: [Platform Superadmin]
+      operationId: getMidtransBusinessReviewReadiness
+      summary: Audit Midtrans Production Business Review readiness & Core API edge-case playbook
+      x-implementation-status: implemented
+      security:
+        - PlatformAdminKey: []
+      responses:
+        "200":
+          description: Readiness score, checks, and edge-case mitigations
+
 components:
   securitySchemes:
+    PlatformAdminKey:
+      type: apiKey
+      in: header
+      name: X-Platform-Admin-Key
+      description: Constant-time SHA-256 verified Superadmin key for AzureDevID platform endpoints; fails closed (503) if unset.
     DeviceCredential:
       type: apiKey
       in: header
@@ -7418,6 +8070,30 @@ components:
         cash_net: {type: integer, format: int64}
         cash_rounding: {type: integer, format: int64, description: "Net cash rounding inside cash_sales (V11); not part of total_amount"}
         outlet_expenses: {type: integer, format: int64, description: "Outlet cash fund expenses in the range (V13), outside the drawers"}
+    SalesChannel:
+      type: object
+      required: [id, name, commission_bps, is_active, updated_at, prices]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        commission_bps: {type: integer, format: int64, minimum: 0, maximum: 10000, description: Commission estimate in basis points of the order total}
+        is_active: {type: boolean}
+        updated_at: {type: string, format: date-time}
+        prices:
+          type: array
+          description: Variants with a channel price; any other variant sells at its normal price
+          items:
+            type: object
+            required: [variant_id, price]
+            properties:
+              variant_id: {type: string, format: uuid}
+              price: {type: integer, format: int64}
+    SalesChannelInput:
+      type: object
+      properties:
+        name: {type: string, minLength: 1, maxLength: 50}
+        commission_bps: {type: integer, format: int64, minimum: 0, maximum: 10000}
+        is_active: {type: boolean}
     StockSession:
       type: object
       required: [id, kind, status, value_amount, note, created_by, created_by_name, decision_note, created_at, lines]
@@ -7624,7 +8300,8 @@ components:
 
     PaymentMethod:
       type: string
-      enum: [qris, gopay, shopeepay, bank_transfer, cash, static_qris, edc]
+      enum: [qris, gopay, shopeepay, bank_transfer, cash, static_qris, edc, platform]
+      description: platform pays delivery-app channel orders only and needs reconciliation_ref (the platform order number, X14)
 
     PaymentStatus:
       type: string
@@ -7701,6 +8378,7 @@ components:
       type: object
       required: [idempotency_key, customer_name, order_type, items]
       properties:
+        sales_channel_id: {type: string, format: uuid, description: "POS only (ignored on public endpoints): prices the order at this active channel without promotions, service charge or tax (X13, X15)"}
         idempotency_key:
           type: string
           minLength: 1
@@ -8399,6 +9077,7 @@ components:
       type: object
       required: [order_type, items]
       properties:
+        sales_channel_id: {type: string, format: uuid, description: "POS only (ignored on public endpoints): prices the order at this active channel without promotions, service charge or tax (X13, X15)"}
         order_type:
           type: string
           enum: [dine_in, takeaway, delivery]

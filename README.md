@@ -72,6 +72,16 @@ Prasyarat: Go 1.27.3, Docker Desktop. Semua perintah ada di `scripts/dev.ps1`
 | Email, SMS/OTP, Demo (`abbdullaziz.online`), Monitoring, Onboarding | [docs/Setup/Email.md](docs/Setup/Email.md), [docs/Setup/Sms.md](docs/Setup/Sms.md), [docs/Setup/DemoStagingEnvironment.md](docs/Setup/DemoStagingEnvironment.md), [docs/Setup/Monitoring.md](docs/Setup/Monitoring.md), [docs/Setup/FirstClientOnboardingRunbook.md](docs/Setup/FirstClientOnboardingRunbook.md) |
 | Kontrak API & standar CRUD/error | [docs/Api/OpenApi.yaml](docs/Api/OpenApi.yaml), [docs/Architecture/ApiConventions.md](docs/Architecture/ApiConventions.md) |
 
+## Client Applications & Ecosystem Map
+
+Sistem MyCaffe by AzureDevID mencakup backend dan suite aplikasi client multi-platform:
+- **`MyCaffeClient` Monorepo** (`https://github.com/s9mcqytn4y-sys/mycaffe-client`):
+  - **`apps/android`**: Cassy POS Native Android Tablet application (`com.azuredevid.cassy`) dengan CameraX store pairing, ESC/POS Port 9100 KDS ticket routing, dan ZXing dynamic QRIS.
+  - **`apps/web`**: Guest QR Table Ordering & Owner Backoffice PWA berbasis Next.js 15 App Router dan real-time WebSocket.
+  - **`apps/ios`**: iOS Hardware HAL dan printer driver serial/network.
+  - **`packages/design-tokens`**: Master token visual *Espresso & Crema* dan AzureDevID Control Plane.
+- **`AzureDevId` Vault**: Dokumen legalitas (HAKI, PSE), panduan brand vector resmi, kontrak payment gateway Midtrans, dan kunci security recovery.
+
 ---
 
 ## Git Branching & Release Strategy

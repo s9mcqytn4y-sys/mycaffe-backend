@@ -74,8 +74,8 @@ func (c *Calculator) CalculateEstimate(dailySeq int, ordersAhead int, items []Or
 	}
 
 	// Dynamic work duration (in minutes) for this order
-	bevWork := float64(beverageUnits * 2) / float64(c.ConcurrencyBaristas)
-	foodWork := float64(kitchenUnits * 5) / float64(c.ConcurrencyKitchen)
+	bevWork := float64(beverageUnits*2) / float64(c.ConcurrencyBaristas)
+	foodWork := float64(kitchenUnits*5) / float64(c.ConcurrencyKitchen)
 	pastryWork := float64(pastryUnits * 1) // Fast pastry grab/warm
 
 	// The order is ready when the slowest station finishes

@@ -15,8 +15,8 @@ import (
 )
 
 var (
-	ErrInvalidQRToken = errors.New("qr: invalid or corrupted token")
-	ErrExpiredQRToken = errors.New("qr: token expired")
+	ErrInvalidQRToken    = errors.New("qr: invalid or corrupted token")
+	ErrExpiredQRToken    = errors.New("qr: token expired")
 	ErrSignatureMismatch = errors.New("qr: signature verification failed")
 )
 

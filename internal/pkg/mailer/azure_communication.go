@@ -54,7 +54,7 @@ type acsContent struct {
 }
 
 type acsEmailPayload struct {
-	SenderAddress string `json:"senderAddress"`
+	SenderAddress string     `json:"senderAddress"`
 	Content       acsContent `json:"content"`
 	Recipients    struct {
 		To []acsRecipient `json:"to"`

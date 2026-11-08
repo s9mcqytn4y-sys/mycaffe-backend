@@ -33,22 +33,22 @@ type ReceiptItem struct {
 
 // Data is the template input. Fields a template does not use are ignored.
 type Data struct {
-	StoreName          string
-	StoreSlug          string
-	ReplyTo            string
-	RecipientName      string
-	RecipientEmail     string
-	ActorName          string
-	StaffName          string
-	RoleLabel          string
-	ActionURL          string
-	ActionLabel        string
-	ExpiresIn          string
-	ExpiresAt          string
-	EventAt            string
-	OrderNumber        string
-	TotalLabel         string
-	Year               int
+	StoreName      string
+	StoreSlug      string
+	ReplyTo        string
+	RecipientName  string
+	RecipientEmail string
+	ActorName      string
+	StaffName      string
+	RoleLabel      string
+	ActionURL      string
+	ActionLabel    string
+	ExpiresIn      string
+	ExpiresAt      string
+	EventAt        string
+	OrderNumber    string
+	TotalLabel     string
+	Year           int
 
 	// Rich Receipt fields
 	IssuedAt           string

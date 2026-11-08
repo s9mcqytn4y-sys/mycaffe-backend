@@ -168,6 +168,17 @@ func (s *OrderService) createOrderTx(ctx context.Context, tx *sqlx.Tx, trustedSt
 				return err
 			}
 		}
+		if normalizedInput.RewardItemIndex != nil && normalizedInput.CustomerID == nil {
+			return fmt.Errorf("%w: a stamp card reward needs customer_id", ErrInvalidOrderInput)
+		}
+		if normalizedInput.CustomerID != nil {
+			if normalizedInput.Guest != nil || normalizedInput.Offline != nil {
+				return fmt.Errorf("%w: customer_id is for POS orders", ErrInvalidOrderInput)
+			}
+			if err := applyCustomerTx(ctx, tx, trustedStoreID, normalizedInput, &snapshot, s.nowFunc().UTC()); err != nil {
+				return err
+			}
+		}
 		if normalizedInput.Offline != nil {
 			// Offline sync (ADR-005 OF3): price from the served snapshot, not from today's catalog.
 			if err := normalizedInput.Offline.apply(&catalogData.Store, &snapshot, normalizedInput); err != nil {
@@ -306,6 +317,12 @@ func (s *OrderService) createOrderTx(ctx context.Context, tx *sqlx.Tx, trustedSt
 			if _, err := tx.ExecContext(ctx, `UPDATE orders SET sales_channel_id = $3, snapshot_channel_name = $4, channel_commission_amount = $5
 				WHERE store_id = $1 AND id = $2`, trustedStoreID, order.ID, channel.ID, channel.Name, commission); err != nil {
 				return fmt.Errorf("failed to record order channel: %w", err)
+			}
+		}
+		if normalizedInput.CustomerID != nil {
+			if _, err := tx.ExecContext(ctx, `UPDATE orders SET customer_id = $3, stamp_reward = $4 WHERE store_id = $1 AND id = $2`,
+				trustedStoreID, order.ID, *normalizedInput.CustomerID, normalizedInput.RewardItemIndex != nil); err != nil {
+				return fmt.Errorf("failed to link order customer: %w", err)
 			}
 		}
 		if normalizedInput.Offline != nil {

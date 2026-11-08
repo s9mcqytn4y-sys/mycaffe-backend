@@ -43,6 +43,8 @@ type POSCreateOrderRequest struct {
 	ExpectedQuoteFingerprint string                   `json:"expected_quote_fingerprint,omitempty"`
 	Notes                    string                   `json:"notes" binding:"max=500"`
 	SalesChannelID           *uuid.UUID               `json:"sales_channel_id"`
+	CustomerID               *uuid.UUID               `json:"customer_id"`
+	RewardItemIndex          *int                     `json:"reward_item_index"`
 	Items                    []service.OrderItemInput `json:"items" binding:"required,min=1,max=100"`
 }
 
@@ -64,6 +66,7 @@ func (h *POSHandler) CreateOrder(c *gin.Context) {
 		CustomerPhone: req.CustomerPhone, OrderType: req.OrderType, BillingMode: req.BillingMode,
 		ActorUserID: &actorID, ExpectedTotal: req.ExpectedTotal,
 		ExpectedQuoteFingerprint: req.ExpectedQuoteFingerprint, Notes: req.Notes, Items: req.Items, SalesChannelID: req.SalesChannelID,
+		CustomerID: req.CustomerID, RewardItemIndex: req.RewardItemIndex,
 	})
 	if err != nil {
 		orderError(c, err)
@@ -82,6 +85,8 @@ type OrderQuoteRequest struct {
 	ExpectedTotal            *int64                   `json:"expected_total,omitempty"`
 	ExpectedQuoteFingerprint string                   `json:"expected_quote_fingerprint,omitempty"`
 	SalesChannelID           *uuid.UUID               `json:"sales_channel_id"`
+	CustomerID               *uuid.UUID               `json:"customer_id"`
+	RewardItemIndex          *int                     `json:"reward_item_index"`
 	Items                    []service.OrderItemInput `json:"items" binding:"required,min=1,max=100"`
 }
 
@@ -101,6 +106,8 @@ func (h *POSHandler) QuoteOrder(c *gin.Context) {
 		ExpectedQuoteFingerprint: req.ExpectedQuoteFingerprint,
 		ActorUserID:              &actorID,
 		SalesChannelID:           req.SalesChannelID,
+		CustomerID:               req.CustomerID,
+		RewardItemIndex:          req.RewardItemIndex,
 		Items:                    req.Items,
 	})
 	if err != nil {

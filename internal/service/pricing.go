@@ -76,6 +76,10 @@ type OrderCreationInput struct {
 	Items                    []OrderItemInput   `json:"items"`
 	// SalesChannelID prices a delivery-app order at its channel prices (X12-X15); POS only.
 	SalesChannelID *uuid.UUID `json:"sales_channel_id,omitempty"`
+	// CustomerID links a verified customer for the stamp card; RewardItemIndex makes one unit of that item
+	// the stamp card reward (X16, X17). POS only.
+	CustomerID      *uuid.UUID `json:"customer_id,omitempty"`
+	RewardItemIndex *int       `json:"reward_item_index,omitempty"`
 	// Guest binds a QR order to its table, table session and guest session (iteration 5b); never from JSON.
 	Guest *GuestOrderBinding `json:"-"`
 	// Offline re-prices a synced offline order from its catalog snapshot (ADR-005 OF3); never from JSON.
@@ -94,6 +98,8 @@ type CatalogSnapshot struct {
 	Promotions       []domain.Promotion
 	PromoAt          time.Time
 	IgnorePromoQuota bool
+	// RewardItem is the index of the item whose one unit is free as a stamp card reward (X17).
+	RewardItem *int
 }
 
 type PricedItemOption struct {
@@ -207,6 +213,9 @@ func ValidateAndPriceOrder(store domain.Store, input OrderCreationInput, catalog
 			return nil, fmt.Errorf("%w: product %q is unavailable", ErrProductUnavailable, product.Name)
 		}
 		if product.ProductType == domain.ProductTypeBundle {
+			if catalog.RewardItem != nil && *catalog.RewardItem == itemIdx {
+				return nil, fmt.Errorf("%w: a bundle cannot be a stamp card reward", ErrInvalidOrderInput)
+			}
 			lines, err := priceBundleLine(store.ID, product, reqItem, catalog, productDeducts, optionDeducts)
 			if err != nil {
 				return nil, err
@@ -238,8 +247,12 @@ func ValidateAndPriceOrder(store domain.Store, input OrderCreationInput, catalog
 		if err != nil {
 			return nil, err
 		}
-		// One best promotion per line, taken off the line subtotal (K7, X2).
-		if p, d := bestPromotion(catalog.Promotions, product, pricedItem.Item.SubtotalAmount, reqItem.Quantity,
+		if catalog.RewardItem != nil && *catalog.RewardItem == itemIdx {
+			// Stamp card reward: one unit free, in place of any promotion (X17).
+			name := stampRewardName
+			pricedItem.Item.SubtotalAmount -= pricedItem.Item.SnapshotPrice
+			pricedItem.Item.PromoDiscountAmount, pricedItem.Item.SnapshotPromoName = pricedItem.Item.SnapshotPrice, &name
+		} else if p, d := bestPromotion(catalog.Promotions, product, pricedItem.Item.SubtotalAmount, reqItem.Quantity,
 			storeLocal(catalog.PromoAt, store.Timezone), catalog.IgnorePromoQuota); p != nil {
 			name := p.Name
 			pricedItem.Item.SubtotalAmount -= d
@@ -691,6 +704,12 @@ func ComputeInputRequestHash(
 	)
 	if input.SalesChannelID != nil { // appended only when set so hashes of earlier orders stay valid
 		fmt.Fprintf(&b, "|channel=%s", input.SalesChannelID.String())
+	}
+	if input.CustomerID != nil {
+		fmt.Fprintf(&b, "|customer=%s", input.CustomerID.String())
+	}
+	if input.RewardItemIndex != nil {
+		fmt.Fprintf(&b, "|reward=%d", *input.RewardItemIndex)
 	}
 	for _, item := range input.Items {
 		cfgHash := computeItemConfigHashFromModifiers(item.ProductID, item.Modifiers)

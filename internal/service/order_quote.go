@@ -23,6 +23,8 @@ type OrderQuoteInput struct {
 	ExpectedQuoteFingerprint string             `json:"expected_quote_fingerprint,omitempty"`
 	ActorUserID              *uuid.UUID         `json:"actor_user_id,omitempty"`
 	SalesChannelID           *uuid.UUID         `json:"sales_channel_id,omitempty"`
+	CustomerID               *uuid.UUID         `json:"customer_id,omitempty"`
+	RewardItemIndex          *int               `json:"reward_item_index,omitempty"`
 	Items                    []OrderItemInput   `json:"items"`
 }
 
@@ -158,12 +160,23 @@ func (s *OrderService) QuoteOrder(ctx context.Context, trustedStoreID uuid.UUID,
 		}
 
 		creationInput := OrderCreationInput{
-			IdempotencyKey: "quote-" + uuid.NewString(),
-			CustomerName:   "Quote",
-			OrderType:      input.OrderType,
-			BillingMode:    billingMode,
-			ActorUserID:    input.ActorUserID,
-			Items:          input.Items,
+			IdempotencyKey:  "quote-" + uuid.NewString(),
+			CustomerName:    "Quote",
+			OrderType:       input.OrderType,
+			BillingMode:     billingMode,
+			ActorUserID:     input.ActorUserID,
+			Items:           input.Items,
+			SalesChannelID:  input.SalesChannelID,
+			CustomerID:      input.CustomerID,
+			RewardItemIndex: input.RewardItemIndex,
+		}
+		if input.RewardItemIndex != nil {
+			if input.CustomerID == nil {
+				return fmt.Errorf("%w: a stamp card reward needs customer_id", ErrInvalidOrderInput)
+			}
+			if err := applyCustomerTx(ctx, tx, trustedStoreID, creationInput, &snapshot, s.nowFunc().UTC()); err != nil {
+				return err
+			}
 		}
 
 		priced, err := ValidateAndPriceOrder(catalogData.Store, creationInput, snapshot)

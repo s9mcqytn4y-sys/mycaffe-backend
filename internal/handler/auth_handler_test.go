@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/handler"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/handler"
 )
 
 // These paths are rejected before the service is touched, so a nil service is enough.

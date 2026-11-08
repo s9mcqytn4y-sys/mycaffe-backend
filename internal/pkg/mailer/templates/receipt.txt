@@ -9,4 +9,4 @@ Total Pembayaran: {{.TotalLabel}}
 Lihat dan unduh struk digital resmi Anda:
 {{.ActionURL}}
 
-© {{.Year}} {{.StoreName}} • Didukung oleh Cassy by AzureDevID
+© {{.Year}} {{.StoreName}} • Didukung oleh Cassy POS by AzureDevID (Usaha Perorangan)

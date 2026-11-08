@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/mailer"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/sms"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/pkg/mailer"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/pkg/sms"
 )
 
 type captureMailer struct {

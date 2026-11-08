@@ -11,7 +11,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/domain"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/domain"
 )
 
 func TestValidateSplitAllocations(t *testing.T) {

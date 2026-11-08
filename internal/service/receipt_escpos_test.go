@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/service"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/service"
 )
 
 var updateGolden = flag.Bool("update", false, "rewrite testdata golden files")

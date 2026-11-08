@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/domain"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/domain"
 )
 
 // priceBundleLine prices one fixed-price bundle line (X4, PR 11.2). Each chosen component becomes its own

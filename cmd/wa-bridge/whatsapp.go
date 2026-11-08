@@ -11,13 +11,14 @@ import (
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/store/sqlstore"
+	"go.mau.fi/whatsmeow/types/events"
 	waLog "go.mau.fi/whatsmeow/util/log"
 	"google.golang.org/protobuf/proto"
 	_ "modernc.org/sqlite"
 )
 
-// waSender sends through a WhatsApp Web multi-device session (whatsmeow, unofficial; demo and
-// development only, decision W12). The session lives in a SQLite file on the bridge volume.
+// waSender sends through a WhatsApp Web multi-device session (whatsmeow).
+// The session lives in a SQLite file on the bridge volume.
 type waSender struct {
 	client *whatsmeow.Client
 }
@@ -36,10 +37,21 @@ func newWASender(ctx context.Context, dbPath string) (*waSender, error) {
 	if err != nil {
 		return nil, fmt.Errorf("load device: %w", err)
 	}
-	return &waSender{client: whatsmeow.NewClient(device, waLog.Stdout("WhatsApp", "WARN", false))}, nil
+	sender := &waSender{client: whatsmeow.NewClient(device, waLog.Stdout("WhatsApp", "WARN", false))}
+	sender.client.AddEventHandler(func(evt interface{}) {
+		switch evt.(type) {
+		case *events.Disconnected:
+			log.Printf("[WA BRIDGE] connection disconnected, auto-reconnecting...")
+		case *events.Connected:
+			log.Printf("[WA BRIDGE] connection established to WhatsApp network")
+		case *events.LoggedOut:
+			log.Printf("[WA BRIDGE] session logged out from mobile phone; re-pairing required")
+		}
+	})
+	return sender, nil
 }
 
-// Connect connects the session; on first start it prints a QR code to scan from the demo phone
+// Connect connects the session; on first start it prints a high-contrast QR code to scan from WhatsApp
 // (WhatsApp > Linked devices > Link a device).
 func (s *waSender) Connect(ctx context.Context) error {
 	if s.client.Store.ID != nil {
@@ -54,14 +66,21 @@ func (s *waSender) Connect(ctx context.Context) error {
 	}
 	go func() {
 		for item := range qr {
-			switch item.Event {
-			case whatsmeow.QRChannelEventCode:
-				log.Printf("[WA BRIDGE] scan this QR from WhatsApp > Linked devices on the demo phone:")
-				qrterminal.GenerateHalfBlock(item.Code, qrterminal.L, os.Stdout)
-			case "success":
-				log.Printf("[WA BRIDGE] paired")
-			default:
-				log.Printf("[WA BRIDGE] pairing: %s", item.Event)
+			if item.Event == whatsmeow.QRChannelEventCode {
+				log.Printf("[WA BRIDGE] scan this high-contrast QR from WhatsApp > Linked devices (WhatsApp Business):")
+				config := qrterminal.Config{
+					Level:      qrterminal.M,
+					Writer:     os.Stdout,
+					HalfBlocks: false,
+					BlackChar:  qrterminal.BLACK,
+					WhiteChar:  qrterminal.WHITE,
+					QuietZone:  4,
+				}
+				qrterminal.GenerateWithConfig(item.Code, config)
+			} else if item == whatsmeow.QRChannelSuccess || item.Event == "success" {
+				log.Printf("[WA BRIDGE] WhatsApp session paired and ready")
+			} else {
+				log.Printf("[WA BRIDGE] pairing event: %s (err: %v)", item.Event, item.Error)
 			}
 		}
 	}()

@@ -7,7 +7,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/auth"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/pkg/auth"
 )
 
 func TestValidatePINPolicy(t *testing.T) {

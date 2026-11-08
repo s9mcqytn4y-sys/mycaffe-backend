@@ -1,4 +1,4 @@
-module github.com/s9mcqytn4y-sys/mycaffe-backend/cmd/wa-bridge
+module github.com/s9mcqytn4y-sys/cassy-backend/cmd/wa-bridge
 
 go 1.27.3
 

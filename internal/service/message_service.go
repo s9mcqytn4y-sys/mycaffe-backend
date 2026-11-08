@@ -9,9 +9,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/database"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/metrics"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/sms"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/pkg/database"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/pkg/metrics"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/pkg/sms"
 )
 
 // SMS/WhatsApp delivery queue (decision V5), same durable pattern as email_outbox: enqueue inside the

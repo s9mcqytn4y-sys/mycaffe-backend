@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/printfmt"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/pkg/printfmt"
 )
 
 // PrinterConfig is one printer the agent serves: its agent token (from the owner's printer settings,

@@ -10,7 +10,7 @@ import (
 	"image/png"
 	"testing"
 
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/imaging"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/pkg/imaging"
 )
 
 // testImage is blue with a red 30x30 block in the top-left corner.

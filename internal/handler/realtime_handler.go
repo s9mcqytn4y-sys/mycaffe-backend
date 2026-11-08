@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/realtime"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/service"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/realtime"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/service"
 )
 
 // RealtimeHandler issues single-use WebSocket tickets and upgrades GET /ws (iteration 5c). Access

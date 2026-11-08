@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/config"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/config"
 )
 
 func TestValidateConfigProductionFailClosed(t *testing.T) {

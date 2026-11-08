@@ -11,7 +11,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/realtime"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/realtime"
 )
 
 func TestHubTenantIsolation(t *testing.T) {

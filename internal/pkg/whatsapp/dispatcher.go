@@ -7,7 +7,7 @@ import (
 	"log"
 	"strings"
 
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/sms"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/pkg/sms"
 )
 
 // ErrNoSenderConfigured indicates no valid sender driver is available.

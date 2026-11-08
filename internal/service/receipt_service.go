@@ -13,7 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/database"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/pkg/database"
 )
 
 // Receipts (B1, decision R1). Every amount comes from the order, item, option and payment snapshots;

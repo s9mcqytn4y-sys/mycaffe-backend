@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/qr"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/pkg/qr"
 )
 
 func TestTokenResolver_Roundtrip(t *testing.T) {

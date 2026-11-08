@@ -17,7 +17,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/s9mcqytn4y-sys/mycaffe-backend/internal/pkg/mailer"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/pkg/mailer"
 )
 
 // ErrPermanent marks a failure that retrying cannot fix (invalid number, rejected sender).

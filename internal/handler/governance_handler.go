@@ -556,3 +556,21 @@ func (h *GovernanceHandler) MidtransBusinessReviewReadiness(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, out)
 }
+
+// MobileBootstrap handles GET /api/v1/mobile/bootstrap
+// Consolidates tablet POS branding, layout orientation, hardware LAN/drawer configuration,
+// payment gateway status, and authenticated staff profile.
+func (h *GovernanceHandler) MobileBootstrap(c *gin.Context) {
+	staff := currentStaff(c)
+	if staff == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "UNAUTHENTICATED", "message": "Autentikasi staf diperlukan"})
+		return
+	}
+	out, err := h.governance.GetMobileBootstrap(c.Request.Context(), staff)
+	if err != nil {
+		writeGovernanceError(c, err)
+		return
+	}
+	c.Header("Cache-Control", "no-store, private")
+	c.JSON(http.StatusOK, out)
+}

@@ -26,7 +26,7 @@ Status: deploy `main` ke demo masih manual. Demo berjalan di workstation Owner, 
 4. Satu PR, satu tujuan. Migrasi selalu aditif, file migrasi yang sudah di-merge tidak boleh diubah.
 5. Perubahan lokal yang belum di-commit disimpan dengan `git stash` dan dilaporkan ke Owner, bukan dibuang.
 
-Repo privat paket gratis tidak punya branch protection (API 403), jadi aturan ini mengandalkan disiplin. Periksa berkala: `gh pr list --state merged --base main` harus cocok dengan persetujuan yang tercatat.
+Kedua repo saat ini publik, jadi branch protection tersedia tapi belum diaktifkan. Sampai diaktifkan, aturan ini mengandalkan disiplin. Periksa berkala: `gh pr list --state merged --base main` harus cocok dengan persetujuan yang tercatat.
 
 ## 3. Quality gates
 

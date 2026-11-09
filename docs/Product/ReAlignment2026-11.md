@@ -159,7 +159,7 @@ MikroTik: tiga VLAN dan dual-WAN cocok untuk outlet ramai, tapi terlalu berat se
 - **Branch**: trunk-based. `main` plus branch pendek `feat/`, `fix/`, `docs/`. Staging sudah hilang, jangan dihidupkan lagi.
 - **Lingkungan**: `main` ke demo otomatis, tag ke produksi manual dengan persetujuan Director.
 - **Versi**: SemVer per repo. API `v0.x` sampai pilot stabil, `v1.0.0` saat tenant berbayar pertama berjalan 30 hari. Client mengikuti kontrak OpenAPI.
-- **PR**: kecil, CI hijau, satu tujuan. Branch protection tidak tersedia di repo privat gratis. Terima risiko, atau repo publik setelah audit secret.
+- **PR**: kecil, CI hijau, satu tujuan. Kedua repo publik, jadi branch protection bisa diaktifkan di `main`.
 - **Kecepatan**: job integrasi tetap, tambahkan path filter agar perubahan docs tidak menjalankan semuanya.
 
 ## 9. Urutan pengembangan baku

@@ -2,6 +2,7 @@ package sms
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -53,7 +54,7 @@ func (w *WhatsAppSender) Send(ctx context.Context, m Message) error {
 		"to":                strings.TrimPrefix(m.To, "+"),
 		"type":              "template",
 		"template": map[string]any{
-			"name":       w.Template,
+			"name":       cmp.Or(m.Template, w.Template),
 			"language":   map[string]string{"code": w.Language},
 			"components": []map[string]any{{"type": "body", "parameters": params}},
 		},

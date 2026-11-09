@@ -2,6 +2,7 @@ package sms
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -32,7 +33,7 @@ func NewBridgeSender(url, token, template string) (*BridgeSender, error) {
 }
 
 func (b *BridgeSender) Send(ctx context.Context, m Message) error {
-	payload, err := json.Marshal(map[string]any{"to": m.To, "template": b.Template, "params": strings.Split(m.Body, "\n")})
+	payload, err := json.Marshal(map[string]any{"to": m.To, "template": cmp.Or(m.Template, b.Template), "params": strings.Split(m.Body, "\n")})
 	if err != nil {
 		return fmt.Errorf("%w: marshal payload: %v", ErrPermanent, err)
 	}

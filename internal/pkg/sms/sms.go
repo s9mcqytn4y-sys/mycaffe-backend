@@ -29,6 +29,8 @@ var ErrInvalidPhone = errors.New("invalid phone number")
 type Message struct {
 	To   string // E.164, e.g. +6281234567890
 	Body string
+	// Template overrides the WhatsApp sender's configured template; SMS senders ignore it.
+	Template string
 }
 
 type Sender interface {

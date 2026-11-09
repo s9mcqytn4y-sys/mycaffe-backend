@@ -21,6 +21,7 @@ const (
 	TemplateAccountLocked         = "account_locked"
 	TemplateOwnerPINAttempts      = "owner_pin_attempts"
 	TemplateReceipt               = "receipt"
+	TemplateInvoiceReminder       = "invoice_reminder"
 	TemplateOnboardingOTP         = "onboarding_otp"
 	TemplateOnboardingProvisioned = "onboarding_provisioned"
 )
@@ -64,6 +65,11 @@ type Data struct {
 	DiscountLabel      string
 	ServiceFeeLabel    string
 	TaxLabel           string
+
+	// Invoice reminder fields
+	InvoiceNumber string
+	DueDate       string
+	DueStatus     string
 }
 
 type Rendered struct {

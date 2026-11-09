@@ -1,0 +1,6 @@
+{{define "subject"}}Pengingat invoice {{.InvoiceNumber}} dari {{.StoreName}}{{end}}
+{{define "preheader"}}Invoice {{.InvoiceNumber}} {{.DueStatus}}.{{end}}
+{{define "html_body"}}<h1 style="margin:0 0 16px 0;font-size:22px;line-height:30px;color:#2C1810;">Halo {{.RecipientName}},</h1>
+<p style="margin:0 0 16px 0;">Invoice <strong>{{.InvoiceNumber}}</strong> dari <strong>{{.StoreName}}</strong> {{.DueStatus}}.</p>
+<p style="margin:0 0 16px 0;">Sisa tagihan: <strong>{{.TotalLabel}}</strong><br>Jatuh tempo: <strong>{{.DueDate}}</strong></p>
+<p style="margin:0 0 16px 0;">Mohon abaikan pesan ini bila pembayaran sudah dilakukan.</p>{{end}}

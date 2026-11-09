@@ -14,7 +14,7 @@ func TestRenderAllTemplates(t *testing.T) {
 		ActorName: "Budi", StaffName: "Doni", RoleLabel: "Kasir", ActionURL: "https://pos.kafe.test/staff/pin#token=abc",
 		ActionLabel: "Buat PIN", ExpiresIn: "48 jam", ExpiresAt: "2 Nov 2026 10:00 WIB", EventAt: "31 Okt 2026 10:00 WIB", Year: 2026,
 	}
-	for _, name := range []string{mailer.TemplateStaffInvite, mailer.TemplatePINReset, mailer.TemplatePINChanged, mailer.TemplateAccountLocked, mailer.TemplateOwnerPINAttempts, mailer.TemplateReceipt} {
+	for _, name := range []string{mailer.TemplateStaffInvite, mailer.TemplatePINReset, mailer.TemplatePINChanged, mailer.TemplateAccountLocked, mailer.TemplateOwnerPINAttempts, mailer.TemplateReceipt, mailer.TemplateInvoiceReminder} {
 		r, err := mailer.Render(name, data)
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)

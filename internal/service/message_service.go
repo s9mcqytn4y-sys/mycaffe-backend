@@ -132,7 +132,11 @@ func (s *MessageService) DeliverDue(ctx context.Context, batchLimit int) (sent i
 			continue
 		}
 		for _, m := range claimed {
-			sendErr := s.senderFor(m.Channel).Send(ctx, sms.Message{To: m.ToPhone, Body: m.Body})
+			msg := sms.Message{To: m.ToPhone, Body: m.Body}
+			if m.Template == WhatsAppInvoiceTemplate { // every other WhatsApp message uses the configured receipt template
+				msg.Template = m.Template
+			}
+			sendErr := s.senderFor(m.Channel).Send(ctx, msg)
 			if err := s.recordOutcome(ctx, m, sendErr); err != nil {
 				log.Printf("[SMS WORKER] message_id=%s outcome error: %v", m.ID, err)
 				continue

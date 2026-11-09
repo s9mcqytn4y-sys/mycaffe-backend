@@ -402,6 +402,14 @@ BEGIN
        OR has_table_privilege('mycaffe_app', 'public.invoices', 'DELETE') THEN
         RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may rewrite invoice payments or delete invoices!';
     END IF;
+    -- 10F-30. Invoice reminders (migration 000056): RLS on; the ledger is never rewritten.
+    IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.invoice_reminders'::regclass) THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: invoice_reminders does not have row-level security enabled!';
+    END IF;
+    IF has_table_privilege('mycaffe_app', 'public.invoice_reminders', 'UPDATE')
+       OR has_table_privilege('mycaffe_app', 'public.invoice_reminders', 'DELETE') THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may rewrite invoice reminders!';
+    END IF;
     -- 10F-24. Purchasing (migration 000046): RLS on; receipts are append-only (stock and cost already moved).
     IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.suppliers'::regclass)
        OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.purchase_orders'::regclass)

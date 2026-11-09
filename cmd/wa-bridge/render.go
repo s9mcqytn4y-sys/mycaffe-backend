@@ -16,6 +16,12 @@ func render(template string, params []string) (string, error) {
 		}
 		return fmt.Sprintf("Terima kasih sudah berbelanja di %s. Struk digital pesanan %s bisa dilihat di %s. Tautan berlaku 90 hari.",
 			params[0], params[1], params[2]), nil
+	case "tagihan_invoice":
+		if len(params) != 5 {
+			return "", fmt.Errorf("tagihan_invoice needs 5 parameters, got %d", len(params))
+		}
+		return fmt.Sprintf("%s: invoice %s sebesar %s %s (%s). Mohon abaikan bila sudah dibayar.",
+			params[0], params[1], params[2], params[3], params[4]), nil
 	case "text":
 		if len(params) != 1 || strings.TrimSpace(params[0]) == "" {
 			return "", fmt.Errorf("text needs 1 non-empty parameter")

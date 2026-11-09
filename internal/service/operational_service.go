@@ -30,14 +30,16 @@ var (
 )
 
 type OperationalService struct {
-	db          *sqlx.DB
-	orderRepo   *postgres.OrderRepository
-	paymentRepo *postgres.PaymentRepository
-	shiftRepo   *postgres.ShiftRepository
-	settings    *postgres.SettingsRepository
-	pins        *pinGuard
-	gateway     GatewayClient // nil: refund_method gateway is unsupported
-	nowFunc     func() time.Time
+	db                    *sqlx.DB
+	orderRepo             *postgres.OrderRepository
+	paymentRepo           *postgres.PaymentRepository
+	shiftRepo             *postgres.ShiftRepository
+	settings              *postgres.SettingsRepository
+	pins                  *pinGuard
+	gateway               GatewayClient // nil: refund_method gateway is unsupported
+	gatewayResolver       StoreGatewayResolver
+	tenantGatewayRequired bool
+	nowFunc               func() time.Time
 }
 
 func NewOperationalService(

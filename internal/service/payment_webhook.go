@@ -66,7 +66,11 @@ func (s *PaymentService) ProcessMidtransWebhook(
 	refundOrChargeback := mappedStatus == domain.PaymentStatusRefunded || mappedStatus == domain.PaymentStatusPartiallyRefunded ||
 		mappedStatus == domain.PaymentStatusChargeback || mappedStatus == domain.PaymentStatusPartialChargeback
 	if resolved.CurrentStatus == domain.PaymentStatusPaid && mappedStatus != domain.PaymentStatusPaid && !refundOrChargeback {
-		latest, statusErr := s.midtransClient.CheckTransaction(ctx, input.OrderID)
+		gateway, statusErr := s.gatewayForStore(ctx, resolved.StoreID)
+		var latest *coreapi.TransactionStatusResponse
+		if statusErr == nil {
+			latest, statusErr = gateway.CheckTransaction(ctx, input.OrderID)
+		}
 		if statusErr != nil {
 			return nil, fmt.Errorf("failed to reconcile out-of-order Midtrans notification: %w", statusErr)
 		}

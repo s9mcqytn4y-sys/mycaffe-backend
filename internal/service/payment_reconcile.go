@@ -111,9 +111,17 @@ func (s *PaymentService) ReconcileStalePendingPayments(
 		return 0, err
 	}
 
+	if len(candidates) == 0 {
+		return 0, nil
+	}
+	gateway, err := s.gatewayForStore(ctx, trustedStoreID)
+	if err != nil {
+		return 0, err
+	}
+
 	var reconciledCount int
 	for _, candidate := range candidates {
-		statusResp, checkErr := s.midtransClient.CheckTransaction(ctx, candidate.ProviderOrderID)
+		statusResp, checkErr := gateway.CheckTransaction(ctx, candidate.ProviderOrderID)
 		if checkErr != nil || statusResp == nil {
 			continue
 		}

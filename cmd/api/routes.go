@@ -119,6 +119,7 @@ func wireHandlers(workerCtx context.Context, cfg *config.Config, db *sqlx.DB, hu
 	)
 	operationalService.SetPINPolicy(authPolicy, emailService)
 	operationalService.SetGateway(midtransClient) // RF1-a Direct Refund
+	operationalService.SetGatewayResolver(governanceService.ResolveStoreGatewayClientTx, cfg.AppEnv == "production")
 	h.pos.SetOperational(operationalService)
 
 	h.approval = handler.NewApprovalHandler(service.NewApprovalService(db, operationalService))

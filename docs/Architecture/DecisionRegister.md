@@ -303,8 +303,8 @@ Rationale: [ReAlignment2026-11.md](../Product/ReAlignment2026-11.md).
 
 | ID | Decision | Approved option |
 | ---- | ---------- | ----------------- |
-| AL1 | Website for Midtrans review | New Cassy domain, not `abbdullaziz.online` |
-| AL2 | Primary domain | `cassy.id`, pending registrar and PDKI checks |
+| AL1 | Official domain | `abbdullaziz.online` is mandatory (owner revision, 2026-11-09, replaces the new-domain choice) |
+| AL2 | Current focus | Demo stability for cloud and client. Landing page and sales work are deferred |
 | AL3 | Legal entity | Stay sole proprietor until Midtrans approves and a paid pilot runs; move up before tenant 10 or when revenue covers formation |
 | AL4 | AzureDevID Midtrans methods | Keep all 14 requested methods; owner chose this over the QRIS and VA recommendation |
 | AL5 | Public pricing | Starter Rp 149.000, Pro Rp 299.000 (lead plan), Enterprise Rp 599.000, 14-day trial. Plan limits must be enforced before a paid pilot |
@@ -330,5 +330,5 @@ None. The G-1/G-2 contract (PR #55), ADR-007 (G-5), and D1-D14 decisions were ap
 
 | Topic | Needed for | Default until decided |
 | ------- | ----------- | ----------------------- |
-| Production domain purchase | Tunnel hostname (IN1), cookie domain (O2) | `cassy.id` chosen (AL2), not yet bought; demo stays on `demo.abbdullaziz.online` |
+| Production hostname | Tunnel hostname (IN1), cookie domain (O2) | Under `abbdullaziz.online` (AL1); demo stays on `demo.abbdullaziz.online` |
 | Midtrans production credentials & VPS provisioning | Production cutover | Sandbox only |

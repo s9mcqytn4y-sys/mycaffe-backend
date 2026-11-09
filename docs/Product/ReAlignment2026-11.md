@@ -1,5 +1,7 @@
 # Re-Alignment Cassy by AzureDevID (Draft, 2026-11-09)
 
+Revisi Director 2026-11-09: domain wajib `abbdullaziz.online`, landing page dan jualan ditunda, fokus stabilitas demo cloud dan client. Bagian analisis yang menyarankan domain baru tetap sebagai catatan, keputusan yang berlaku ada di bagian 11.
+
 Status: **Draft untuk keputusan Director**. Belum ada keputusan di sini yang berlaku sampai dicatat di `docs/Architecture/DecisionRegister.md`.
 
 Label keyakinan: **[V]** diverifikasi langsung (repo, file, halaman resmi, HTTP). **[S]** sumber sekunder atau bertentangan. **[A]** asumsi atau pengetahuan umum yang belum dicek.
@@ -182,8 +184,8 @@ Rename menunggu keputusan dan semua sesi selesai. Jangan ubah nama role database
 
 | # | Keputusan | Tanggal |
 |---|---|---|
-| 1 | Website Midtrans memakai domain Cassy baru, bukan `abbdullaziz.online` | 2026-11-09 |
-| 2 | Domain utama `cassy.id`, menunggu cek registrar dan PDKI | 2026-11-09 |
+| 1 | Domain resmi wajib `abbdullaziz.online` (direvisi Director) | 2026-11-09 |
+| 2 | Fokus saat ini stabilitas demo cloud dan client. Landing page dan jualan ditunda (menggantikan pilihan `cassy.id`) | 2026-11-09 |
 | 3 | Tetap usaha perorangan sampai Midtrans disetujui dan pilot berbayar berjalan. Pemicu naik: sebelum tenant ke-10 atau pendapatan menutup biaya pendirian | 2026-11-09 |
 | 4 | Akun Midtrans AzureDevID tetap mengajukan 14 metode (menyimpang dari rekomendasi QRIS dan VA). Perlu dokumen Payment Flow ShopeePay | 2026-11-09 |
 | 5 | Harga publik mengikuti seed: Starter Rp 149.000, Pro Rp 299.000 (paket utama), Enterprise Rp 599.000, uji coba 14 hari. Penegakan batas paket wajib sebelum pilot berbayar | 2026-11-09 |

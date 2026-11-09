@@ -11,7 +11,7 @@
 | Midtrans Core API, BYOK per tenant | Implemented & Tested di sandbox | Akun AzureDevID masih review, koreksi Website dan Foto Selfie belum dikirim |
 | Stok, kanal ojol manual, stamp card, invoice B2B, pengingat | Implemented & Tested | Client belum punya layarnya |
 | Batas paket langganan | Planned | Kolom ada, penegakan belum terlihat. Wajib sebelum pilot berbayar |
-| Website publik | Blocked by Dependency | `abbdullaziz.online` masih parkir, `cassy.id` belum dibeli |
+| Website publik | Ditunda (AL2) | `abbdullaziz.online` masih parkir. Koreksi "Website" Midtrans tertahan sampai halaman ini hidup |
 | Email produksi | Planned | Pindah ke SES (AL6). Saat ini SMTP Gmail |
 | WhatsApp | Guarded / Fail-Closed | `whatsmeow` ditolak di produksi. Template `tagihan_invoice` butuh persetujuan Meta |
 | Deploy demo pascarebrand | Belum diperiksa | Tahap 3 re-alignment |

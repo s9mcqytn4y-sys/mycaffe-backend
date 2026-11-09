@@ -11,7 +11,8 @@ Urutan dari [ReAlignment2026-11.md](../docs/Product/ReAlignment2026-11.md) bagia
 
 ## Engineering
 - [ ] PR 1: dokumen dan agentic (sedang berjalan).
-- [ ] PR 2: stabilitas demo: deploy v0.12.1, migrasi 000053 sampai 000056, web client di demo, smoke test cloud dan client.
+- [x] Deploy v0.12.1 ke demo, migrasi 000053 sampai 000056, smoke test API (2026-11-09).
+- [ ] PR 2: web client di demo (image, compose, nginx), retry migrate saat start, rotasi WHATSAPP_BRIDGE_TOKEN demo, uji Android.
 - [ ] PR 4: golangci-lint, ESLint + jsx-a11y, next-intl, axe, path filter CI.
 - [ ] PR 5: penegakan batas paket, driver SES, rotasi key per tenant, batas kredit, credit note.
 - [ ] PR 6: rename repo, image GHCR, `deploy/`. Folder paling akhir.

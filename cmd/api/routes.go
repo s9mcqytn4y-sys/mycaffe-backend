@@ -125,6 +125,8 @@ func wireHandlers(workerCtx context.Context, cfg *config.Config, db *sqlx.DB, hu
 	h.catalog = handler.NewCatalogHandler(catalogService)
 	h.inventory = handler.NewInventoryHandler(service.NewInventoryService(db))
 	h.invoice = handler.NewInvoiceHandler(service.NewInvoiceService(db))
+	// Invoice reminders at D-3, the due date and D+7 (v0.11.1 PR 11.10, X18).
+	go service.NewInvoiceReminderService(db, emailService, messageService).StartWorker(workerCtx, time.Hour)
 	h.device = handler.NewDeviceHandler(service.NewDeviceService(db, catalogService))
 
 	shiftService := service.NewShiftService(db)

@@ -1,0 +1,11 @@
+Halo {{.RecipientName}},
+
+Invoice {{.InvoiceNumber}} dari {{.StoreName}} {{.DueStatus}}.
+
+Sisa tagihan: {{.TotalLabel}}
+Jatuh tempo: {{.DueDate}}
+
+Mohon abaikan pesan ini bila pembayaran sudah dilakukan.
+
+--
+{{.StoreName}}. Email otomatis, mohon tidak dibalas.

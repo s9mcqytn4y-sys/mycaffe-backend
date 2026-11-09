@@ -167,17 +167,8 @@ func (s *PaymentService) directCashierPaymentTx(ctx context.Context, tx *sqlx.Tx
 		if err := checkChannelPaymentTx(ctx, tx, trustedStoreID, order.ID, input.Method); err != nil {
 			return err
 		}
-		if order.BillingMode == domain.BillingModeOpenTab {
-			if order.Status == domain.OrderStatusOpen {
-				return ErrTabNotClosed
-			}
-			if input.SplitID == nil {
-				return ErrSplitIDRequired
-			}
-		} else {
-			if input.SplitID != nil {
-				return ErrSplitIDNotAllowed
-			}
+		if err := checkOrderSplitTarget(order, splits, input.SplitID); err != nil {
+			return err
 		}
 		targetSplit, err := resolveOrderSplit(input.SplitID, splits)
 		if err != nil {
@@ -459,17 +450,8 @@ func (s *PaymentService) initiateMidtransGatewayPayment(
 		if err := checkChannelPaymentTx(ctx, tx, trustedStoreID, order.ID, input.Method); err != nil {
 			return err
 		}
-		if order.BillingMode == domain.BillingModeOpenTab {
-			if order.Status == domain.OrderStatusOpen {
-				return ErrTabNotClosed
-			}
-			if input.SplitID == nil {
-				return ErrSplitIDRequired
-			}
-		} else {
-			if input.SplitID != nil {
-				return ErrSplitIDNotAllowed
-			}
+		if err := checkOrderSplitTarget(order, splits, input.SplitID); err != nil {
+			return err
 		}
 		targetSplit, err := resolveOrderSplit(input.SplitID, splits)
 		if err != nil {

@@ -761,192 +761,9 @@ func (s *TabService) CloseTab(
 		}
 
 		now := s.nowFunc().UTC()
-		var splits []domain.PaymentSplit
-		var splitItems []domain.PaymentSplitItem
-
-		switch strategy {
-		case "full":
-			// Single-payer tab: 1 full split
-			splitID := uuid.New()
-			splits = []domain.PaymentSplit{
-				{
-					ID:                  splitID,
-					StoreID:             storeID,
-					OrderID:             order.ID,
-					SplitNumber:         1,
-					Label:               "Main Bill",
-					SplitMode:           domain.SplitModeFull,
-					SubtotalAmount:      order.SubtotalAmount,
-					TaxAmount:           order.TaxAmount,
-					ServiceChargeAmount: order.ServiceChargeAmount,
-					TotalAmount:         order.TotalAmount,
-					PaidAmount:          0,
-					Status:              domain.SplitBillStatusUnpaid,
-					CreatedAt:           now,
-					UpdatedAt:           now,
-				},
-			}
-
-		case "equal":
-			if in.SplitCount < 2 || in.SplitCount > 20 {
-				return fmt.Errorf("%w: got %d, expected 2-20", ErrInvalidSplitCount, in.SplitCount)
-			}
-			n := in.SplitCount
-			baseSubtotal := order.SubtotalAmount / int64(n)
-			baseTax := order.TaxAmount / int64(n)
-			baseService := order.ServiceChargeAmount / int64(n)
-
-			remSubtotal := order.SubtotalAmount - (baseSubtotal * int64(n))
-			remTax := order.TaxAmount - (baseTax * int64(n))
-			remService := order.ServiceChargeAmount - (baseService * int64(n))
-
-			splits = make([]domain.PaymentSplit, n)
-			for i := 0; i < n; i++ {
-				spID := uuid.New()
-				sub := baseSubtotal
-				tax := baseTax
-				svc := baseService
-
-				// Remainder deterministic allocation: Split #1 gets all rounding remainders
-				if i == 0 {
-					sub += remSubtotal
-					tax += remTax
-					svc += remService
-				}
-
-				tot := sub + tax + svc
-				if tot <= 0 {
-					return errors.New("calculated split amount must be strictly positive")
-				}
-
-				splits[i] = domain.PaymentSplit{
-					ID:                  spID,
-					StoreID:             storeID,
-					OrderID:             order.ID,
-					SplitNumber:         i + 1,
-					Label:               fmt.Sprintf("Split %d/%d", i+1, n),
-					SplitMode:           domain.SplitModeEqual,
-					SubtotalAmount:      sub,
-					TaxAmount:           tax,
-					ServiceChargeAmount: svc,
-					TotalAmount:         tot,
-					PaidAmount:          0,
-					Status:              domain.SplitBillStatusUnpaid,
-					CreatedAt:           now,
-					UpdatedAt:           now,
-				}
-			}
-
-		case "by_item":
-			if len(in.Splits) < 2 || len(in.Splits) > 20 {
-				return fmt.Errorf("%w: got %d splits, expected 2-20", ErrInvalidSplitCount, len(in.Splits))
-			}
-
-			// Validate item allocations
-			itemMap := make(map[uuid.UUID]domain.OrderItem, len(items))
-			for _, it := range items {
-				itemMap[it.ID] = it
-			}
-			allocatedQty := make(map[uuid.UUID]int, len(items))
-
-			for sIdx, spInput := range in.Splits {
-				if len(spInput.Items) == 0 {
-					return fmt.Errorf("split #%d has no items allocated", sIdx+1)
-				}
-				for _, itAlloc := range spInput.Items {
-					if itAlloc.Quantity <= 0 {
-						return fmt.Errorf("split #%d has invalid quantity %d for item %s", sIdx+1, itAlloc.Quantity, itAlloc.OrderItemID)
-					}
-					it, exists := itemMap[itAlloc.OrderItemID]
-					if !exists {
-						return fmt.Errorf("split #%d references unknown order_item_id %s", sIdx+1, itAlloc.OrderItemID)
-					}
-					allocatedQty[it.ID] += itAlloc.Quantity
-				}
-			}
-
-			// Every single purchased unit must be allocated exactly once
-			for _, it := range items {
-				alloc := allocatedQty[it.ID]
-				if alloc != it.Quantity {
-					return fmt.Errorf("%w: item %q (ID %s) has purchased qty %d but allocated %d",
-						ErrItemAllocationMismatch, it.SnapshotName, it.ID, it.Quantity, alloc)
-				}
-			}
-
-			splits = make([]domain.PaymentSplit, len(in.Splits))
-			var cumTax, cumService int64
-
-			for sIdx, spInput := range in.Splits {
-				spID := uuid.New()
-				var splitSubtotal int64
-				var thisSplitItems []domain.PaymentSplitItem
-
-				for _, itAlloc := range spInput.Items {
-					it := itemMap[itAlloc.OrderItemID]
-					unitPrice := it.SubtotalAmount / int64(it.Quantity)
-					itemAllocTotal := unitPrice * int64(itAlloc.Quantity)
-					splitSubtotal += itemAllocTotal
-
-					psi := domain.PaymentSplitItem{
-						ID:              uuid.New(),
-						StoreID:         storeID,
-						SplitID:         spID,
-						OrderItemID:     it.ID,
-						Quantity:        itAlloc.Quantity,
-						AllocatedAmount: itemAllocTotal,
-						CreatedAt:       now,
-					}
-					thisSplitItems = append(thisSplitItems, psi)
-					splitItems = append(splitItems, psi)
-				}
-
-				// Proportional tax and service charge
-				var splitTax, splitService int64
-				if order.SubtotalAmount > 0 {
-					splitService = (order.ServiceChargeAmount * splitSubtotal) / order.SubtotalAmount
-					splitTax = (order.TaxAmount * splitSubtotal) / order.SubtotalAmount
-				}
-
-				// Remainder deterministic allocation: Last split absorbs residual rounding
-				isLastSplit := sIdx == len(in.Splits)-1
-				if isLastSplit {
-					splitService = order.ServiceChargeAmount - cumService
-					splitTax = order.TaxAmount - cumTax
-				} else {
-					cumService += splitService
-					cumTax += splitTax
-				}
-
-				splitTotal := splitSubtotal + splitTax + splitService
-				label := strings.TrimSpace(spInput.Label)
-				if label == "" {
-					label = fmt.Sprintf("Split %d/%d", sIdx+1, len(in.Splits))
-				}
-
-				splits[sIdx] = domain.PaymentSplit{
-					ID:                  spID,
-					StoreID:             storeID,
-					OrderID:             order.ID,
-					SplitNumber:         sIdx + 1,
-					Label:               label,
-					SplitMode:           domain.SplitModeByItem,
-					SubtotalAmount:      splitSubtotal,
-					TaxAmount:           splitTax,
-					ServiceChargeAmount: splitService,
-					TotalAmount:         splitTotal,
-					PaidAmount:          0,
-					Status:              domain.SplitBillStatusUnpaid,
-					Items:               thisSplitItems,
-					CreatedAt:           now,
-					UpdatedAt:           now,
-				}
-			}
-
-			// Validate complete split math integrity
-			if err := domain.ValidateSplitAllocations(order.TotalAmount, items, splits); err != nil {
-				return fmt.Errorf("split validation failed: %w", err)
-			}
+		splits, splitItems, err := allocateSplits(order, items, in, strategy, now)
+		if err != nil {
+			return err
 		}
 
 		// Save splits to database
@@ -1089,4 +906,197 @@ func (s *TabService) ReopenTab(
 		return nil, err
 	}
 	return updatedOrder, nil
+}
+
+// allocateSplits divides an order into payment splits (full, equal, or by_item); nothing is written.
+func allocateSplits(order *domain.Order, items []domain.OrderItem, in CloseTabInput, strategy string, now time.Time) ([]domain.PaymentSplit, []domain.PaymentSplitItem, error) {
+	storeID := order.StoreID
+	var splits []domain.PaymentSplit
+	var splitItems []domain.PaymentSplitItem
+
+	switch strategy {
+	case "full":
+		// Single-payer tab: 1 full split
+		splitID := uuid.New()
+		splits = []domain.PaymentSplit{
+			{
+				ID:                  splitID,
+				StoreID:             storeID,
+				OrderID:             order.ID,
+				SplitNumber:         1,
+				Label:               "Main Bill",
+				SplitMode:           domain.SplitModeFull,
+				SubtotalAmount:      order.SubtotalAmount,
+				TaxAmount:           order.TaxAmount,
+				ServiceChargeAmount: order.ServiceChargeAmount,
+				TotalAmount:         order.TotalAmount,
+				PaidAmount:          0,
+				Status:              domain.SplitBillStatusUnpaid,
+				CreatedAt:           now,
+				UpdatedAt:           now,
+			},
+		}
+
+	case "equal":
+		if in.SplitCount < 2 || in.SplitCount > 20 {
+			return nil, nil, fmt.Errorf("%w: got %d, expected 2-20", ErrInvalidSplitCount, in.SplitCount)
+		}
+		n := in.SplitCount
+		baseSubtotal := order.SubtotalAmount / int64(n)
+		baseTax := order.TaxAmount / int64(n)
+		baseService := order.ServiceChargeAmount / int64(n)
+
+		remSubtotal := order.SubtotalAmount - (baseSubtotal * int64(n))
+		remTax := order.TaxAmount - (baseTax * int64(n))
+		remService := order.ServiceChargeAmount - (baseService * int64(n))
+
+		splits = make([]domain.PaymentSplit, n)
+		for i := 0; i < n; i++ {
+			spID := uuid.New()
+			sub := baseSubtotal
+			tax := baseTax
+			svc := baseService
+
+			// Remainder deterministic allocation: Split #1 gets all rounding remainders
+			if i == 0 {
+				sub += remSubtotal
+				tax += remTax
+				svc += remService
+			}
+
+			tot := sub + tax + svc
+			if tot <= 0 {
+				return nil, nil, errors.New("calculated split amount must be strictly positive")
+			}
+
+			splits[i] = domain.PaymentSplit{
+				ID:                  spID,
+				StoreID:             storeID,
+				OrderID:             order.ID,
+				SplitNumber:         i + 1,
+				Label:               fmt.Sprintf("Split %d/%d", i+1, n),
+				SplitMode:           domain.SplitModeEqual,
+				SubtotalAmount:      sub,
+				TaxAmount:           tax,
+				ServiceChargeAmount: svc,
+				TotalAmount:         tot,
+				PaidAmount:          0,
+				Status:              domain.SplitBillStatusUnpaid,
+				CreatedAt:           now,
+				UpdatedAt:           now,
+			}
+		}
+
+	case "by_item":
+		if len(in.Splits) < 2 || len(in.Splits) > 20 {
+			return nil, nil, fmt.Errorf("%w: got %d splits, expected 2-20", ErrInvalidSplitCount, len(in.Splits))
+		}
+
+		// Validate item allocations
+		itemMap := make(map[uuid.UUID]domain.OrderItem, len(items))
+		for _, it := range items {
+			itemMap[it.ID] = it
+		}
+		allocatedQty := make(map[uuid.UUID]int, len(items))
+
+		for sIdx, spInput := range in.Splits {
+			if len(spInput.Items) == 0 {
+				return nil, nil, fmt.Errorf("%w: split #%d has no items allocated", ErrItemAllocationMismatch, sIdx+1)
+			}
+			for _, itAlloc := range spInput.Items {
+				if itAlloc.Quantity <= 0 {
+					return nil, nil, fmt.Errorf("%w: split #%d has invalid quantity %d for item %s", ErrItemAllocationMismatch, sIdx+1, itAlloc.Quantity, itAlloc.OrderItemID)
+				}
+				it, exists := itemMap[itAlloc.OrderItemID]
+				if !exists {
+					return nil, nil, fmt.Errorf("%w: split #%d references unknown order_item_id %s", ErrItemAllocationMismatch, sIdx+1, itAlloc.OrderItemID)
+				}
+				allocatedQty[it.ID] += itAlloc.Quantity
+			}
+		}
+
+		// Every single purchased unit must be allocated exactly once
+		for _, it := range items {
+			alloc := allocatedQty[it.ID]
+			if alloc != it.Quantity {
+				return nil, nil, fmt.Errorf("%w: item %q (ID %s) has purchased qty %d but allocated %d",
+					ErrItemAllocationMismatch, it.SnapshotName, it.ID, it.Quantity, alloc)
+			}
+		}
+
+		splits = make([]domain.PaymentSplit, len(in.Splits))
+		var cumTax, cumService int64
+
+		for sIdx, spInput := range in.Splits {
+			spID := uuid.New()
+			var splitSubtotal int64
+			var thisSplitItems []domain.PaymentSplitItem
+
+			for _, itAlloc := range spInput.Items {
+				it := itemMap[itAlloc.OrderItemID]
+				unitPrice := it.SubtotalAmount / int64(it.Quantity)
+				itemAllocTotal := unitPrice * int64(itAlloc.Quantity)
+				splitSubtotal += itemAllocTotal
+
+				psi := domain.PaymentSplitItem{
+					ID:              uuid.New(),
+					StoreID:         storeID,
+					SplitID:         spID,
+					OrderItemID:     it.ID,
+					Quantity:        itAlloc.Quantity,
+					AllocatedAmount: itemAllocTotal,
+					CreatedAt:       now,
+				}
+				thisSplitItems = append(thisSplitItems, psi)
+				splitItems = append(splitItems, psi)
+			}
+
+			// Proportional tax and service charge
+			var splitTax, splitService int64
+			if order.SubtotalAmount > 0 {
+				splitService = (order.ServiceChargeAmount * splitSubtotal) / order.SubtotalAmount
+				splitTax = (order.TaxAmount * splitSubtotal) / order.SubtotalAmount
+			}
+
+			// Remainder deterministic allocation: Last split absorbs residual rounding
+			isLastSplit := sIdx == len(in.Splits)-1
+			if isLastSplit {
+				splitService = order.ServiceChargeAmount - cumService
+				splitTax = order.TaxAmount - cumTax
+			} else {
+				cumService += splitService
+				cumTax += splitTax
+			}
+
+			splitTotal := splitSubtotal + splitTax + splitService
+			label := strings.TrimSpace(spInput.Label)
+			if label == "" {
+				label = fmt.Sprintf("Split %d/%d", sIdx+1, len(in.Splits))
+			}
+
+			splits[sIdx] = domain.PaymentSplit{
+				ID:                  spID,
+				StoreID:             storeID,
+				OrderID:             order.ID,
+				SplitNumber:         sIdx + 1,
+				Label:               label,
+				SplitMode:           domain.SplitModeByItem,
+				SubtotalAmount:      splitSubtotal,
+				TaxAmount:           splitTax,
+				ServiceChargeAmount: splitService,
+				TotalAmount:         splitTotal,
+				PaidAmount:          0,
+				Status:              domain.SplitBillStatusUnpaid,
+				Items:               thisSplitItems,
+				CreatedAt:           now,
+				UpdatedAt:           now,
+			}
+		}
+
+		// Validate complete split math integrity
+		if err := domain.ValidateSplitAllocations(order.TotalAmount, items, splits); err != nil {
+			return nil, nil, fmt.Errorf("%w: %v", ErrItemAllocationMismatch, err)
+		}
+	}
+	return splits, splitItems, nil
 }

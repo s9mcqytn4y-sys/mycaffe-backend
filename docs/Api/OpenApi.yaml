@@ -2898,6 +2898,109 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/public/guest/orders/{id}/splits:
+    post:
+      security: []
+      tags: [Guest]
+      operationId: createGuestOrderSplits
+      summary: Divide an unpaid QR order into per-person payment links
+      description: "Only when `GUEST_SPLIT_ENABLED=true`. Requires `X-CSRF-Protection: 1`. Works once, before any QR was created. Each token is returned only in this response."
+      x-implementation-status: implemented
+      parameters:
+        - $ref: "#/components/parameters/CsrfProtectionHeader"
+        - $ref: "#/components/parameters/ResourceID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [strategy]
+              properties:
+                strategy:
+                  type: string
+                  enum: [equal, by_item]
+                split_count:
+                  type: integer
+                  minimum: 2
+                  maximum: 20
+                splits:
+                  type: array
+                  maxItems: 20
+                  items:
+                    type: object
+                    additionalProperties: true
+      responses:
+        "201":
+          description: One link per person
+        "404":
+          description: Not this guest's order
+        "409":
+          description: The order can no longer be divided
+    get:
+      security: []
+      tags: [Guest]
+      operationId: listGuestOrderSplits
+      summary: Status of each share of this guest's order, without tokens
+      description: Only when `GUEST_SPLIT_ENABLED=true`.
+      x-implementation-status: implemented
+      parameters:
+        - $ref: "#/components/parameters/ResourceID"
+      responses:
+        "200":
+          description: Live shares
+        "404":
+          description: Not this guest's order
+  /api/v1/public/split-shares/{token}:
+    get:
+      security: []
+      tags: [Guest]
+      operationId: getSplitShare
+      summary: What a link holder owes (store, label, amount, status)
+      description: Only when `GUEST_SPLIT_ENABLED=true`.
+      x-implementation-status: implemented
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The share
+        "404":
+          description: Unknown or expired link
+  /api/v1/public/split-shares/{token}/payments:
+    post:
+      security: []
+      tags: [Guest]
+      operationId: paySplitShare
+      summary: Pay one share with dynamic QRIS
+      description: "Only when `GUEST_SPLIT_ENABLED=true`. Requires `X-CSRF-Protection: 1`."
+      x-implementation-status: implemented
+      parameters:
+        - $ref: "#/components/parameters/CsrfProtectionHeader"
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [idempotency_key]
+              properties:
+                idempotency_key:
+                  type: string
+                  maxLength: 50
+      responses:
+        "200":
+          description: Pending QRIS charge (or idempotent replay)
+        "404":
+          description: Unknown or expired link
   /api/v1/public/guest/orders/{id}/payments:
     post:
       security: []

@@ -20,6 +20,7 @@ import (
 
 // handlerSet groups all HTTP handlers wired for the API server.
 type handlerSet struct {
+	guestSplit bool
 	health     *handler.HealthHandler
 	midtrans   *handler.MidtransHandler
 	auth       *handler.AuthHandler
@@ -52,8 +53,9 @@ type handlerSet struct {
 func wireHandlers(workerCtx context.Context, cfg *config.Config, db *sqlx.DB, hub *realtime.Hub) *handlerSet {
 	midtransClient := midtrans.NewClient(cfg)
 	h := &handlerSet{
-		health:   handler.NewHealthHandler("MyCaffe POS Backend", cfg.AppEnv, db),
-		midtrans: handler.NewMidtransHandler(midtransClient, hub),
+		guestSplit: cfg.GuestSplitEnabled,
+		health:     handler.NewHealthHandler("MyCaffe POS Backend", cfg.AppEnv, db),
+		midtrans:   handler.NewMidtransHandler(midtransClient, hub),
 	}
 	if db == nil {
 		return h
@@ -379,6 +381,12 @@ func registerTableAndGuestRoutes(v1 *gin.RouterGroup, h *handlerSet) {
 	guest.POST("/orders", h.guest.CreateOrder)
 	guest.POST("/orders/:id/payments", h.guest.InitiatePayment)
 	guest.POST("/orders/:id/receipt/send", h.receiptOut.SendByGuest)
+	if h.guestSplit { // stays off until the Android cashier can settle a share a guest leaves unpaid
+		guest.POST("/orders/:id/splits", h.guest.CreateSplits)
+		guest.GET("/orders/:id/splits", h.guest.ListSplits)
+		v1.GET("/public/split-shares/:token", h.guest.SplitShare)
+		v1.POST("/public/split-shares/:token/payments", handler.LimitBody(4<<10), h.guest.PaySplitShare)
+	}
 	guest.POST("/ws-ticket", h.realtime.IssueGuestTicket)
 	pos.POST("/ws-ticket", h.auth.RequireStaff(), h.realtime.IssueStaffTicket)
 }

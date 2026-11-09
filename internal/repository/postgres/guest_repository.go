@@ -160,3 +160,54 @@ func (r *GuestRepository) TrackOrder(ctx context.Context, db *sqlx.DB, tokenHash
 	}
 	return &out, nil
 }
+
+// SplitShare is a per-person payment link resolved from its token hash.
+type SplitShare struct {
+	StoreID   uuid.UUID `db:"store_id"`
+	SplitID   uuid.UUID `db:"split_id"`
+	OrderID   uuid.UUID `db:"order_id"`
+	ExpiresAt time.Time `db:"expires_at"`
+}
+
+// SplitShareView is everything a link holder may see.
+type SplitShareView struct {
+	StoreName string `json:"store_name" db:"store_name"`
+	Label     string `json:"label" db:"label"`
+	Amount    int64  `json:"amount" db:"amount"`
+	Status    string `json:"status" db:"status"`
+}
+
+func (r *GuestRepository) InsertSplitShare(ctx context.Context, tx *sqlx.Tx, storeID, orderID, splitID uuid.UUID, tokenHash []byte, expiresAt time.Time) error {
+	_, err := tx.ExecContext(ctx, `
+		INSERT INTO guest_split_shares (store_id, order_id, split_id, token_hash, expires_at)
+		VALUES ($1, $2, $3, $4, $5)`, storeID, orderID, splitID, tokenHash, expiresAt)
+	if err != nil {
+		return fmt.Errorf("failed to insert split share: %w", err)
+	}
+	return nil
+}
+
+// ResolveSplitShare returns nil when no link has this hash.
+func (r *GuestRepository) ResolveSplitShare(ctx context.Context, db *sqlx.DB, tokenHash []byte) (*SplitShare, error) {
+	var out SplitShare
+	err := db.GetContext(ctx, &out, `SELECT store_id, split_id, order_id, expires_at FROM resolve_split_share($1)`, tokenHash)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve split share: %w", err)
+	}
+	return &out, nil
+}
+
+func (r *GuestRepository) GetSplitShareView(ctx context.Context, tx *sqlx.Tx, storeID, splitID uuid.UUID) (*SplitShareView, error) {
+	var out SplitShareView
+	err := tx.GetContext(ctx, &out, `
+		SELECT st.name AS store_name, ps.label, ps.total_amount AS amount, ps.status
+		FROM payment_splits ps JOIN stores st ON st.id = ps.store_id
+		WHERE ps.store_id = $1 AND ps.id = $2`, storeID, splitID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load split share: %w", err)
+	}
+	return &out, nil
+}

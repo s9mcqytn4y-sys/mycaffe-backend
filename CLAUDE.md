@@ -11,7 +11,7 @@
   - Public Media CDN (R2 `mycaffe-media`): `https://cdn.abbdullaziz.online`
 
 ## 2. Kontrak Keamanan & Finansial Wajib
-1. **Multi-Tenant RLS**: Setiap query/mutasi wajib berjalan di dalam `database.WithTenantTx(ctx, db, storeID, ...)` menggunakan role `mycaffe_app` (`NOBYPASSRLS`). Hanya fungsi `SECURITY DEFINER` resmi (`resolve_payment_webhook_context`, `resolve_store_for_login`, `resolve_table_qr`, `track_order_by_token`, `list_stores_with_*`) yang boleh dipanggil sebelum `WithTenantTx`.
+1. **Multi-Tenant RLS**: Setiap query/mutasi wajib berjalan di dalam `database.WithTenantTx(ctx, db, storeID, ...)` menggunakan role `mycaffe_app` (`NOBYPASSRLS`). Hanya fungsi `SECURITY DEFINER` resmi (`resolve_payment_webhook_context`, `resolve_store_for_login`, `resolve_table_qr`, `track_order_by_token`, `resolve_split_share`, `list_stores_with_*`) yang boleh dipanggil sebelum `WithTenantTx`.
 2. **Whole Integer IDR (`int64` / `BIGINT`)**: Dilarang menggunakan `float` untuk nominal uang. Kalkulasi harga produk, varian, modifier, 1-level sub-addon, diskon, pajak (`tax_bps`), dan service charge (`service_bps`) wajib dihitung ulang di server.
 3. **2-Phase Midtrans Core API (No Snap)**: Gunakan `payments.id.String()` sebagai `provider_order_id` sekaligus `Idempotency-Key`. Jangan pernah menahan lock transaksi DB saat melakukan panggilan HTTP eksternal ke Midtrans.
 4. **Immutability Migrasi**: Jangan pernah mengubah file migrasi yang sudah di-merge ke `main` karena `cmd/migrate` memverifikasi checksum SHA-256 di `schema_migrations`. Selalu buat migrasi aditif baru.

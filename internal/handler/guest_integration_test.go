@@ -87,6 +87,10 @@ func TestGuestQROrderingIteration5bIntegration(t *testing.T) {
 	guest.GET("/orders", gh.ListOrders)
 	guest.POST("/orders", gh.CreateOrder)
 	guest.POST("/orders/:id/payments", gh.InitiatePayment)
+	guest.POST("/orders/:id/splits", gh.CreateSplits)
+	guest.GET("/orders/:id/splits", gh.ListSplits)
+	r.GET("/public/split-shares/:token", gh.SplitShare)
+	r.POST("/public/split-shares/:token/payments", gh.PaySplitShare)
 
 	type req struct {
 		cookie, bearer string
@@ -334,6 +338,119 @@ func TestGuestQROrderingIteration5bIntegration(t *testing.T) {
 		}
 		if res := call("GET", "/public/orders/track/"+strings.Repeat("x", 43), req{}, nil); res.Code != http.StatusNotFound {
 			t.Fatalf("unknown tracking token must be 404, got %d", res.Code)
+		}
+	})
+
+	t.Run("BillDividedThroughPerPersonLinks", func(t *testing.T) {
+		splitQR := "gs" + strings.ReplaceAll(uuid.NewString(), "-", "")
+		inStore(centralID, func(tx *sqlx.Tx) error {
+			_, err := tx.ExecContext(ctx, `INSERT INTO tables (store_id, table_number, qr_token) VALUES ($1, $2, $3)`, centralID, "S-"+splitQR[:8], splitQR)
+			return err
+		})
+		_, payer, _ := startSession(splitQR)
+		_, stranger, _ := startSession(splitQR)
+		var placed service.GuestOrderResult
+		placedRes := order(payer, "split-1", 2)
+		if err := json.Unmarshal(placedRes.Body.Bytes(), &placed); err != nil || placedRes.Code != http.StatusCreated {
+			t.Fatalf("order failed: %d: %s", placedRes.Code, placedRes.Body.String())
+		}
+		orderPath := "/public/guest/orders/" + placed.Order.ID.String()
+		equal := map[string]any{"strategy": "equal", "split_count": 2}
+
+		if res := call("POST", orderPath+"/splits", req{cookie: stranger, csrf: true}, equal); res.Code != http.StatusNotFound {
+			t.Fatalf("another guest must not divide this order, got %d", res.Code)
+		}
+		if res := call("POST", orderPath+"/splits", req{cookie: payer, csrf: true}, map[string]any{"strategy": "full"}); res.Code != http.StatusBadRequest {
+			t.Fatalf("full strategy must be refused, got %d", res.Code)
+		}
+		created := call("POST", orderPath+"/splits", req{cookie: payer, csrf: true}, equal)
+		var divided struct {
+			Links []service.GuestSplitLink `json:"links"`
+		}
+		_ = json.Unmarshal(created.Body.Bytes(), &divided)
+		if created.Code != http.StatusCreated || len(divided.Links) != 2 {
+			t.Fatalf("divide failed: %d: %s", created.Code, created.Body.String())
+		}
+		if sum := divided.Links[0].Amount + divided.Links[1].Amount; sum != placed.Order.TotalAmount {
+			t.Fatalf("shares sum to %d, order total is %d", sum, placed.Order.TotalAmount)
+		}
+		if res := call("POST", orderPath+"/splits", req{cookie: payer, csrf: true}, equal); res.Code != http.StatusConflict || !strings.Contains(res.Body.String(), "SPLIT_NOT_ALLOWED") {
+			t.Fatalf("second divide must be 409, got %d: %s", res.Code, res.Body.String())
+		}
+		if res := call("POST", orderPath+"/payments", req{cookie: payer, csrf: true}, map[string]any{"idempotency_key": "whole"}); res.Code == http.StatusOK {
+			t.Fatal("a divided bill must not be payable as a whole")
+		}
+
+		sharePath := "/public/split-shares/"
+		view := call("GET", sharePath+divided.Links[0].Token, req{}, nil)
+		if view.Code != http.StatusOK || strings.Contains(view.Body.String(), "order_") || strings.Contains(view.Body.String(), placed.Order.ID.String()) {
+			t.Fatalf("share view leaks or failed: %d: %s", view.Code, view.Body.String())
+		}
+		if res := call("GET", sharePath+strings.Repeat("x", 43), req{}, nil); res.Code != http.StatusNotFound {
+			t.Fatalf("unknown link must be 404, got %d", res.Code)
+		}
+		if res := call("POST", sharePath+divided.Links[0].Token+"/payments", req{}, map[string]any{"idempotency_key": "k"}); res.Code != http.StatusForbidden {
+			t.Fatalf("share payment without CSRF header must be 403, got %d", res.Code)
+		}
+
+		settle := func(link service.GuestSplitLink) {
+			t.Helper()
+			res := call("POST", sharePath+link.Token+"/payments", req{csrf: true}, map[string]any{"idempotency_key": "pay-1"})
+			var charge service.GuestSharePayment
+			_ = json.Unmarshal(res.Body.Bytes(), &charge)
+			if res.Code != http.StatusOK || charge.QRString == "" || charge.Amount != link.Amount || strings.Contains(res.Body.String(), "order") {
+				t.Fatalf("share charge failed: %d: %s", res.Code, res.Body.String())
+			}
+			if _, err := paymentSvc.ProcessMidtransWebhook(ctx, service.MidtransWebhookInput{
+				OrderID: charge.ID.String(), TransactionID: "tx-" + charge.ID.String(), StatusCode: "200", TransactionStatus: "settlement",
+				GrossAmount: fmt.Sprintf("%d.00", charge.Amount), FraudStatus: "accept", Currency: "IDR",
+			}, "{}"); err != nil {
+				t.Fatalf("settlement failed: %v", err)
+			}
+		}
+		var state struct {
+			Status        string     `db:"status"`
+			PaymentStatus string     `db:"payment_status"`
+			PaidAmount    int64      `db:"paid_amount"`
+			ExpiresAt     *time.Time `db:"expires_at"`
+			Tickets       int        `db:"tickets"`
+			Cancelled     int        `db:"cancelled"`
+		}
+		load := func() {
+			t.Helper()
+			inStore(centralID, func(tx *sqlx.Tx) error {
+				return tx.GetContext(ctx, &state, `SELECT o.status, o.payment_status, o.paid_amount, o.expires_at,
+					(SELECT COUNT(*) FROM kds_tickets k WHERE k.store_id = o.store_id AND k.order_id = o.id) AS tickets,
+					(SELECT COUNT(*) FROM payment_splits s WHERE s.store_id = o.store_id AND s.order_id = o.id AND s.status = 'cancelled') AS cancelled
+					FROM orders o WHERE o.store_id = $1 AND o.id = $2`, centralID, placed.Order.ID)
+			})
+		}
+
+		settle(divided.Links[0])
+		load()
+		if state.PaymentStatus != "partially_paid" || state.Status != string(domain.OrderStatusPendingPayment) ||
+			state.PaidAmount != divided.Links[0].Amount || state.ExpiresAt != nil || state.Tickets != 0 {
+			t.Fatalf("first share must only record the money: %+v", state)
+		}
+		settle(divided.Links[1])
+		load()
+		if state.PaymentStatus != "paid" || state.Status == string(domain.OrderStatusPendingPayment) ||
+			state.PaidAmount != placed.Order.TotalAmount || state.Cancelled != 1 {
+			t.Fatalf("last share must release the order and keep the original split cancelled: %+v", state)
+		}
+		listed := call("GET", orderPath+"/splits", req{cookie: payer}, nil)
+		if listed.Code != http.StatusOK || strings.Count(listed.Body.String(), `"status":"paid"`) != 2 || strings.Contains(listed.Body.String(), "token") {
+			t.Fatalf("split status wrong: %d: %s", listed.Code, listed.Body.String())
+		}
+
+		var charged service.GuestOrderResult
+		_ = json.Unmarshal(order(payer, "split-2", 1).Body.Bytes(), &charged)
+		chargedPath := "/public/guest/orders/" + charged.Order.ID.String()
+		if res := call("POST", chargedPath+"/payments", req{cookie: payer, csrf: true}, map[string]any{"idempotency_key": "whole-2"}); res.Code != http.StatusOK {
+			t.Fatalf("charge failed: %d: %s", res.Code, res.Body.String())
+		}
+		if res := call("POST", chargedPath+"/splits", req{cookie: payer, csrf: true}, equal); res.Code != http.StatusConflict {
+			t.Fatalf("an order with a live QR must not be divided, got %d", res.Code)
 		}
 	})
 

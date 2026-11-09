@@ -51,6 +51,28 @@ func isPaymentMethodEnabled(enabledJSON string, method domain.PaymentMethod) boo
 	return false
 }
 
+// checkOrderSplitTarget enforces who must name a split: open tabs always, pay-first orders only once
+// their bill was divided among guests, and any other order never.
+func checkOrderSplitTarget(order *domain.Order, splits []domain.PaymentSplit, splitID *uuid.UUID) error {
+	if order.BillingMode == domain.BillingModeOpenTab {
+		if order.Status == domain.OrderStatusOpen {
+			return ErrTabNotClosed
+		}
+		if splitID == nil {
+			return ErrSplitIDRequired
+		}
+		return nil
+	}
+	divided := order.BillingMode == domain.BillingModePayFirst && len(splits) > 1
+	if divided && splitID == nil {
+		return ErrSplitIDRequired
+	}
+	if !divided && splitID != nil {
+		return ErrSplitIDNotAllowed
+	}
+	return nil
+}
+
 func resolveOrderSplit(requestedSplitID *uuid.UUID, splits []domain.PaymentSplit) (*domain.PaymentSplit, error) {
 	if len(splits) == 0 {
 		return nil, errors.New("order has no payment splits")

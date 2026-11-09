@@ -410,6 +410,14 @@ BEGIN
        OR has_table_privilege('mycaffe_app', 'public.invoice_reminders', 'DELETE') THEN
         RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may rewrite invoice reminders!';
     END IF;
+    -- 10F-31. Guest split links (migration 000057): RLS on; links are never rewritten.
+    IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.guest_split_shares'::regclass) THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: guest_split_shares does not have row-level security enabled!';
+    END IF;
+    IF has_table_privilege('mycaffe_app', 'public.guest_split_shares', 'UPDATE')
+       OR has_table_privilege('mycaffe_app', 'public.guest_split_shares', 'DELETE') THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may rewrite guest split links!';
+    END IF;
     -- 10F-24. Purchasing (migration 000046): RLS on; receipts are append-only (stock and cost already moved).
     IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.suppliers'::regclass)
        OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.purchase_orders'::regclass)

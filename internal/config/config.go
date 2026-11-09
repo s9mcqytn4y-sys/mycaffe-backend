@@ -52,7 +52,9 @@ type Config struct {
 	WhatsAppTemplateLanguage string
 	// WhatsAppDriver is "cloud" (Cloud API), "bridge" (cmd/wa-bridge via whatsmeow, demo/development only,
 	// decision W12) or "disabled"; empty picks cloud when the Cloud API token is set.
-	WhatsAppDriver      string
+	WhatsAppDriver string
+	// GuestSplitEnabled exposes per-person payment links on QR orders (ADR-010).
+	GuestSplitEnabled   bool
 	WhatsAppBridgeURL   string
 	WhatsAppBridgeToken string
 	SMTPHost            string
@@ -213,6 +215,7 @@ func LoadConfig() (*Config, error) {
 		WhatsAppAccessToken:          strings.TrimSpace(getEnv("WHATSAPP_ACCESS_TOKEN", "")),
 		WhatsAppReceiptTemplate:      strings.TrimSpace(getEnv("WHATSAPP_RECEIPT_TEMPLATE", "struk_digital")),
 		WhatsAppTemplateLanguage:     strings.TrimSpace(getEnv("WHATSAPP_TEMPLATE_LANGUAGE", "id")),
+		GuestSplitEnabled:            getEnv("GUEST_SPLIT_ENABLED", "false") == "true",
 		WhatsAppDriver:               strings.ToLower(strings.TrimSpace(getEnv("WHATSAPP_DRIVER", ""))),
 		WhatsAppBridgeURL:            strings.TrimSpace(getEnv("WHATSAPP_BRIDGE_URL", "")),
 		WhatsAppBridgeToken:          strings.TrimSpace(getEnv("WHATSAPP_BRIDGE_TOKEN", "")),

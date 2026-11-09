@@ -61,6 +61,7 @@ type GuestService struct {
 	db       *sqlx.DB
 	repo     *postgres.GuestRepository
 	tables   *postgres.TableRepository
+	tabs     *postgres.TabRepository
 	settings *postgres.SettingsRepository
 	orders   *OrderService
 	payments *PaymentService
@@ -69,7 +70,7 @@ type GuestService struct {
 
 func NewGuestService(db *sqlx.DB, orders *OrderService, payments *PaymentService) *GuestService {
 	return &GuestService{
-		db: db, repo: postgres.NewGuestRepository(), tables: postgres.NewTableRepository(),
+		db: db, repo: postgres.NewGuestRepository(), tables: postgres.NewTableRepository(), tabs: postgres.NewTabRepository(),
 		settings: postgres.NewSettingsRepository(), orders: orders, payments: payments, nowFunc: time.Now,
 	}
 }

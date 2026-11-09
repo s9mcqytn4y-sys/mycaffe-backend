@@ -33,6 +33,43 @@ func (s *PaymentService) commitPaidOrderTx(ctx context.Context, tx *sqlx.Tx, ord
 		return nil
 	}
 
+	dividedBill := false
+	if order.BillingMode == domain.BillingModePayFirst {
+		var tally struct {
+			Splits int   `db:"splits"`
+			Unpaid int   `db:"unpaid"`
+			Paid   int64 `db:"paid"`
+		}
+		if err := tx.GetContext(ctx, &tally, `
+			SELECT COUNT(*) AS splits,
+			       COUNT(*) FILTER (WHERE status NOT IN ('paid', 'cancelled')) AS unpaid,
+			       COALESCE(SUM(paid_amount) FILTER (WHERE status IN ('paid', 'partially_paid')), 0) AS paid
+			FROM payment_splits WHERE store_id = $1 AND order_id = $2
+		`, order.StoreID, order.ID); err != nil {
+			return fmt.Errorf("failed to tally payment splits: %w", err)
+		}
+		dividedBill = tally.Splits > 1
+		// One guest's money must never revive the whole order: a late share is refunded instead.
+		if dividedBill && order.Status == domain.OrderStatusCancelled {
+			return s.insertPaymentOutboxTx(ctx, tx, order, "payment.refund_required", map[string]any{
+				"reason": "share settled after the divided order was cancelled",
+			})
+		}
+		// The kitchen starts only when the last share is in; money already taken keeps the order alive.
+		if dividedBill && tally.Unpaid > 0 {
+			order.PaymentStatus = domain.OrderPaymentStatusPartiallyPaid
+			order.PaidAmount = tally.Paid
+			order.ExpiresAt = nil
+			if err := s.orderRepo.UpdateOrderStatusAndStock(ctx, tx, order); err != nil {
+				return fmt.Errorf("failed to update partially paid order: %w", err)
+			}
+			return s.insertPaymentOutboxTx(ctx, tx, order, "payment.split_settled", map[string]any{
+				"paid_amount":             order.PaidAmount,
+				"remaining_unpaid_splits": tally.Unpaid,
+			})
+		}
+	}
+
 	if order.Status == domain.OrderStatusCancelled && order.PaymentStatus != domain.OrderPaymentStatusExpired {
 		order.PaymentStatus = domain.OrderPaymentStatusPaid
 		order.PaidAmount = order.TotalAmount
@@ -171,8 +208,10 @@ func (s *PaymentService) commitPaidOrderTx(ctx context.Context, tx *sqlx.Tx, ord
 	if err := s.orderRepo.UpdateOrderStatusAndStock(ctx, tx, order); err != nil {
 		return fmt.Errorf("failed to update paid order: %w", err)
 	}
-	if err := s.orderRepo.UpdatePaymentSplitsStatusByOrder(ctx, tx, order.StoreID, order.ID, domain.SplitBillStatusPaid, true); err != nil {
-		return err
+	if !dividedBill { // a divided bill keeps its own per-share amounts and its cancelled original split
+		if err := s.orderRepo.UpdatePaymentSplitsStatusByOrder(ctx, tx, order.StoreID, order.ID, domain.SplitBillStatusPaid, true); err != nil {
+			return err
+		}
 	}
 	if err := consumePromotionsTx(ctx, tx, order.StoreID, order.ID); err != nil {
 		return err
@@ -196,7 +235,8 @@ func (s *PaymentService) applyNonPaidStatusTx(
 	order *domain.Order,
 	status domain.PaymentAttemptStatus,
 ) error {
-	if order == nil || order.PaymentStatus == domain.OrderPaymentStatusPaid {
+	// One share's failed QR must not erase the money other shares already paid.
+	if order == nil || order.PaymentStatus == domain.OrderPaymentStatusPaid || order.PaymentStatus == domain.OrderPaymentStatusPartiallyPaid {
 		return nil
 	}
 	order.PaymentStatus = orderPaymentStatusFromAttempt(status)

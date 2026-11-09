@@ -409,8 +409,11 @@ func (s *PaymentService) initiateMidtransGatewayPayment(
 			if resolveErr != nil {
 				return resolveErr
 			}
-			if normalized := normalizeGatewayClient(customClient); normalized != nil {
+			normalized := normalizeGatewayClient(customClient)
+			if normalized != nil {
 				gwClient = normalized
+			} else if s.tenantGatewayRequired {
+				return fmt.Errorf("%w: store has no Midtrans credentials", ErrPaymentMethodNotEnabled)
 			}
 		}
 		if gwClient == nil {

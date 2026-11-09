@@ -87,7 +87,11 @@ func (s *OperationalService) openGatewayRefundTx(ctx context.Context, tx *sqlx.T
 // (waiting for bank_confirmed_at), 202 or a business error → failed, transport error → left pending for
 // the reconciliation worker.
 func (s *OperationalService) dispatchGatewayRefund(ctx context.Context, storeID uuid.UUID, req *gatewayRefundRequest) (string, error) {
-	resp, callErr := s.gateway.DirectRefund(ctx, req.ProviderOrderID, req.ID.String(), req.Amount, req.Reason)
+	gw, callErr := s.gatewayForStore(ctx, storeID)
+	var resp *coreapi.RefundResponse
+	if callErr == nil {
+		resp, callErr = gw.DirectRefund(ctx, req.ProviderOrderID, req.ID.String(), req.Amount, req.Reason)
+	}
 	status, providerStatus, failure := "pending", "", ""
 	switch {
 	case callErr != nil:
@@ -205,8 +209,16 @@ func (s *PaymentService) ReconcileGatewayRefunds(ctx context.Context, staleAfter
 			log.Printf("[REFUND RECONCILE] store %s: %v", storeID, err)
 			continue
 		}
+		if len(open) == 0 {
+			continue
+		}
+		gw, err := s.gatewayForStore(ctx, storeID)
+		if err != nil {
+			log.Printf("[REFUND RECONCILE] store %s: gateway unavailable: %v", storeID, err)
+			continue
+		}
 		for _, g := range open {
-			resp, err := s.midtransClient.CheckTransaction(ctx, g.ProviderOrderID)
+			resp, err := gw.CheckTransaction(ctx, g.ProviderOrderID)
 			if err != nil {
 				log.Printf("[REFUND RECONCILE] gateway refund %s: status lookup failed: %v", g.ID, err)
 				continue

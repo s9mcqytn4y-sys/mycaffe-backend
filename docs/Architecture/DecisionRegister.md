@@ -297,6 +297,24 @@ Status: decided. Context: GitHub-hosted runners stopped on a billing failure rig
 | D13 | Rekonsiliasi dokumen & drift | PR B1 terpisah untuk menyelaraskan seluruh spesifikasi usang menjadi satu sumber kebenaran |
 | D14 | Kepatuhan hukum UU PDP No. 27/2022 | Halaman Privasi & Portabilitas Data di console owner & tamu, ekspor arsip JSON/CSV, penutupan akun masa tenggang 7 hari, dan retensi keuangan 10 tahun (UU KUP) |
 
+## Re-alignment 2026-11-09
+
+Rationale: [ReAlignment2026-11.md](../Product/ReAlignment2026-11.md).
+
+| ID | Decision | Approved option |
+| ---- | ---------- | ----------------- |
+| AL1 | Website for Midtrans review | New Cassy domain, not `abbdullaziz.online` |
+| AL2 | Primary domain | `cassy.id`, pending registrar and PDKI checks |
+| AL3 | Legal entity | Stay sole proprietor until Midtrans approves and a paid pilot runs; move up before tenant 10 or when revenue covers formation |
+| AL4 | AzureDevID Midtrans methods | Keep all 14 requested methods; owner chose this over the QRIS and VA recommendation |
+| AL5 | Public pricing | Starter Rp 149.000, Pro Rp 299.000 (lead plan), Enterprise Rp 599.000, 14-day trial. Plan limits must be enforced before a paid pilot |
+| AL6 | AWS | SES only in `ap-southeast-2`, $1 budget alarm. Production stays on VPS and Cloudflare until about 20 paying tenants |
+| AL7 | Digital receipts | Free link by default. WhatsApp only on Pro and above with the tenant's own WhatsApp Business account. OTP, subscription billing and invoice reminders use the Cassy account |
+| AL8 | Logo | One colour plus one accent, same monogram, text as paths, endorsement moved to footer. After PDKI check |
+| AL9 | First-year buyer | Young owners of 1 to 3 outlets. Gen-Z is the QR experience bar, not the sales target |
+| AL10 | Rename scope | Folders, GitHub repos, GHCR image and `deploy/` files in a dedicated PR with a demo smoke test. Database roles, migration names and R2 buckets stay |
+| AL11 | Release flow | Trunk-based: short branches to `main`, `main` to demo, `v*` tag to production with owner approval. `staging` is not revived |
+
 ## Awaiting owner approval
 
 None. The G-1/G-2 contract (PR #55), ADR-007 (G-5), and D1-D14 decisions were approved.
@@ -312,5 +330,5 @@ None. The G-1/G-2 contract (PR #55), ADR-007 (G-5), and D1-D14 decisions were ap
 
 | Topic | Needed for | Default until decided |
 | ------- | ----------- | ----------------------- |
-| Production domain name | Tunnel hostname (IN1), cookie domain (O2) | Quick Tunnel URL for demo only |
+| Production domain purchase | Tunnel hostname (IN1), cookie domain (O2) | `cassy.id` chosen (AL2), not yet bought; demo stays on `demo.abbdullaziz.online` |
 | Midtrans production credentials & VPS provisioning | Production cutover | Sandbox only |

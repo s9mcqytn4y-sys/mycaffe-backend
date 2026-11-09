@@ -2,9 +2,9 @@ name: CI - Quality Gates & Security Checks
 
 on:
   push:
-    branches: [ main, staging, "feature/**", "feat/**", "fix/**", "chore/**" ]
+    branches: [ main, "feat/**", "fix/**", "docs/**", "chore/**" ]
   pull_request:
-    branches: [ main, staging ]
+    branches: [ main ]
 
 permissions:
   contents: read

@@ -1,7 +1,7 @@
-# MyCaffe Core POS: Workspace Instructions
+# Cassy by AzureDevID: Workspace Instructions
 
 ## Product Context
-MyCaffe is a configurable, multi-tenant, white-label QR table ordering, Point of Sale (POS), Kitchen Display System (KDS), queue display, and owner backoffice product for cafes and restaurants. Business rules, branding, taxes, service charges, modifier groups, payment methods, and operating policies are fully configurable per store/tenant rather than hardcoded. See [Brand Guidelines & Product Knowledge](docs/Product/BrandAndProductKnowledge.md) for the official brand identity (`MyCaffe`), default visual tokens (*Espresso & Crema*), entity numbering conventions, and operational product knowledge.
+Cassy (formerly MyCaffe; the name survives in database roles, migrations, buckets and a few paths) is a configurable, multi-tenant, white-label QR table ordering, Point of Sale (POS), Kitchen Display System (KDS), queue display, and owner backoffice product for cafes and restaurants. Business rules, branding, taxes, service charges, modifier groups, payment methods, and operating policies are fully configurable per store/tenant rather than hardcoded. See [Brand Guidelines & Product Knowledge](docs/Product/BrandAndProductKnowledge.md) for the brand identity, default visual tokens (*Espresso & Crema*), entity numbering conventions, and operational product knowledge.
 
 This workspace is `mycaffe-backend`. Treat it as the backend repository. The frontend is a separate Next.js App Router + TypeScript + Tailwind CSS/PWA repository. Do not create or modify frontend code directly within this backend repository.
 
@@ -31,9 +31,9 @@ This workspace is `mycaffe-backend`. Treat it as the backend repository. The fro
 ## Zero In-Place Coding on Production VPS
 - **Strict Prohibition:** Never write, edit, hot-patch, or compile (`go build`, `npm build`, `vim`, `nano`, `sed`) application source code or SQL migration files directly on the production Hostinger VPS.
 - **Immutable Release Pipeline:** All changes must follow the disciplined Git and CI/CD flow:
-  1. Develop and test locally on a `feature/*` branch.
-  2. Open a Pull Request to `staging` and pass all 3 GitHub Actions quality gates (`build-and-test`, `docker-build`, `database-migration-test`).
-  3. Promote `staging` to `main` via Pull Request to publish an immutable, versioned container image to `ghcr.io`.
+  1. Develop and test locally on a short-lived `feat/*`, `fix/*`, `docs/*` or `chore/*` branch.
+  2. Open a Pull Request to `main` and pass all 3 GitHub Actions quality gates (`build-and-test`, `docker-build`, `database-migration-test`).
+  3. After owner approval, merge to `main`; a `v*` tag publishes the release image to `ghcr.io`. Production only ever deploys a tagged image.
   4. On the production VPS, deployment is strictly limited to pulling the verified image from GHCR, running `migrate -action=up` using `mycaffe_migrator`, and restarting containers via `docker compose -f deploy/docker/docker-compose.prod.yml up -d`.
 - **Emergency Rollback:** If a production deployment fails, roll back by deploying the previous immutable GHCR image tag (`git SHA` or semantic tag) and, if necessary, restoring from the verified Cloudflare R2 encrypted backup rather than live-editing files on the server.
 
@@ -61,6 +61,7 @@ This workspace is `mycaffe-backend`. Treat it as the backend repository. The fro
 - For database changes, verify both fresh-install (`db/migrations/*.up.sql`), constraints (`scripts/verify/`), teardown (`db/migrations/*.down.sql`), and seed idempotency (`db/seeds/development.sql`).
 - For API changes, document request/response shapes and error cases.
 - Keep commits small and descriptive. Do not commit secrets, generated binaries, local caches, or production data.
+- Apply SOLID and DRY to new or touched code; do not start refactors without a concrete defect or a feature that needs them. Client work must ship with i18n keys, accessibility checks and lint passing.
 
 ## Bounded Autonomy & Decision Making
 - **Decision Making Under Uncertainty**:
@@ -85,14 +86,8 @@ This workspace is `mycaffe-backend`. Treat it as the backend repository. The fro
 ## Communication
 Respond to the owner in Bahasa Indonesia unless English is needed for code/API terminology. Be direct about risks, trade-offs, assumptions, and unverified facts. Distinguish implemented behavior from a proposal using the four-tier classification (*Implemented & Tested*, *Guarded / Fail-Closed*, *Planned*, *Blocked by Dependency*).
 
-## Ecosystem Directory Map (7 Locations)
-1. `C:\Projects\myCaffe-backend`: Core Backend Engine (Go 1.24, PostgreSQL 18 RLS, KDS Hub, Midtrans Core API).
-2. `C:\Projects\mycaffe-wt-sc`: Git Worktree for loyalty stamp card program (`feat/v011-stamp-card`).
-3. `C:\Projects\MyCaffeClient`: Client monorepo root (`com.azuredevid.cassy`).
-4. `C:\Projects\MyCaffeClient\apps\android`: Cassy POS Native Tablet App (Jetpack Compose, CameraX, Port 9100 ESC/POS).
-5. `C:\Projects\MyCaffeClient\apps\web`: Guest QR Table Ordering & Owner Backoffice PWA (Next.js 15).
-6. `C:\Projects\MyCaffeClient\apps\ios`: iOS hardware HAL and native receipt printer bridge.
-7. `C:\Users\Acer\OneDrive\Documents\AzureDevId`: Brand identity assets, legal licenses, and security recovery keys.
+## Ecosystem Directory Map
+See [docs/Setup/WorkspaceDirectoryMap.md](docs/Setup/WorkspaceDirectoryMap.md). There are two repositories: this backend (including the WhatsApp bridge in `cmd/wa-bridge`) and the client monorepo. Current re-alignment decisions: [docs/Product/ReAlignment2026-11.md](docs/Product/ReAlignment2026-11.md).
 
 <!-- antislop:start -->
 ## antislop

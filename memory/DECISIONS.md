@@ -1,5 +1,8 @@
 # Architecture & Executive Decisions (`memory/DECISIONS.md`)
 
+## Re-alignment terbaru
+AL1 sampai AL11 (2026-11-09) ada di `docs/Architecture/DecisionRegister.md` dan mengalahkan ringkasan di bawah bila bertentangan.
+
 ## ADR & Executive Decisions Summary
 1. **ADR-002 (Single-VPS Docker Modular Monolith)**:
    - Production target is a single Hostinger KVM 2 VPS running Docker Compose (`postgres:18-alpine`, Go API, Next.js PWA, Nginx).

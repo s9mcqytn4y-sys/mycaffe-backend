@@ -1,6 +1,6 @@
 # Arsitektur Jaringan Hybrid Cloud-to-LAN, Otomasi MikroTik RouterOS v7, & Keamanan Operasional Gerai
 
-Dokumen ini merinci standar jaringan lokal (LAN) dan koneksi internet (WAN) untuk setiap tenant **MyCaffe** (`online.abbdullaziz.mycaffe`), mencakup segmentasi VLAN MikroTik, panduan anti-salah-konfigurasi Winbox, kebijakan transfer berkas SFTP-only (FileZilla), serta sinkronisasi transaksi saat internet terputus (Offline-First).
+Dokumen ini merinci standar jaringan lokal (LAN) dan koneksi internet (WAN) untuk setiap tenant **MyCaffe** (`com.azuredevid.cassy`), mencakup segmentasi VLAN MikroTik, panduan anti-salah-konfigurasi Winbox, kebijakan transfer berkas SFTP-only (FileZilla), serta sinkronisasi transaksi saat internet terputus (Offline-First).
 
 ## 1. Denah Topologi Jaringan Gerai (3-VLAN Segmentation + Dual-WAN Failover)
 

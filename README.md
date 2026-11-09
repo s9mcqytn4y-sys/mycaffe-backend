@@ -22,7 +22,7 @@ Backend RESTful API dan Realtime Hub untuk platform white-label multi-tenant QR 
 4. **Webhook Verification**: Webhook Midtrans diverifikasi menggunakan signature key resmi SHA-512:
    $$\text{SHA512}(\text{order\_id} + \text{status\_code} + \text{gross\_amount} + \text{ServerKey})$$
 5. **Fail-Closed Operations**: Startup server ditolak (`log.Fatalf`) bila `DATABASE_URL` kosong atau bila `JWT_SECRET_KEY` lemah/placeholder di `staging` maupun `production` (L-1..L-3 tertutup). Endpoint publik (QR tamu, tracker, struk) memakai token bertanda tangan dan resolver `SECURITY DEFINER` yang sempit; fitur tanpa konfigurasi (mis. R2/SMS) menjawab `503`.
-6. **Zero In-Place Coding on Production VPS**: Dilarang mengedit kode sumber, mengubah migrasi SQL, atau menjalankan `go build` langsung di server VPS produksi. Seluruh perubahan wajib melalui alur `feature/*` -> PR `staging` (CI hijau) -> PR `main` -> penarikan image kontainer bertanda versi dari `ghcr.io`.
+6. **Zero In-Place Coding on Production VPS**: Dilarang mengedit kode sumber, mengubah migrasi SQL, atau menjalankan `go build` langsung di server VPS produksi. Seluruh perubahan wajib melalui branch pendek, CI, merge ke `main` dengan persetujuan Owner, lalu image GHCR bertag `v*`.
 
 ---
 
@@ -86,5 +86,5 @@ Sistem MyCaffe by AzureDevID mencakup backend dan suite aplikasi client multi-pl
 
 ## Git Branching & Release Strategy
 - `main`: Branch produksi yang dilindungi. Setiap merge ke `main` memicu workflow rilis image kontainer bertanda versi ke GitHub Container Registry (`ghcr.io`).
-- `staging`: Branch integrasi pra-rilis. Seluruh PR wajib lolos 3 job CI (`build-and-test`, `docker-build`, `database-migration-test`) sebelum ditinjau.
-- `feature/*`: Branch pengembangan fitur atau perbaikan spesifik yang dibuat dari baseline stabil dan diajukan melalui Pull Request ke `staging`.
+- Tidak ada branch `staging`. Demo memakai `main`, produksi memakai image bertag `v*`. Lihat [Git Workflow](docs/Engineering/GitWorkflowAndReleases.md).
+- `feat/*`, `fix/*`, `docs/*`, `chore/*`: Branch pendek dari `main`, diajukan lewat Pull Request ke `main`.

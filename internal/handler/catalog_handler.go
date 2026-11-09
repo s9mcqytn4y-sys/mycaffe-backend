@@ -525,3 +525,27 @@ func (h *CatalogHandler) SetChannelPrices(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, out)
 }
+
+// GetStampProgram handles GET /api/v1/catalog/stamp-program (X17).
+func (h *CatalogHandler) GetStampProgram(c *gin.Context) {
+	out, err := h.catalog.GetStampProgram(c.Request.Context(), currentStaff(c))
+	if err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, out)
+}
+
+// SetStampProgram handles PUT /api/v1/catalog/stamp-program (X17).
+func (h *CatalogHandler) SetStampProgram(c *gin.Context) {
+	var in service.StampProgram
+	if !bindJSON(c, &in) {
+		return
+	}
+	out, err := h.catalog.SetStampProgram(c.Request.Context(), currentStaff(c), in)
+	if err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, out)
+}

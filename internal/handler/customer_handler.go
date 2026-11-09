@@ -56,3 +56,19 @@ func (h *CustomerHandler) ConfirmVerification(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, res)
 }
+
+// LookupCustomer handles POST /api/v1/pos/customers/lookup {phone}; a POST keeps the phone number out of URLs and logs.
+func (h *CustomerHandler) LookupCustomer(c *gin.Context) {
+	var in struct {
+		Phone string `json:"phone"`
+	}
+	if !bindJSON(c, &in) {
+		return
+	}
+	out, err := h.svc.LookupCustomer(c.Request.Context(), currentStaff(c), in.Phone)
+	if err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, out)
+}

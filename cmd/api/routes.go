@@ -280,6 +280,7 @@ func registerStoreAndPOSRoutes(v1 *gin.RouterGroup, h *handlerSet) {
 	pos.POST("/products/:id/stock-override", h.auth.RequirePermission(rbac.StockOverride), h.pos.OverrideStock)
 
 	// Receipts (B1, decision R1): snapshot-only JSON or ESC/POS, 90-day digital link.
+	pos.POST("/customers/lookup", h.auth.RequirePermission(rbac.OrderPOSCreate), h.customer.LookupCustomer)
 	pos.POST("/customers/verify", h.auth.RequirePermission(rbac.OrderPOSCreate), h.customer.StartVerification)
 	pos.POST("/customers/verify/:id/confirm", h.auth.RequirePermission(rbac.OrderPOSCreate), h.customer.ConfirmVerification)
 	pos.GET("/orders", h.auth.RequirePermission(rbac.OrderReadStore), h.orderRead.List)
@@ -424,6 +425,9 @@ func registerKDSAndCatalogRoutes(v1 *gin.RouterGroup, h *handlerSet) {
 	cat.POST("/sales-channels", manage, h.catalog.CreateSalesChannel)
 	cat.PATCH("/sales-channels/:id", manage, h.catalog.UpdateSalesChannel)
 	cat.PUT("/sales-channels/:id/prices", manage, h.catalog.SetChannelPrices)
+	// Stamp card (v0.11.1 PR 11.8, X16, X17).
+	cat.GET("/stamp-program", manage, h.catalog.GetStampProgram)
+	cat.PUT("/stamp-program", manage, h.catalog.SetStampProgram)
 	cat.POST("/modifier-groups", manage, h.catalog.CreateModifierGroup)
 	cat.GET("/modifier-groups", manage, h.catalog.ListModifierGroups)
 	cat.GET("/modifier-groups/:id", manage, h.catalog.GetModifierGroup)

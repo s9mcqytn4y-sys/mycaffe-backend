@@ -941,6 +941,44 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
         "422": {$ref: "#/components/responses/ValidationFailed"}
+  /api/v1/catalog/stamp-program:
+    get:
+      tags: [Catalog]
+      operationId: getStampProgram
+      summary: The store stamp card program; inactive defaults until saved (catalog.manage, X17)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: The program
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/StampProgram"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    put:
+      tags: [Catalog]
+      operationId: setStampProgram
+      summary: Replace the store stamp card program (catalog.manage, audited, X17)
+      description: >-
+        An active program needs at least one reward product; reward products must be live and not bundles.
+        One stamp is earned per paid direct order at or above min_order_amount.
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/StampProgram"}
+      responses:
+        "200":
+          description: The saved program
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/StampProgram"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "422": {$ref: "#/components/responses/ValidationFailed"}
   /api/v1/catalog/sales-channels:
     get:
       tags: [Catalog]
@@ -1900,6 +1938,32 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /api/v1/pos/customers/lookup:
+    post:
+      tags: [Orders]
+      operationId: lookupPosCustomer
+      summary: Find a customer by phone with their live stamps (order.pos.create, X16)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phone]
+              properties:
+                phone: {type: string, example: "081234567890"}
+      responses:
+        "200":
+          description: The customer and their stamps
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CustomerStamps"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "422": {$ref: "#/components/responses/ValidationFailed"}
   /api/v1/pos/sales-channels:
     get:
       tags: [Orders]
@@ -8070,6 +8134,39 @@ components:
         cash_net: {type: integer, format: int64}
         cash_rounding: {type: integer, format: int64, description: "Net cash rounding inside cash_sales (V11); not part of total_amount"}
         outlet_expenses: {type: integer, format: int64, description: "Outlet cash fund expenses in the range (V13), outside the drawers"}
+    StampProgram:
+      type: object
+      required: [is_active, stamps_required, min_order_amount, stamp_valid_days, reward_product_ids]
+      properties:
+        is_active: {type: boolean}
+        stamps_required: {type: integer, format: int64, minimum: 2, maximum: 50}
+        min_order_amount: {type: integer, format: int64, minimum: 0}
+        stamp_valid_days: {type: integer, format: int64, minimum: 1, maximum: 730}
+        reward_product_ids:
+          type: array
+          maxItems: 100
+          items: {type: string, format: uuid}
+    CustomerStamps:
+      type: object
+      required: [customer, verified, program_active, stamps, stamps_required, reward_ready, reward_product_ids]
+      properties:
+        customer:
+          type: object
+          required: [id, phone, name]
+          properties:
+            id: {type: string, format: uuid}
+            phone: {type: string}
+            name: {type: string}
+            phone_verified_at: {type: string, format: date-time}
+        verified: {type: boolean}
+        program_active: {type: boolean}
+        stamps: {type: integer, format: int64, description: Live stamps (not redeemed or expired and the order not fully refunded)}
+        stamps_required: {type: integer, format: int64}
+        reward_ready: {type: boolean}
+        reward_product_ids:
+          type: array
+          items: {type: string, format: uuid}
+        next_expiry: {type: string, format: date-time}
     SalesChannel:
       type: object
       required: [id, name, commission_bps, is_active, updated_at, prices]
@@ -8379,6 +8476,8 @@ components:
       required: [idempotency_key, customer_name, order_type, items]
       properties:
         sales_channel_id: {type: string, format: uuid, description: "POS only (ignored on public endpoints): prices the order at this active channel without promotions, service charge or tax (X13, X15)"}
+        customer_id: {type: string, format: uuid, description: "POS only: a customer with a verified phone number, for the stamp card (X16)"}
+        reward_item_index: {type: integer, minimum: 0, description: "POS only, needs customer_id: index in items of the product whose one unit is the free stamp card reward (X17)"}
         idempotency_key:
           type: string
           minLength: 1
@@ -9078,6 +9177,8 @@ components:
       required: [order_type, items]
       properties:
         sales_channel_id: {type: string, format: uuid, description: "POS only (ignored on public endpoints): prices the order at this active channel without promotions, service charge or tax (X13, X15)"}
+        customer_id: {type: string, format: uuid, description: "POS only: a customer with a verified phone number, for the stamp card (X16)"}
+        reward_item_index: {type: integer, minimum: 0, description: "POS only, needs customer_id: index in items of the product whose one unit is the free stamp card reward (X17)"}
         order_type:
           type: string
           enum: [dine_in, takeaway, delivery]

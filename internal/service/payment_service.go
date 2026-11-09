@@ -102,6 +102,8 @@ type InitiatePaymentInput struct {
 	DrawerID          *uuid.UUID
 	// ShiftID pins the tender to that shift even when closed; set only by offline sync, never from a request.
 	ShiftID *uuid.UUID
+	// BusinessCustomerID is who owes the order when Method is invoice (X18).
+	BusinessCustomerID *uuid.UUID
 }
 
 type InitiatePaymentResult struct {

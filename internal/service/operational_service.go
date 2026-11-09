@@ -398,6 +398,10 @@ func (s *OperationalService) RefundPayment(
 		if payment.OrderID != order.ID {
 			return postgres.ErrPaymentNotFound
 		}
+		if payment.Method == domain.PaymentMethodInvoice {
+			// shortcut: a wrong charge stays on the account, add an invoice credit note when owners need to correct one.
+			return ErrInvoicedPaymentNotRefundable
+		}
 		if in.IdempotencyKey != "" {
 			var prior int64
 			err := tx.GetContext(ctx, &prior, `SELECT amount FROM payment_refunds WHERE store_id = $1 AND idempotency_key = $2 AND payment_id = $3`,

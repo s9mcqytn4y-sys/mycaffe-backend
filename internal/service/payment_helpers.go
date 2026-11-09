@@ -18,7 +18,7 @@ import (
 
 func isDirectCashierMethod(method domain.PaymentMethod) bool {
 	switch method {
-	case domain.PaymentMethodCash, domain.PaymentMethodStaticQRIS, domain.PaymentMethodEDC, domain.PaymentMethodPlatform:
+	case domain.PaymentMethodCash, domain.PaymentMethodStaticQRIS, domain.PaymentMethodEDC, domain.PaymentMethodPlatform, domain.PaymentMethodInvoice:
 		return true
 	default:
 		return false
@@ -117,6 +117,8 @@ func directCashierAuditDetails(method domain.PaymentMethod, orderNumber, reconci
 		return "STATIC_QRIS_RECONCILE", fmt.Sprintf("Static QRIS manually reconciled for order %s (ref: %s)", orderNumber, reconciliationRef)
 	case domain.PaymentMethodEDC:
 		return "EDC_RECONCILE", fmt.Sprintf("EDC terminal payment reconciled for order %s (ref: %s)", orderNumber, reconciliationRef)
+	case domain.PaymentMethodInvoice:
+		return "INVOICE_CHARGED", fmt.Sprintf("Order %s charged to a business customer", orderNumber)
 	case domain.PaymentMethodPlatform:
 		return "PLATFORM_PAYMENT_RECORDED", fmt.Sprintf("Delivery-app order %s paid by the platform (ref: %s)", orderNumber, reconciliationRef)
 	default:

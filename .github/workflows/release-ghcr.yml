@@ -2,7 +2,7 @@ name: Release - Publish Immutable Container Image to GHCR
 
 on:
   push:
-    branches: [ main, staging ]
+    branches: [ main ]
     tags: [ "v*.*.*" ]
 
 permissions:

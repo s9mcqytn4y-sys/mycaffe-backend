@@ -1,17 +1,18 @@
-# MyCaffe Backend — Project Status (`memory/STATUS.md`)
+# Cassy Backend: Status (`memory/STATUS.md`)
 
-**Last Updated**: 2026-11-06  
-**Active Branch**: `feat/seeder-catalog-webp-agent-setup` (branched from `origin/staging`)  
-**Latest Merged Milestone**: v0.9 Cafe Floor (`#73`–`#77`) + Infra/Cloudflare/Sentry/Modularization (`#65`)
+**Last Updated**: 2026-11-09
+**Branch dasar**: `main` (tidak ada `staging`)
+**Rilis terakhir**: v0.12.1 (`e25e648`), image GHCR tag `0.12.1`, `0.12`, `latest`
+**Keputusan aktif**: [ReAlignment2026-11.md](../docs/Product/ReAlignment2026-11.md), AL1 sampai AL11 di [DecisionRegister](../docs/Architecture/DecisionRegister.md)
 
-## 1. Infrastructure & Integrations Status
-| Subsystem | Tier | Details |
+| Area | Status | Catatan |
 | :--- | :--- | :--- |
-| **PostgreSQL 18 + RLS** | *Implemented & Tested* | 37 migrations (`000001`–`000037`), `mycaffe_migrator` (DDL) + `mycaffe_app` (`NOBYPASSRLS` DML). Verified by `verify_schema_constraints.sql`. |
-| **Midtrans Core API (QRIS/VA/E-Wallet)** | *Implemented & Tested* | 2-phase charge lifecycle (`payments.id.String()` as `provider_order_id` & `Idempotency-Key`), SHA-512 webhook verification, no Snap dependency. Sandbox active for dev/demo; Production keys stored for post-review switch. |
-| **Cloudflare (`abbdullaziz.online`)** | *Implemented & Tested* | Zone `7fa2f37d613b1bb7bc0c3a830c023730`. Named Tunnel `mycaffe-demo` (`https://demo.abbdullaziz.online`), R2 public media bucket `mycaffe-media` (`https://cdn.abbdullaziz.online`), R2 private backup bucket `mycaffe-backups`, Email Routing active. |
-| **Sentry Error & Panic Tracking** | *Implemented & Tested* | `SentryMiddleware` + `BeforeSend` PII scrubbing active (`internal/handler/middleware.go`, `cmd/api/main.go`). |
-| **Email & SMS Outbox** | *Implemented & Tested* | Transactional `email_outbox` (Gmail App Password SMTP) & `message_outbox` (`SMS_DRIVER=email|webhook|noop`, `internal/pkg/sms/sms.go`). |
-| **Cafe Floor v0.9 & Receipt Delivery** | *Implemented & Tested* | Table move/merge/split (`000033`), table timers (`000034`), queue TV display tokens (`000035`), server print queue (`000036`), receipt delivery ledger (`000037`). |
-| **Catalog Seeder & R2 WebP Assets** | *Implemented & Tested* | [`db/seeds/development.sql`](../db/seeds/development.sql) overhauled: 0 pre-seeded orders/transactions, 2 stores (*MyCaffe Flagship Roastery — Senopati* & *MyCaffe Express Grab & Go — Sudirman MRT*), owner `abdulaziz543333@gmail.com`, 38 products across 11 categories, 51 variants, 10 modifier groups, 28 options, 11 tables, 3 cash drawers, and 144 `.webp` assets (`1:1`, `4:3`, `16:9`) live on `https://cdn.abbdullaziz.online/seeds/...`. |
-
+| PostgreSQL 18 + RLS | Implemented & Tested | 56 migrasi, demo sudah di 000056 sejak 2026-11-09 |
+| Midtrans Core API, BYOK per tenant | Implemented & Tested di sandbox | Akun AzureDevID masih review, koreksi Website dan Foto Selfie belum dikirim |
+| Stok, kanal ojol manual, stamp card, invoice B2B, pengingat | Implemented & Tested | Client belum punya layarnya |
+| Batas paket langganan | Planned | Kolom ada, penegakan belum terlihat. Wajib sebelum pilot berbayar |
+| Website publik | Ditunda (AL2) | `abbdullaziz.online` masih parkir. Koreksi "Website" Midtrans tertahan sampai halaman ini hidup |
+| Email produksi | Planned | Pindah ke SES (AL6). Saat ini SMTP Gmail |
+| WhatsApp | Guarded / Fail-Closed | `whatsmeow` ditolak di produksi. Template `tagihan_invoice` butuh persetujuan Meta |
+| Demo | Sebagian | API v0.12.1 sehat dan lolos smoke test login serta endpoint baca. Web client tayang dari `main` client (`1dc89b9`), termasuk perpanjangan token staf. Menu dan quote tamu lolos uji browser, pembayaran dan login browser belum |
+| Klikit | Planned | Sandbox gratis, tunggu toko yang membayar add-on |

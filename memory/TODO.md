@@ -1,14 +1,20 @@
-# MyCaffe Backend — Action Queue (`memory/TODO.md`)
+# Cassy Backend: Antrean (`memory/TODO.md`)
 
-## Active Sprint (`feat/seeder-catalog-webp-agent-setup`)
-- [x] Merge PR #65 (`feat/infra-cloudflare-sentry-clean-code`) to `staging`.
-- [x] Fix Windows 11 `PATH` priority (`Python 3.12`, `uv`, `Blender 5.2.3 LTS`, `agy`, `wrangler`, `defuddle`).
-- [x] Establish Global (`~/.claude/CLAUDE.md`) & Project (`./CLAUDE.md`, `./memory/*`, `.claude/settings.json`, `.mcp.json`) Agent Architecture.
-- [x] Complete 6 Core Auto-Invoked Skills (`vibe-coder-pro`, `blender-roblox-pipeline`, `human-writer-content`, `bizdev-client-hunter`, `netops-cloudflare-docker`, `claude-artifact-builder`) + Tier-2 curated skill sync.
-- [x] Generate `.webp` catalog, variant, addon, logo, and onboarding image assets and upload to Cloudflare R2 (`https://cdn.abbdullaziz.online/seeds/...`).
-- [x] Overhaul `db/seeds/development.sql` (0 transactions, realistic catalog & store onboarding data) and self-seed legacy test fixture in `internal/service/order_service_integration_test.go`.
-- [x] Run `gofmt`, `go vet ./...`, `go test -v -race ./...`, double-run `cmd/migrate -action=seed`, push branch, and open PR to `staging`.
+Urutan dari [ReAlignment2026-11.md](../docs/Product/ReAlignment2026-11.md) bagian 9.
 
-## Upcoming Backlog
-- [ ] Promote `staging` -> `main` once client VPS is provisioned.
-- [ ] Switch `MIDTRANS_IS_PRODUCTION=true` after Midtrans Business Review approval completes.
+## Owner
+- [ ] Cek merek "Cassy" di PDKI (kelas 9 dan 42) sebelum logo dirapikan.
+- [ ] Kirim koreksi Midtrans: website, foto selfie, Payment Flow ShopeePay. Tanyakan arti "Aggregator", MDR 0%, dan akun Partner.
+- [ ] Jelaskan URL `geaniproduction.com/fotoflow` ke Midtrans, atau minta diganti.
+- [ ] Buat akun AWS, login browser.
+- [ ] Periksa Surat Pelimpahan Dana. Konsultasi DPA dan PP 33/2026 sebelum pilot.
+
+## Engineering
+- [ ] PR 1: dokumen dan agentic (sedang berjalan).
+- [x] Deploy v0.12.1 ke demo, migrasi 000053 sampai 000056, smoke test API (2026-11-09).
+- [ ] PR 2: web client di demo (image, compose, nginx), retry migrate saat start, rotasi WHATSAPP_BRIDGE_TOKEN demo, uji Android.
+- [ ] PR 4: golangci-lint, ESLint + jsx-a11y, next-intl, axe, path filter CI.
+- [ ] PR 5: penegakan batas paket, driver SES, rotasi key per tenant, batas kredit, credit note.
+- [ ] PR 6: rename repo, image GHCR, `deploy/`. Folder paling akhir.
+- [ ] Layar client v0.11 dan v0.12, lalu pilot 3 sampai 5 kafe.
+- [ ] Ditunda (AL2): landing page dan materi jualan di `abbdullaziz.online`.

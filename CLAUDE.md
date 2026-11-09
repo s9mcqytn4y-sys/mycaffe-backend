@@ -1,6 +1,6 @@
-# MyCaffe Backend — Project Instructions (`CLAUDE.md`)
+# Cassy Backend: Project Instructions (`CLAUDE.md`)
 
-> Lihat [`AGENTS.md`](AGENTS.md) dan [`GEMINI.md`](GEMINI.md) untuk kontrak lengkap produk, serta direktori [`memory/`](memory/) untuk status sesi terkini (`STATUS.md`, `TODO.md`, `DECISIONS.md`, `TOOLCHAIN_CATALOG.md`).
+> Lihat [`AGENTS.md`](AGENTS.md) dan [`GEMINI.md`](GEMINI.md) untuk kontrak lengkap produk, serta direktori [`docs/Product/ReAlignment2026-11.md`](docs/Product/ReAlignment2026-11.md) untuk keputusan re-alignment, serta [`memory/`](memory/) untuk status sesi terkini (`STATUS.md`, `TODO.md`, `DECISIONS.md`, `TOOLCHAIN_CATALOG.md`).
 
 ## 1. Peran Repository & Stack Inti
 - **Repo**: `mycaffe-backend` (Modular Monolith Go 1.25+ / Gin Gonic / `sqlx` / `pgx/v5` / PostgreSQL 18 RLS / Cloudflare R2 / Midtrans Core API / Sentry).
@@ -14,7 +14,7 @@
 1. **Multi-Tenant RLS**: Setiap query/mutasi wajib berjalan di dalam `database.WithTenantTx(ctx, db, storeID, ...)` menggunakan role `mycaffe_app` (`NOBYPASSRLS`). Hanya fungsi `SECURITY DEFINER` resmi (`resolve_payment_webhook_context`, `resolve_store_for_login`, `resolve_table_qr`, `track_order_by_token`, `list_stores_with_*`) yang boleh dipanggil sebelum `WithTenantTx`.
 2. **Whole Integer IDR (`int64` / `BIGINT`)**: Dilarang menggunakan `float` untuk nominal uang. Kalkulasi harga produk, varian, modifier, 1-level sub-addon, diskon, pajak (`tax_bps`), dan service charge (`service_bps`) wajib dihitung ulang di server.
 3. **2-Phase Midtrans Core API (No Snap)**: Gunakan `payments.id.String()` sebagai `provider_order_id` sekaligus `Idempotency-Key`. Jangan pernah menahan lock transaksi DB saat melakukan panggilan HTTP eksternal ke Midtrans.
-4. **Immutability Migrasi**: Jangan pernah mengubah file migrasi yang sudah di-merge ke `staging`/`main` karena `cmd/migrate` memverifikasi checksum SHA-256 di `schema_migrations`. Selalu buat migrasi aditif baru.
+4. **Immutability Migrasi**: Jangan pernah mengubah file migrasi yang sudah di-merge ke `main` karena `cmd/migrate` memverifikasi checksum SHA-256 di `schema_migrations`. Selalu buat migrasi aditif baru.
 
 ## 3. Perintah Verifikasi Kualitas (Wajib Sebelum Commit/PR)
 ```powershell

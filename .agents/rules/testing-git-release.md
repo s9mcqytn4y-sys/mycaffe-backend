@@ -5,7 +5,7 @@ description: "Aktif saat menambah test, melakukan review, commit, membuat releas
 
 # Testing, Git, and release rules
 
-- Follow the repository's actual branch and CI policy. The intended flow is feature branch -> staging/demo -> reviewed production release; do not assume branch names exist before checking Git.
+- Follow the repository's actual branch and CI policy. The flow is short-lived branch -> PR to `main` -> demo -> owner-approved `v*` tag for production; do not assume branch names exist before checking Git.
 - Before editing, inspect `git status` and preserve unrelated user changes.
 - Never use destructive Git commands such as `reset --hard`, force push, or branch deletion unless the owner explicitly approves.
 - Run focused tests first, then the relevant broader test/build checks. Report commands and results accurately.

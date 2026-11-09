@@ -98,6 +98,7 @@ func wireHandlers(workerCtx context.Context, cfg *config.Config, db *sqlx.DB, hu
 		orderRepo,
 		midtransClient,
 		service.WithStoreGatewayResolver(governanceService.ResolveStoreGatewayClientTx),
+		service.WithTenantGatewayRequired(cfg.AppEnv == "production"),
 	)
 	h.offline = handler.NewOfflineHandler(service.NewOfflineSyncService(db, orderService, paymentService))
 	if cfg.PlatformMidtransServerKey != "" {
@@ -195,6 +196,10 @@ func registerRoutes(router *gin.Engine, h *handlerSet) {
 	router.GET("/health", h.health.Check)
 	router.GET("/health/live", h.health.Liveness)
 	router.GET("/health/ready", h.health.Check)
+	// Uptime monitors commonly probe with HEAD, which Gin does not derive from GET.
+	router.HEAD("/health", h.health.Check)
+	router.HEAD("/health/live", h.health.Liveness)
+	router.HEAD("/health/ready", h.health.Check)
 
 	// WebSocket (iteration 5c): single-use 30 s ticket from POST /api/v1/pos/ws-ticket or
 	// /api/v1/public/guest/ws-ticket; replay with last_seq.

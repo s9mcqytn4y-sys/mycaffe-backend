@@ -303,6 +303,12 @@ func TestGuestQROrderingIteration5bIntegration(t *testing.T) {
 		if res := call("POST", url, req{cookie: deviceB, csrf: true}, map[string]any{"idempotency_key": "pay-1"}); res.Code != http.StatusNotFound {
 			t.Fatalf("another device must not pay this order, got %d: %s", res.Code, res.Body.String())
 		}
+		strict := service.NewPaymentService(db, postgres.NewPaymentRepository(), orderRepo, qrisGateway{},
+			service.WithStoreGatewayResolver(func(context.Context, *sqlx.Tx, uuid.UUID) (service.GatewayClient, error) { return nil, nil }),
+			service.WithTenantGatewayRequired(true))
+		if _, err := strict.InitiatePayment(ctx, centralID, service.InitiatePaymentInput{OrderID: uuid.MustParse(fmt.Sprint(orderA1)), IdempotencyKey: "strict-1", Method: domain.PaymentMethodQRIS}); !errors.Is(err, service.ErrPaymentMethodNotEnabled) {
+			t.Fatalf("a store without its own key must not charge through the platform account, got %v", err)
+		}
 		res := call("POST", url, req{cookie: deviceA, csrf: true}, map[string]any{"idempotency_key": "pay-1"})
 		if res.Code != http.StatusOK {
 			t.Fatalf("QRIS payment failed: %d: %s", res.Code, res.Body.String())

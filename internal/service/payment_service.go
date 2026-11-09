@@ -76,6 +76,14 @@ func WithStoreGatewayResolver(fn StoreGatewayResolver) PaymentServiceOption {
 	}
 }
 
+// WithTenantGatewayRequired refuses gateway charges for a store without its own Midtrans key, so
+// guest money never settles to the platform account (ADR-009).
+func WithTenantGatewayRequired(required bool) PaymentServiceOption {
+	return func(s *PaymentService) {
+		s.tenantGatewayRequired = required
+	}
+}
+
 func normalizeGatewayClient(client GatewayClient) GatewayClient {
 	if client == nil {
 		return nil
@@ -133,13 +141,14 @@ type PaymentWebhookResult struct {
 }
 
 type PaymentService struct {
-	db                   *sqlx.DB
-	paymentRepo          *postgres.PaymentRepository
-	orderRepo            *postgres.OrderRepository
-	shiftRepo            *postgres.ShiftRepository
-	midtransClient       GatewayClient
-	storeGatewayResolver StoreGatewayResolver
-	nowFunc              func() time.Time
+	db                    *sqlx.DB
+	paymentRepo           *postgres.PaymentRepository
+	orderRepo             *postgres.OrderRepository
+	shiftRepo             *postgres.ShiftRepository
+	midtransClient        GatewayClient
+	storeGatewayResolver  StoreGatewayResolver
+	tenantGatewayRequired bool
+	nowFunc               func() time.Time
 }
 
 func (s *PaymentService) SetStoreGatewayResolver(fn StoreGatewayResolver) {

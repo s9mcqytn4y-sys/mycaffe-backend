@@ -41,6 +41,7 @@ type handlerSet struct {
 	print      *handler.PrintHandler
 	device     *handler.DeviceHandler
 	inventory  *handler.InventoryHandler
+	invoice    *handler.InvoiceHandler
 	offline    *handler.OfflineHandler
 	receiptOut *handler.ReceiptDeliveryHandler
 	media      *handler.MediaHandler
@@ -123,6 +124,7 @@ func wireHandlers(workerCtx context.Context, cfg *config.Config, db *sqlx.DB, hu
 	catalogService := service.NewCatalogService(db)
 	h.catalog = handler.NewCatalogHandler(catalogService)
 	h.inventory = handler.NewInventoryHandler(service.NewInventoryService(db))
+	h.invoice = handler.NewInvoiceHandler(service.NewInvoiceService(db))
 	h.device = handler.NewDeviceHandler(service.NewDeviceService(db, catalogService))
 
 	shiftService := service.NewShiftService(db)
@@ -240,6 +242,7 @@ func registerStoreAndPOSRoutes(v1 *gin.RouterGroup, h *handlerSet) {
 	pos.POST("/orders", h.auth.RequirePermission(rbac.OrderPOSCreate), h.pos.CreateOrder)
 	pos.POST("/orders/quote", h.auth.RequirePermission(rbac.OrderPOSCreate), h.pos.QuoteOrder)
 	pos.GET("/sales-channels", h.auth.RequirePermission(rbac.OrderPOSCreate), h.catalog.ListSalesChannels(true))
+	pos.GET("/business-customers", h.auth.RequirePermission(rbac.PaymentTenderDirect), h.invoice.ListChargeableCustomers)
 	pos.POST("/orders/:id/payments", h.auth.RequireStaff(), h.pos.InitiatePayment)
 	pos.GET("/catalog", h.auth.RequireStaff(), h.catalog.StaffCatalog)
 
@@ -319,6 +322,18 @@ func registerStoreAndPOSRoutes(v1 *gin.RouterGroup, h *handlerSet) {
 	v1.POST("/public/queue/ws-ticket", h.display.IssueTicket)
 
 	// Owner reports (B2): read-only, business day in the store time zone, JSON or CSV.
+	// B2B invoices (v0.11.1 PR 11.9, X18): charged orders billed on invoices paid in instalments.
+	invoices := v1.Group("/invoices", h.auth.RequirePermission(rbac.InvoiceManage))
+	invoices.GET("/customers", h.invoice.ListBusinessCustomers)
+	invoices.POST("/customers", h.invoice.CreateBusinessCustomer)
+	invoices.PATCH("/customers/:id", h.invoice.UpdateBusinessCustomer)
+	invoices.GET("/uninvoiced-orders", h.invoice.ListUninvoicedOrders)
+	invoices.GET("", h.invoice.ListInvoices)
+	invoices.POST("", h.invoice.CreateInvoice)
+	invoices.GET("/:id", h.invoice.GetInvoice)
+	invoices.GET("/:id/pdf", h.invoice.InvoicePDF)
+	invoices.POST("/:id/payments", h.invoice.PayInvoice)
+
 	reports := v1.Group("/reports", h.auth.RequirePermission(rbac.ReportFinanceRead))
 	reports.GET("/sales", h.report.Sales)
 	reports.GET("/summary", h.report.Summary)

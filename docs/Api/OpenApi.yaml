@@ -1964,6 +1964,250 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
         "422": {$ref: "#/components/responses/ValidationFailed"}
+  /api/v1/invoices/customers:
+    get:
+      tags: [Invoices]
+      operationId: listBusinessCustomers
+      summary: Business customers with contacts (invoice.manage, X18)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: Customers, active first
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  customers:
+                    type: array
+                    items: {$ref: "#/components/schemas/BusinessCustomer"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    post:
+      tags: [Invoices]
+      operationId: createBusinessCustomer
+      summary: Create a business customer (invoice.manage, audited, X18)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/BusinessCustomerInput"}
+      responses:
+        "201":
+          description: The customer
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/BusinessCustomer"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409":
+          description: The name is already used in this store
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "422": {$ref: "#/components/responses/ValidationFailed"}
+  /api/v1/invoices/customers/{id}:
+    patch:
+      tags: [Invoices]
+      operationId: updateBusinessCustomer
+      summary: Change or deactivate a business customer (invoice.manage, audited)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/BusinessCustomerInput"}
+      responses:
+        "200":
+          description: The customer
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/BusinessCustomer"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409":
+          description: The name is already used in this store
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "422": {$ref: "#/components/responses/ValidationFailed"}
+  /api/v1/invoices/uninvoiced-orders:
+    get:
+      tags: [Invoices]
+      operationId: listUninvoicedOrders
+      summary: Orders charged to accounts and not billed yet (invoice.manage)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - {name: business_customer_id, in: query, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: Up to 500 orders, oldest first
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  orders:
+                    type: array
+                    items: {$ref: "#/components/schemas/InvoiceOrder"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "422": {$ref: "#/components/responses/ValidationFailed"}
+  /api/v1/invoices:
+    get:
+      tags: [Invoices]
+      operationId: listInvoices
+      summary: Invoices, open ones by due date first (invoice.manage)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - {name: status, in: query, schema: {type: string, enum: [open, paid]}}
+      responses:
+        "200":
+          description: Up to 200 invoices, without their orders and payments
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  invoices:
+                    type: array
+                    items: {$ref: "#/components/schemas/Invoice"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "422": {$ref: "#/components/responses/ValidationFailed"}
+    post:
+      tags: [Invoices]
+      operationId: createInvoice
+      summary: Bill charged orders of one business customer (invoice.manage, audited, X18)
+      description: The due date is the issue date in the store time zone plus the payment terms of the customer.
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [business_customer_id, order_ids]
+              properties:
+                business_customer_id: {type: string, format: uuid}
+                order_ids:
+                  type: array
+                  minItems: 1
+                  maxItems: 200
+                  items: {type: string, format: uuid}
+                note: {type: string, maxLength: 500}
+      responses:
+        "201":
+          description: The invoice
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Invoice"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409":
+          description: Invoice number race, retry
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "422": {$ref: "#/components/responses/ValidationFailed"}
+  /api/v1/invoices/{id}:
+    get:
+      tags: [Invoices]
+      operationId: getInvoice
+      summary: One invoice with its orders and payments (invoice.manage)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: The invoice
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Invoice"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /api/v1/invoices/{id}/pdf:
+    get:
+      tags: [Invoices]
+      operationId: getInvoicePdf
+      summary: Download the invoice as PDF (invoice.manage)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: The PDF
+          content:
+            application/pdf:
+              schema: {type: string, format: binary}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /api/v1/invoices/{id}/payments:
+    post:
+      tags: [Invoices]
+      operationId: payInvoice
+      summary: Record an instalment or the rest of an invoice (invoice.manage, audited, X18)
+      description: Payments are append-only and are records only; they do not move the cash drawer or the outlet fund.
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount, method]
+              properties:
+                amount: {type: integer, format: int64, minimum: 1, description: At most what is still owed}
+                method: {type: string, enum: [transfer, cash, qris]}
+                reference: {type: string, maxLength: 100}
+                note: {type: string, maxLength: 500}
+      responses:
+        "201":
+          description: The invoice after the payment
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Invoice"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "422": {$ref: "#/components/responses/ValidationFailed"}
+  /api/v1/pos/business-customers:
+    get:
+      tags: [Orders]
+      operationId: listPosBusinessCustomers
+      summary: Active business customers for the charge-to-account picker, without contacts (payment.tender.direct)
+      x-implementation-status: implemented
+      security:
+        - BearerStaffJWT: []
+      responses:
+        "200":
+          description: Active customers
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  customers:
+                    type: array
+                    items: {$ref: "#/components/schemas/BusinessCustomer"}
+        "403": {$ref: "#/components/responses/Forbidden"}
   /api/v1/pos/sales-channels:
     get:
       tags: [Orders]
@@ -8167,6 +8411,65 @@ components:
           type: array
           items: {type: string, format: uuid}
         next_expiry: {type: string, format: date-time}
+    BusinessCustomer:
+      type: object
+      required: [id, name, payment_terms_days, is_active]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        tax_id: {type: string}
+        email: {type: string}
+        phone: {type: string}
+        payment_terms_days: {type: integer, format: int64}
+        is_active: {type: boolean}
+    BusinessCustomerInput:
+      type: object
+      properties:
+        name: {type: string, minLength: 1, maxLength: 100}
+        tax_id: {type: string, maxLength: 30}
+        email: {type: string, maxLength: 200}
+        phone: {type: string}
+        payment_terms_days: {type: integer, format: int64, minimum: 0, maximum: 120}
+        is_active: {type: boolean}
+    InvoiceOrder:
+      type: object
+      required: [id, order_number, total_amount, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        order_number: {type: string}
+        total_amount: {type: integer, format: int64}
+        created_at: {type: string, format: date-time}
+    Invoice:
+      type: object
+      required: [id, number, business_customer_id, customer_name, tax_id, total_amount, paid_amount, remaining, due_date, overdue, note, issued_at]
+      properties:
+        id: {type: string, format: uuid}
+        number: {type: integer}
+        business_customer_id: {type: string, format: uuid}
+        customer_name: {type: string}
+        tax_id: {type: string}
+        total_amount: {type: integer, format: int64}
+        paid_amount: {type: integer, format: int64}
+        remaining: {type: integer, format: int64}
+        due_date: {type: string, format: date}
+        overdue: {type: boolean}
+        note: {type: string}
+        issued_at: {type: string, format: date-time}
+        orders:
+          type: array
+          items: {$ref: "#/components/schemas/InvoiceOrder"}
+        payments:
+          type: array
+          items:
+            type: object
+            required: [id, amount, method, reference, note, paid_at]
+            properties:
+              id: {type: string, format: uuid}
+              amount: {type: integer, format: int64}
+              method: {type: string, enum: [transfer, cash, qris]}
+              reference: {type: string}
+              note: {type: string}
+              paid_at: {type: string, format: date-time}
     SalesChannel:
       type: object
       required: [id, name, commission_bps, is_active, updated_at, prices]
@@ -8397,7 +8700,7 @@ components:
 
     PaymentMethod:
       type: string
-      enum: [qris, gopay, shopeepay, bank_transfer, cash, static_qris, edc, platform]
+      enum: [qris, gopay, shopeepay, bank_transfer, cash, static_qris, edc, platform, invoice]
       description: platform pays delivery-app channel orders only and needs reconciliation_ref (the platform order number, X14)
 
     PaymentStatus:

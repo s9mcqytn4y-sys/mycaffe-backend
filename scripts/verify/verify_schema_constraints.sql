@@ -391,6 +391,17 @@ BEGIN
     IF has_table_privilege('mycaffe_app', 'public.customer_stamps', 'DELETE') THEN
         RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may delete customer stamps!';
     END IF;
+    -- 10F-29. Invoices (migration 000055): RLS on; payments are append-only, invoices are never deleted.
+    IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.business_customers'::regclass)
+       OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.invoices'::regclass)
+       OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.invoice_payments'::regclass) THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: invoice tables do not have row-level security enabled!';
+    END IF;
+    IF has_table_privilege('mycaffe_app', 'public.invoice_payments', 'UPDATE')
+       OR has_table_privilege('mycaffe_app', 'public.invoice_payments', 'DELETE')
+       OR has_table_privilege('mycaffe_app', 'public.invoices', 'DELETE') THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may rewrite invoice payments or delete invoices!';
+    END IF;
     -- 10F-24. Purchasing (migration 000046): RLS on; receipts are append-only (stock and cost already moved).
     IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.suppliers'::regclass)
        OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.purchase_orders'::regclass)

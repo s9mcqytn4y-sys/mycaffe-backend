@@ -13,7 +13,7 @@ import (
 var ErrUnsupportedPaperWidth = printfmt.ErrUnsupportedPaperWidth
 
 var paymentMethodLabels = map[string]string{
-	"cash": "Tunai", "qris": "QRIS", "static_qris": "QRIS Statis", "edc": "EDC", "platform": "Platform", "gopay": "GoPay",
+	"cash": "Tunai", "qris": "QRIS", "static_qris": "QRIS Statis", "edc": "EDC", "platform": "Platform", "invoice": "Tagihan", "gopay": "GoPay",
 	"shopeepay": "ShopeePay", "bank_transfer": "Transfer Bank",
 }
 

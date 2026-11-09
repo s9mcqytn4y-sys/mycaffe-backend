@@ -104,7 +104,7 @@ func (s *PaymentService) directCashierPaymentTx(ctx context.Context, tx *sqlx.Tx
 		if !store.IsActive || store.DeletedAt != nil {
 			return ErrStoreInactive
 		}
-		if input.Method != domain.PaymentMethodPlatform && !isPaymentMethodEnabled(store.EnabledPaymentMethods, input.Method) {
+		if input.Method != domain.PaymentMethodPlatform && input.Method != domain.PaymentMethodInvoice && !isPaymentMethodEnabled(store.EnabledPaymentMethods, input.Method) {
 			return fmt.Errorf("%w: %s", ErrPaymentMethodNotEnabled, input.Method)
 		}
 
@@ -223,6 +223,12 @@ func (s *PaymentService) directCashierPaymentTx(ctx context.Context, tx *sqlx.Tx
 		attemptNo, err := s.paymentRepo.NextAttemptNumberForSplit(ctx, tx, trustedStoreID, split.ID)
 		if err != nil {
 			return err
+		}
+
+		if input.Method == domain.PaymentMethodInvoice {
+			if err := chargeToAccountTx(ctx, tx, trustedStoreID, order, input.BusinessCustomerID, partial); err != nil {
+				return err
+			}
 		}
 
 		var cashTendered, changeGiven, rounding int64
@@ -395,7 +401,7 @@ func (s *PaymentService) initiateMidtransGatewayPayment(
 		if !store.IsActive || store.DeletedAt != nil {
 			return ErrStoreInactive
 		}
-		if input.Method != domain.PaymentMethodPlatform && !isPaymentMethodEnabled(store.EnabledPaymentMethods, input.Method) {
+		if input.Method != domain.PaymentMethodPlatform && input.Method != domain.PaymentMethodInvoice && !isPaymentMethodEnabled(store.EnabledPaymentMethods, input.Method) {
 			return fmt.Errorf("%w: %s", ErrPaymentMethodNotEnabled, input.Method)
 		}
 		if s.storeGatewayResolver != nil {

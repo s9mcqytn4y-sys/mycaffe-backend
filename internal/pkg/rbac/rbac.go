@@ -56,6 +56,8 @@ const (
 	InventoryManage Permission = "inventory.manage"
 	// InventoryCount: stock counts and waste (cashier, barista, kitchen; X8, PR 11.6).
 	InventoryCount Permission = "inventory.count"
+	// InvoiceManage: business customers, invoices and their payments (owner, X18).
+	InvoiceManage Permission = "invoice.manage"
 )
 
 // Options are per-store settings that widen a role (owner decision C3).
@@ -71,7 +73,7 @@ var all = []Permission{
 	OrderVoid, PaymentRefund, OrderDiscountApply, StockOverride,
 	KDSBaristaRead, KDSBaristaUpdate, KDSKitchenRead, KDSKitchenUpdate,
 	AvailabilityToggleBeverage, AvailabilityToggleFood, TableManage, TableQRManage, ApprovalDecide, DeviceManage,
-	InventoryManage, InventoryCount,
+	InventoryManage, InventoryCount, InvoiceManage,
 }
 
 var cashierBase = []Permission{

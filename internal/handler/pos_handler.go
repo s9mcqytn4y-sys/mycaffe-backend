@@ -193,6 +193,7 @@ type POSInitiatePaymentRequest struct {
 	ReconciliationRef  string               `json:"reconciliation_ref,omitempty" binding:"max=100"`
 	CallbackURL        string               `json:"callback_url,omitempty" binding:"max=500"`
 	DrawerID           *uuid.UUID           `json:"drawer_id,omitempty"`
+	BusinessCustomerID *uuid.UUID           `json:"business_customer_id,omitempty"`
 }
 
 // InitiatePayment handles POST /api/v1/pos/orders/:id/payments. Direct tender (cash, static QRIS,
@@ -211,7 +212,7 @@ func (h *POSHandler) InitiatePayment(c *gin.Context) {
 	actor := currentStaff(c)
 	needed := rbac.PaymentInitiateGateway
 	switch req.Method {
-	case domain.PaymentMethodCash, domain.PaymentMethodStaticQRIS, domain.PaymentMethodEDC, domain.PaymentMethodPlatform:
+	case domain.PaymentMethodCash, domain.PaymentMethodStaticQRIS, domain.PaymentMethodEDC, domain.PaymentMethodPlatform, domain.PaymentMethodInvoice:
 		needed = rbac.PaymentTenderDirect
 	}
 	if !actor.Can(needed) {
@@ -222,8 +223,8 @@ func (h *POSHandler) InitiatePayment(c *gin.Context) {
 	res, err := h.payments.InitiatePayment(c.Request.Context(), actor.Staff.Store.ID, service.InitiatePaymentInput{
 		OrderID: orderID, SplitID: req.SplitID, IdempotencyKey: req.IdempotencyKey, Method: req.Method, Bank: req.Bank,
 		CashTenderedAmount: req.CashTenderedAmount, Amount: req.Amount, ReconciliationRef: req.ReconciliationRef, CallbackURL: req.CallbackURL,
-		ActorUserID: &actorID,
-		DrawerID:    req.DrawerID,
+		ActorUserID: &actorID, BusinessCustomerID: req.BusinessCustomerID,
+		DrawerID: req.DrawerID,
 	})
 	if err != nil {
 		paymentError(c, err)
@@ -482,6 +483,8 @@ func writeOperationalError(c *gin.Context, err error) {
 			"code":  "ORDER_ALREADY_CANCELLED",
 			"error": "Pesanan sudah dalam status dibatalkan.",
 		})
+	case errors.Is(err, service.ErrInvoicedPaymentNotRefundable):
+		authError(c, http.StatusConflict, "INVOICED_ORDER_NOT_REFUNDABLE", "Pesanan yang ditagihkan ke akun tidak bisa direfund.")
 	case errors.Is(err, service.ErrPaymentAlreadyRefunded):
 		c.JSON(http.StatusConflict, gin.H{
 			"code":  "PAYMENT_ALREADY_REFUNDED",

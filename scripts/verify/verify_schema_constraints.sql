@@ -383,6 +383,14 @@ BEGIN
     IF has_table_privilege('mycaffe_app', 'public.sales_channels', 'DELETE') THEN
         RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may delete sales channels!';
     END IF;
+    -- 10F-28. Stamp card (migration 000050): RLS on; stamps are only marked redeemed, never deleted.
+    IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.stamp_programs'::regclass)
+       OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.customer_stamps'::regclass) THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: stamp card tables do not have row-level security enabled!';
+    END IF;
+    IF has_table_privilege('mycaffe_app', 'public.customer_stamps', 'DELETE') THEN
+        RAISE EXCEPTION 'SECURITY FAILURE: mycaffe_app may delete customer stamps!';
+    END IF;
     -- 10F-24. Purchasing (migration 000046): RLS on; receipts are append-only (stock and cost already moved).
     IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.suppliers'::regclass)
        OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.purchase_orders'::regclass)

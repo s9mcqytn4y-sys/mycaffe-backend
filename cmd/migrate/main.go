@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jmoiron/sqlx"
 	"github.com/s9mcqytn4y-sys/cassy-backend/internal/config"
 	"github.com/s9mcqytn4y-sys/cassy-backend/internal/pkg/database"
 	"github.com/s9mcqytn4y-sys/cassy-backend/internal/service"
@@ -42,7 +43,7 @@ func main() {
 	migCfg := *cfg
 	migCfg.DatabaseURL = dsn
 
-	db, err := database.NewPostgresDB(&migCfg)
+	db, err := retryConnect(func() (*sqlx.DB, error) { return database.NewPostgresDB(&migCfg) }, connectAttempts, connectWait, time.Sleep)
 	if err != nil {
 		log.Fatalf("[MIGRATE FATAL] Database connection failed: %v", err)
 	}

@@ -279,6 +279,8 @@ type PublicTable struct {
 	Label        string `json:"label"`
 	OrderingOpen bool   `json:"ordering_open"`
 	ClosedReason string `json:"closed_reason,omitempty"`
+	// PaymentMethods lists the guest methods (qris, gopay, shopeepay) this store has enabled, in that order.
+	PaymentMethods []string `json:"payment_methods"`
 }
 
 // ResolveQR maps a scanned token to its table. Unknown tokens and archived tables or stores are
@@ -314,7 +316,12 @@ func (s *TableService) ResolveQR(ctx context.Context, token string) (*PublicTabl
 			return err
 		}
 		out = &PublicTable{StoreName: store.Name, StoreSlug: store.Slug, TableNumber: t.TableNumber, Label: t.Label,
-			OrderingOpen: reason == "", ClosedReason: reason}
+			OrderingOpen: reason == "", ClosedReason: reason, PaymentMethods: []string{}}
+		for _, m := range []domain.PaymentMethod{domain.PaymentMethodQRIS, domain.PaymentMethodGoPay, domain.PaymentMethodShopeePay} {
+			if isPaymentMethodEnabled(store.EnabledPaymentMethods, m) {
+				out.PaymentMethods = append(out.PaymentMethods, string(m))
+			}
+		}
 		return nil
 	})
 	if err != nil {

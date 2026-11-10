@@ -180,13 +180,15 @@ func (h *GuestHandler) InitiatePayment(c *gin.Context) {
 	if !ok {
 		return
 	}
+	// Any callback_url in the body is ignored on purpose: the return link is built from the guest's own table.
 	var req struct {
 		IdempotencyKey string `json:"idempotency_key"`
+		Method         string `json:"method"`
 	}
 	if !bindJSON(c, &req) {
 		return
 	}
-	res, err := h.guests.InitiatePayment(c.Request.Context(), currentGuest(c), orderID, req.IdempotencyKey)
+	res, err := h.guests.InitiatePayment(c.Request.Context(), currentGuest(c), orderID, req.IdempotencyKey, req.Method)
 	if err != nil {
 		writeGuestPaymentError(c, err)
 		return

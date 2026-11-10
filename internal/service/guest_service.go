@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -66,6 +67,8 @@ type GuestService struct {
 	orders   *OrderService
 	payments *PaymentService
 	nowFunc  func() time.Time
+	// publicURL is the WPA origin; empty leaves e-wallet charges without a return link.
+	publicURL string
 }
 
 func NewGuestService(db *sqlx.DB, orders *OrderService, payments *PaymentService) *GuestService {
@@ -310,13 +313,32 @@ func (s *GuestService) ListOrders(ctx context.Context, g *GuestIdentity) ([]post
 	return out, err
 }
 
-// InitiatePayment charges one of the guest's own orders through dynamic QRIS (Midtrans) only.
-func (s *GuestService) InitiatePayment(ctx context.Context, g *GuestIdentity, orderID uuid.UUID, idempotencyKey string) (*InitiatePaymentResult, error) {
+// guestPaymentMethods are the gateway methods a guest may pick; the store must also have enabled them.
+var guestPaymentMethods = map[string]domain.PaymentMethod{
+	"":          domain.PaymentMethodQRIS,
+	"qris":      domain.PaymentMethodQRIS,
+	"gopay":     domain.PaymentMethodGoPay,
+	"shopeepay": domain.PaymentMethodShopeePay,
+}
+
+// SetPublicURL sets the WPA origin that e-wallet apps return the guest to after paying.
+func (s *GuestService) SetPublicURL(publicURL string) {
+	s.publicURL = strings.TrimRight(publicURL, "/")
+}
+
+// InitiatePayment charges one of the guest's own orders through QRIS, GoPay or ShopeePay (Midtrans).
+// The e-wallet return URL is built here from the guest's own table, never taken from the request.
+func (s *GuestService) InitiatePayment(ctx context.Context, g *GuestIdentity, orderID uuid.UUID, idempotencyKey, method string) (*InitiatePaymentResult, error) {
 	f := fieldErrors{}
 	key := f.text("idempotency_key", idempotencyKey, 1, maxGuestIdempotentKey)
+	chosen, known := guestPaymentMethods[strings.ToLower(strings.TrimSpace(method))]
+	if !known {
+		f.add("method", "harus qris, gopay, atau shopeepay")
+	}
 	if err := f.err(); err != nil {
 		return nil, err
 	}
+	var qrToken string
 	err := database.WithTenantTx(ctx, s.db, g.StoreID, func(tx *sqlx.Tx) error {
 		owner, err := s.repo.OrderGuestSession(ctx, tx, g.StoreID, orderID)
 		if err != nil {
@@ -325,7 +347,10 @@ func (s *GuestService) InitiatePayment(ctx context.Context, g *GuestIdentity, or
 		if owner == nil || *owner != g.SessionID {
 			return ErrGuestOrderNotFound
 		}
-		return nil
+		if chosen == domain.PaymentMethodQRIS {
+			return nil
+		}
+		return tx.GetContext(ctx, &qrToken, `SELECT qr_token FROM tables WHERE store_id = $1 AND id = $2`, g.StoreID, g.TableID)
 	})
 	if errors.Is(err, postgres.ErrOrderNotFound) {
 		return nil, ErrGuestOrderNotFound
@@ -333,11 +358,15 @@ func (s *GuestService) InitiatePayment(ctx context.Context, g *GuestIdentity, or
 	if err != nil {
 		return nil, err
 	}
-	return s.payments.InitiatePayment(ctx, g.StoreID, InitiatePaymentInput{
+	input := InitiatePaymentInput{
 		OrderID:        orderID,
 		IdempotencyKey: "g:" + g.SessionID.String() + ":" + key,
-		Method:         domain.PaymentMethodQRIS,
-	})
+		Method:         chosen,
+	}
+	if qrToken != "" && s.publicURL != "" {
+		input.CallbackURL = s.publicURL + "/order/" + url.PathEscape(qrToken)
+	}
+	return s.payments.InitiatePayment(ctx, g.StoreID, input)
 }
 
 // Track resolves a public tracker token (decision QR6).

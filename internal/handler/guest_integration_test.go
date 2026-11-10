@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -27,15 +28,34 @@ import (
 	"github.com/s9mcqytn4y-sys/cassy-backend/internal/service"
 )
 
-// qrisGateway answers every charge with a pending dynamic QRIS, like the Midtrans sandbox.
+// qrisGateway answers every charge with a pending payment, like the Midtrans sandbox: a dynamic QRIS,
+// plus a deeplink for e-wallets. It keeps the last charge so tests can read what was sent.
 type qrisGateway struct{}
 
+var (
+	chargeMu   sync.Mutex
+	lastCharge midtrans.ChargeRequest
+)
+
+func lastGuestCharge() midtrans.ChargeRequest {
+	chargeMu.Lock()
+	defer chargeMu.Unlock()
+	return lastCharge
+}
+
 func (qrisGateway) ChargeCoreAPI(_ context.Context, in midtrans.ChargeRequest) (*coreapi.ChargeResponse, error) {
-	return &coreapi.ChargeResponse{
+	chargeMu.Lock()
+	lastCharge = in
+	chargeMu.Unlock()
+	res := &coreapi.ChargeResponse{
 		StatusCode: "201", TransactionID: "tx-" + in.OrderID, OrderID: in.OrderID,
 		GrossAmount: fmt.Sprintf("%d.00", in.Amount), PaymentType: string(in.Method), TransactionStatus: "pending",
 		FraudStatus: "accept", QRString: "00020101021226610014COM.GO-JEK.WWW" + in.OrderID,
-	}, nil
+	}
+	if in.Method == domain.PaymentMethodGoPay || in.Method == domain.PaymentMethodShopeePay {
+		res.Actions = []coreapi.Action{{Name: "deeplink-redirect", Method: "GET", URL: "https://simulator.sandbox.midtrans.com/pay/" + in.OrderID}}
+	}
+	return res, nil
 }
 
 func (qrisGateway) DirectRefund(context.Context, string, string, int64, string) (*coreapi.RefundResponse, error) {
@@ -72,7 +92,9 @@ func TestGuestQROrderingIteration5bIntegration(t *testing.T) {
 	orderRepo := postgres.NewOrderRepository()
 	orderSvc := service.NewOrderService(db, orderRepo)
 	paymentSvc := service.NewPaymentService(db, postgres.NewPaymentRepository(), orderRepo, qrisGateway{})
-	gh := handler.NewGuestHandler(service.NewGuestService(db, orderSvc, paymentSvc))
+	guestSvc := service.NewGuestService(db, orderSvc, paymentSvc)
+	guestSvc.SetPublicURL("https://wpa.test/")
+	gh := handler.NewGuestHandler(guestSvc)
 	sh := handler.NewShiftHandler(service.NewShiftService(db))
 
 	r := gin.New()
@@ -326,6 +348,34 @@ func TestGuestQROrderingIteration5bIntegration(t *testing.T) {
 		_ = json.Unmarshal(res.Body.Bytes(), &out)
 		if out.Payment.Method != "qris" || out.Payment.Status != "pending" {
 			t.Fatalf("expected a pending dynamic QRIS payment, got %+v", out.Payment)
+		}
+	})
+
+	t.Run("EWalletMethodWithServerBuiltReturnLink", func(t *testing.T) {
+		url := fmt.Sprintf("/public/guest/orders/%s/payments", orderA1)
+		if res := call("POST", url, req{cookie: deviceA, csrf: true}, map[string]any{"idempotency_key": "pay-bad", "method": "ovo"}); res.Code != http.StatusUnprocessableEntity && res.Code != http.StatusBadRequest {
+			t.Fatalf("an unknown method must be refused, got %d: %s", res.Code, res.Body.String())
+		}
+		// The guest switches from the open QRIS to GoPay and tries to choose where the app sends them back.
+		res := call("POST", url, req{cookie: deviceA, csrf: true}, map[string]any{
+			"idempotency_key": "pay-gopay", "method": "gopay", "callback_url": "https://evil.test/steal",
+		})
+		if res.Code != http.StatusOK {
+			t.Fatalf("GoPay payment failed: %d: %s", res.Code, res.Body.String())
+		}
+		var out struct {
+			Payment struct {
+				Method      string `json:"method"`
+				DeeplinkURL string `json:"deeplink_url"`
+			} `json:"payment"`
+		}
+		_ = json.Unmarshal(res.Body.Bytes(), &out)
+		if out.Payment.Method != "gopay" || out.Payment.DeeplinkURL == "" {
+			t.Fatalf("expected a GoPay payment with a deeplink, got %+v", out.Payment)
+		}
+		charge := lastGuestCharge()
+		if want := "https://wpa.test/order/" + qrToken; charge.CallbackURL != want {
+			t.Fatalf("return link must come from the guest's table, got %q want %q", charge.CallbackURL, want)
 		}
 	})
 

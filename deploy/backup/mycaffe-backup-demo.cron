@@ -1,0 +1,10 @@
+# /etc/cron.d/mycaffe-backup on the WSL demo host. Same jobs as deploy/backup/mycaffe-backup.cron;
+# purge goes through compose.sh so the demo-vps override (staging) applies. Times are UTC.
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+15 * * * * mycaffe flock -n /tmp/mycaffe-backup.lock bash -c 'set -a; . /etc/mycaffe/backup.env; set +a; /opt/mycaffe/scripts/backup/backup_to_r2.sh' >> /var/log/mycaffe/backup.log 2>&1
+
+30 20 2 * * mycaffe flock -n /tmp/mycaffe-backup.lock bash -c 'set -a; . /etc/mycaffe/backup.env; set +a; /opt/mycaffe/scripts/backup/restore_drill.sh' >> /var/log/mycaffe/restore-drill.log 2>&1
+
+0 20 * * * mycaffe bash -c 'export DEPLOY_COMPOSE_OVERRIDE=/opt/mycaffe/deploy/docker/docker-compose.demo-vps.yml; /opt/mycaffe/scripts/deploy/compose.sh run --rm --no-deps --entrypoint /app/mycaffe-migrate migrate -action=purge' >> /var/log/mycaffe/purge.log 2>&1

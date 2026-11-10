@@ -115,6 +115,11 @@ enabled, and every container uses `restart: unless-stopped`. On Windows, the own
    `wsl.exe -d Ubuntu-24.04 -u mycaffe --exec sleep infinity`, with "Run whether user is logged on or not" unchecked.
 3. Sleep on battery off while the demo must stay reachable (on AC the laptop already never sleeps).
 
+Backups on the demo host: `/etc/mycaffe/backup.env` (mode 600, `DB_NAME=mycaffe_demo`, bucket
+`mycaffe-backups`, passphrase kept in the owner's vault) and `deploy/backup/mycaffe-backup-demo.cron` installed as
+`/etc/cron.d/mycaffe-backup`: hourly backup, monthly restore drill, daily purge through `compose.sh` so the
+demo-vps override applies. `DEPLOY_SKIP_BACKUP` is no longer set, so every deploy backs up first.
+
 `.github/workflows/demo-uptime.yml` checks `/health/ready`, the home page and the Midtrans webhook every
 5 minutes; a failed run emails the repository owner. A laptop is fine for the demo and internal tests only;
 real money at a pilot cafe needs the VPS gate in `docs/PrdWpaTenantReady.md` (A6, client repo).

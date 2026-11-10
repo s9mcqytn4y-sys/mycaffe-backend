@@ -94,6 +94,31 @@ remote URL in `.env`. VS Code F5 (`.vscode/launch.json`) loads `.env` as-is, so 
 Dev login (seed only, never production): store `central-cafe` or `express-counter`, emails in
 `db/seeds/development.sql`, PIN `482913`. Five wrong PINs lock an account for 15 minutes.
 
+### Keeping the WSL demo host up
+
+On 10 November 2026 Midtrans could not deliver a notification (HTTP 530) because the WSL distro
+stopped about 15 seconds after the last `wsl.exe` session closed. systemd services such as Docker
+do not keep a distro alive. Inside the distro nothing else is needed: systemd is on, Docker is
+enabled, and every container uses `restart: unless-stopped`. On Windows, the owner sets:
+
+1. `%UserProfile%\.wslconfig`, then `wsl --shutdown` once:
+
+   ```ini
+   [general]
+   instanceIdleTimeout=-1
+
+   [wsl2]
+   vmIdleTimeout=-1
+   ```
+
+2. A Task Scheduler task "Cassy demo WSL" that runs at log on:
+   `wsl.exe -d Ubuntu-24.04 -u mycaffe --exec sleep infinity`, with "Run whether user is logged on or not" unchecked.
+3. Sleep on battery off while the demo must stay reachable (on AC the laptop already never sleeps).
+
+`.github/workflows/demo-uptime.yml` checks `/health/ready`, the home page and the Midtrans webhook every
+5 minutes; a failed run emails the repository owner. A laptop is fine for the demo and internal tests only;
+real money at a pilot cafe needs the VPS gate in `docs/PrdWpaTenantReady.md` (A6, client repo).
+
 ## 6. Creating a real store (operator only)
 
 Production has no seed and no sign-up endpoint (decision I5). On the server, with the migrator DSN:

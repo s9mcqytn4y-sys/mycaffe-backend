@@ -883,4 +883,74 @@ func TestPaymentServiceIntegration_EndToEnd(t *testing.T) {
 			t.Fatalf("order paid_amount must stay %d after duplicate settlement, got %d", ord.Order.TotalAmount, paidAmount)
 		}
 	})
+
+	t.Run("7_SettlementOnSupersededQR_FlagsRefundRequired", func(t *testing.T) {
+		ord := createStandardOrder(t, "superseded-qr")
+		old, err := paymentSvc.InitiatePayment(ctx, storeAID, service.InitiatePaymentInput{
+			OrderID:        ord.Order.ID,
+			IdempotencyKey: "idem-old-qr-" + uuid.NewString()[:8],
+			Method:         domain.PaymentMethodQRIS,
+		})
+		if err != nil {
+			t.Fatalf("InitiatePayment (old qr) failed: %v", err)
+		}
+		// The first QR runs out, so the guest asks for a new one, which cancels the old attempt.
+		if err := database.WithTenantTx(ctx, db, storeAID, func(tx *sqlx.Tx) error {
+			_, err := tx.ExecContext(ctx, `UPDATE payments SET expires_at = TIMESTAMPTZ '2020-01-01 00:00:00+00' WHERE store_id = $1 AND id = $2`, storeAID, old.Payment.ID)
+			return err
+		}); err != nil {
+			t.Fatalf("failed to age the old qr: %v", err)
+		}
+		fresh, err := paymentSvc.InitiatePayment(ctx, storeAID, service.InitiatePaymentInput{
+			OrderID:        ord.Order.ID,
+			IdempotencyKey: "idem-new-qr-" + uuid.NewString()[:8],
+			Method:         domain.PaymentMethodQRIS,
+		})
+		if err != nil {
+			t.Fatalf("InitiatePayment (new qr) failed: %v", err)
+		}
+		if fresh.Payment.ID == old.Payment.ID {
+			t.Fatalf("expected a new attempt after the old qr expired")
+		}
+
+		// The guest had already scanned the old QR; its settlement arrives late.
+		res, err := paymentSvc.ProcessMidtransWebhook(ctx, service.MidtransWebhookInput{
+			OrderID:           old.Payment.ProviderOrderID,
+			TransactionID:     old.Payment.TransactionID,
+			StatusCode:        "200",
+			TransactionStatus: "settlement",
+			GrossAmount:       fmt.Sprintf("%d.00", old.Payment.Amount),
+			FraudStatus:       "accept",
+			PaymentType:       "qris",
+			Currency:          "IDR",
+		}, `{"transaction_status":"settlement","status_code":"200"}`)
+		if err != nil {
+			t.Fatalf("ProcessMidtransWebhook failed: %v", err)
+		}
+		if !res.Anomaly || res.Ignored {
+			t.Fatalf("expected settlement on a cancelled attempt to be flagged, got %+v", res)
+		}
+
+		var refundEvents int
+		var paidAmount int64
+		var oldStatus string
+		if err := database.WithTenantTx(ctx, db, storeAID, func(tx *sqlx.Tx) error {
+			if err := tx.GetContext(ctx, &refundEvents, `SELECT COUNT(*) FROM outbox_events WHERE store_id = $1 AND aggregate_id = $2 AND event_type = 'payment.refund_required'`,
+				storeAID, ord.Order.ID.String()); err != nil {
+				return err
+			}
+			if err := tx.GetContext(ctx, &oldStatus, `SELECT status FROM payments WHERE store_id = $1 AND id = $2`, storeAID, old.Payment.ID); err != nil {
+				return err
+			}
+			return tx.GetContext(ctx, &paidAmount, `SELECT paid_amount FROM orders WHERE store_id = $1 AND id = $2`, storeAID, ord.Order.ID)
+		}); err != nil {
+			t.Fatalf("failed to read superseded settlement state: %v", err)
+		}
+		if refundEvents != 1 {
+			t.Fatalf("expected exactly 1 payment.refund_required outbox event, got %d", refundEvents)
+		}
+		if oldStatus != string(domain.PaymentStatusCancelled) || paidAmount != 0 {
+			t.Fatalf("old attempt must stay cancelled and the order unpaid, got status=%s paid=%d", oldStatus, paidAmount)
+		}
+	})
 }

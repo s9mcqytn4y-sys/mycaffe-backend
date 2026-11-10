@@ -160,6 +160,19 @@ func (s *PaymentService) ProcessMidtransWebhook(
 			return nil
 		}
 
+		// A guest can still pay a QR that a newer attempt superseded; the money is real, so it is refunded, never dropped.
+		if !ignoreIncoming && payment.Status == domain.PaymentStatusCancelled && mappedStatus == domain.PaymentStatusPaid {
+			message := "settlement on a cancelled payment attempt; refund required"
+			if _, err := tx.ExecContext(ctx, "UPDATE payment_notification_logs SET error_message = $3 WHERE store_id = $1 AND id = $2", resolved.StoreID, logEntry.ID, message); err != nil {
+				return err
+			}
+			result.Anomaly = true
+			return s.insertPaymentOutboxTx(ctx, tx, order, "payment.refund_required", map[string]any{
+				"reason":     "settlement on a cancelled payment attempt",
+				"payment_id": payment.ID,
+			})
+		}
+
 		if ignoreIncoming || !domain.CanTransitionPaymentStatus(payment.Status, mappedStatus) {
 			if err := s.paymentRepo.MarkNotificationProcessed(ctx, tx, resolved.StoreID, logEntry.ID); err != nil {
 				return err

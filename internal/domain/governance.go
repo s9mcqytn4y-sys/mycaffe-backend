@@ -15,6 +15,8 @@ const (
 	LegalDocPrivacyPDP     LegalDocumentType = "privacy_policy_pdp"
 	LegalDocDPATenant      LegalDocumentType = "dpa_tenant"
 	LegalDocRefundPolicy   LegalDocumentType = "refund_policy"
+	LegalDocGuestPrivacy   LegalDocumentType = "guest_privacy_notice"
+	LegalDocGuestTerms     LegalDocumentType = "guest_order_terms"
 )
 
 // BusinessEntityType aligns 1:1 with chk_onboarding_entity_type and chk_store_kyb_entity_type.

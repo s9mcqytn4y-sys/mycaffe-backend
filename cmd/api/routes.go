@@ -142,7 +142,9 @@ func wireHandlers(workerCtx context.Context, cfg *config.Config, db *sqlx.DB, hu
 	h.table = handler.NewTableHandler(tableService)
 	// Table timer warnings (v0.9 PR 9.2, W6).
 	go tableService.StartTimerWorker(workerCtx, 30*time.Second)
-	h.guest = handler.NewGuestHandler(service.NewGuestService(db, orderService, paymentService))
+	guestService := service.NewGuestService(db, orderService, paymentService)
+	guestService.SetPublicURL(cfg.AppPublicURL)
+	h.guest = handler.NewGuestHandler(guestService)
 	h.kds = handler.NewKDSHandler(service.NewKDSService(db))
 	receiptService := service.NewReceiptService(db, cfg.AppPublicURL)
 	h.receipt = handler.NewReceiptHandler(receiptService)

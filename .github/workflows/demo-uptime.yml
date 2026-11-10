@@ -1,0 +1,39 @@
+name: Ops - Demo Uptime Check
+
+# A failed run is the alert: GitHub emails the owner when a scheduled workflow fails.
+# shortcut: GitHub may delay schedules by several minutes and pauses them after 60 days without repo activity;
+# move to the monitoring stack (deploy/monitoring) once the pilot runs on a VPS.
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: demo-uptime
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Demo API, web and Midtrans webhook reachable
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: API ready
+        run: |
+          body=$(curl -fsS --retry 2 --retry-delay 20 --max-time 15 https://demo.abbdullaziz.online/health/ready)
+          echo "$body"
+          echo "$body" | grep -q '"database":"connected"'
+
+      - name: Guest web serves
+        run: curl -fsS --retry 2 --retry-delay 20 --max-time 15 -o /dev/null https://demo.abbdullaziz.online/
+
+      # An unsigned probe must reach the API and be rejected there (4xx); a 5xx means Midtrans could not deliver.
+      - name: Midtrans webhook reaches the API
+        run: |
+          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 -X POST -H 'Content-Type: application/json' \
+            -d '{}' https://demo.abbdullaziz.online/api/v1/payments/midtrans/webhook/central-cafe)
+          echo "webhook probe: $code"
+          [ "$code" -ge 400 ] && [ "$code" -lt 500 ]

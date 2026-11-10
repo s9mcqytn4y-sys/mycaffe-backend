@@ -191,6 +191,9 @@ func TestTablesIteration5aIntegration(t *testing.T) {
 		})
 		if code, out := resolve(table.QRToken); code != http.StatusOK || !out.OrderingOpen {
 			t.Fatalf("store with an open shift must accept QR orders: %d %+v", code, out)
+		} else if got := strings.Join(out.PaymentMethods, ","); got != "qris,gopay,shopeepay" {
+			// central-cafe also enables bank_transfer, cash and EDC; a guest must only see the three it can use.
+			t.Fatalf("guest payment methods: got %q", got)
 		}
 
 		// A store with no open shift is closed.

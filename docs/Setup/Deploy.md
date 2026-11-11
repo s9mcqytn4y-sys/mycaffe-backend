@@ -44,6 +44,22 @@ scripts/deploy/deploy.sh rollback
 
 Redeploys `previous.env` (with a backup first). Running it twice returns to where you started.
 
+## 3a. Maintenance page (N3)
+
+```bash
+scripts/deploy/maintenance.sh on      # guests see a static 503 page, POS/KDS get 503 {"code":"MAINTENANCE"}
+scripts/deploy/maintenance.sh status
+scripts/deploy/maintenance.sh off
+```
+
+Nginx checks `deploy/nginx/maintenance/maintenance.on` on every request, so there is no reload. Every 503
+carries `Retry-After: 120` and `Cache-Control: no-store`. Midtrans webhooks (`/api/v1/payments/midtrans/webhook`
+and `/webhook/<store_slug>`) and `/health*` always pass through, so payments made before the switch still
+settle. The page makes no API calls and loads no fonts. `scripts/deploy/test_maintenance.sh` checks all of
+this against `nginx.prod.conf` in CI.
+
+The first time this ships, the nginx container needs the new mount: `scripts/deploy/compose.sh up -d nginx`.
+
 ## 4. Other compose commands
 
 The compose file requires the digests, so use the wrapper that reads `current.env`:

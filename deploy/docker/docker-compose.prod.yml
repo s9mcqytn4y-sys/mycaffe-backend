@@ -178,6 +178,8 @@ services:
     # No published ports (IN1, P0-07): only the tunnel reaches Nginx on the edge network.
     volumes:
       - ../nginx/nginx.prod.conf:/etc/nginx/nginx.conf:ro
+      # Static 503 pages and the maintenance.on switch (scripts/deploy/maintenance.sh).
+      - ../nginx/maintenance:/etc/nginx/maintenance:ro
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1/nginx-health"]
       interval: 15s

@@ -123,6 +123,9 @@ jobs:
             -v "$PWD/deploy/nginx/nginx.prod.conf:/etc/nginx/nginx.conf:ro" \
             nginx:1.27-alpine nginx -t
 
+      - name: Nginx Maintenance Switch (503 page, JSON for API, webhooks pass)
+        run: bash scripts/deploy/test_maintenance.sh
+
       - name: Validate Operational Shell Scripts Syntax
         run: |
           bash -n scripts/backup/backup_to_r2.sh
@@ -130,6 +133,7 @@ jobs:
           bash -n scripts/backup/restore_drill.sh
           bash -n scripts/deploy/deploy.sh
           bash -n scripts/deploy/compose.sh
+          bash -n scripts/deploy/maintenance.sh
           bash -n scripts/deploy/test_deploy_rollback.sh
           sh -n deploy/postgres/00-init-roles.sh
 

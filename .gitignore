@@ -40,3 +40,6 @@ Thumbs.db
 
 # Generated seed WebP binaries (hosted on R2 CDN https://cdn.abbdullaziz.online/seeds/ and reproducible via scripts/generate_seed_assets.py)
 docs/assets/seeds/**/*.webp
+
+# Runtime maintenance switch (scripts/deploy/maintenance.sh)
+deploy/nginx/maintenance/maintenance.on

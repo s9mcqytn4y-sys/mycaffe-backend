@@ -22,15 +22,18 @@ type GuestHandler struct {
 	// shortcut: in-process sliding windows (single API instance, ADR-002); see loginFailureLimiter.
 	sessionsPerIP  *loginFailureLimiter
 	ordersPerGuest *loginFailureLimiter
-	sharePayPerIP  *loginFailureLimiter
+	// Every attempt opens a new gateway charge; switching method or renewing an expired QRIS stays well under it.
+	paymentsPerGuest *loginFailureLimiter
+	sharePayPerIP    *loginFailureLimiter
 }
 
 func NewGuestHandler(guests *service.GuestService) *GuestHandler {
 	return &GuestHandler{
-		guests:         guests,
-		sessionsPerIP:  newLoginFailureLimiter(10, 10*time.Minute), // decision QR5
-		ordersPerGuest: newLoginFailureLimiter(10, 10*time.Minute),
-		sharePayPerIP:  newLoginFailureLimiter(30, 10*time.Minute),
+		guests:           guests,
+		sessionsPerIP:    newLoginFailureLimiter(10, 10*time.Minute), // decision QR5
+		ordersPerGuest:   newLoginFailureLimiter(10, 10*time.Minute),
+		paymentsPerGuest: newLoginFailureLimiter(20, 10*time.Minute),
+		sharePayPerIP:    newLoginFailureLimiter(30, 10*time.Minute),
 	}
 }
 
@@ -180,6 +183,12 @@ func (h *GuestHandler) InitiatePayment(c *gin.Context) {
 	if !ok {
 		return
 	}
+	key := currentGuest(c).SessionID.String()
+	if h.paymentsPerGuest.Blocked(key) {
+		authError(c, http.StatusTooManyRequests, "TOO_MANY_REQUESTS", "Terlalu banyak percobaan pembayaran. Coba lagi beberapa menit lagi.")
+		return
+	}
+	h.paymentsPerGuest.RecordFailure(key)
 	// Any callback_url in the body is ignored on purpose: the return link is built from the guest's own table.
 	var req struct {
 		IdempotencyKey string `json:"idempotency_key"`

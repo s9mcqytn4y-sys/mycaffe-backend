@@ -3,7 +3,7 @@
 Backend RESTful API dan Realtime Hub untuk platform white-label multi-tenant QR Table Ordering, Point of Sale (POS), Kitchen Display System (KDS), dan TV Queue Display untuk kafe dan restoran. Lihat [Brand Guidelines, Merk, dan Product Knowledge](docs/Product/BrandAndProductKnowledge.md) untuk identitas merek resmi, token desain visual (*Espresso & Crema*), format penomoran entitas, serta aturan bisnis produk.
 
 ## Tech Stack
-- **Language**: Go 1.27.3
+- **Language**: Go 1.27.4
 - **Web Framework**: Gin Gonic (`v1.12.0`)
 - **Database Driver**: `jackc/pgx/v5` & `jmoiron/sqlx`
 - **Database Engine**: PostgreSQL 18-alpine (Native Row-Level Security & Triple-Role Isolation)
@@ -37,7 +37,7 @@ frontend ada di
 
 ## Local Development Setup (Windows)
 
-Prasyarat: Go 1.27.3, Docker Desktop. Semua perintah ada di `scripts/dev.ps1`
+Prasyarat: Go 1.27.4, Docker Desktop. Semua perintah ada di `scripts/dev.ps1`
 (detail: [docs/Setup/WindowsDevEnvironment.md](docs/Setup/WindowsDevEnvironment.md)).
 
 ```powershell

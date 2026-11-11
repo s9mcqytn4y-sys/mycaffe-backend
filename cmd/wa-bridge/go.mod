@@ -1,6 +1,6 @@
 module github.com/s9mcqytn4y-sys/cassy-backend/cmd/wa-bridge
 
-go 1.27.3
+go 1.27.4
 
 require (
 	github.com/mdp/qrterminal/v3 v3.2.1

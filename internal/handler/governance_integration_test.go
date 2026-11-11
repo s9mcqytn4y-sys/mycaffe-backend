@@ -3,6 +3,7 @@ package handler_test
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"crypto/sha512"
 	"encoding/hex"
 	"encoding/json"
@@ -309,6 +310,28 @@ func TestGovernanceIntegration(t *testing.T) {
 			if d.DocType == domain.LegalDocPrivacyPDP {
 				pdpSHA = strings.TrimSpace(d.ContentSHA256)
 			}
+		}
+
+		// Guest texts (N6): only v1.1 is shown, its hash matches the text, and it names the new methods.
+		guestShown := map[domain.LegalDocumentType]int{}
+		for _, d := range legalBody.Documents {
+			if d.DocType != domain.LegalDocGuestPrivacy && d.DocType != domain.LegalDocGuestTerms {
+				continue
+			}
+			guestShown[d.DocType]++
+			if d.Version != "1.1.0-draft" {
+				t.Fatalf("guest %s shows version %s, want 1.1.0-draft", d.DocType, d.Version)
+			}
+			sum := sha256.Sum256([]byte(d.ContentMarkdown))
+			if hex.EncodeToString(sum[:]) != strings.TrimSpace(d.ContentSHA256) {
+				t.Fatalf("guest %s hash does not match its text", d.DocType)
+			}
+			if !strings.Contains(d.ContentMarkdown, "GoPay") || !strings.Contains(d.ContentMarkdown, "ShopeePay") {
+				t.Fatalf("guest %s does not name GoPay and ShopeePay", d.DocType)
+			}
+		}
+		if guestShown[domain.LegalDocGuestPrivacy] != 1 || guestShown[domain.LegalDocGuestTerms] != 1 {
+			t.Fatalf("want exactly one active guest privacy and terms document, got %v", guestShown)
 		}
 
 		idemKey := "onboard-" + uuid.NewString()

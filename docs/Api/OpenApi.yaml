@@ -7794,6 +7794,16 @@ components:
         closed_reason:
           type: string
           enum: [paused, store_closed, table_inactive]
+        payment_methods:
+          type: array
+          description: Guest payment methods the store has enabled, in this order.
+          items:
+            type: string
+            enum: [qris, gopay, shopeepay]
+        service_mode:
+          type: string
+          enum: [pickup, table]
+          description: How an order reaches the guest; changes only the guest page wording, notices and sound.
     CashDrawer:
       type: object
       properties:
@@ -9357,6 +9367,10 @@ components:
           minimum: 1
           maximum: 60
           description: Warn this many minutes before a table's time ends; shorter than the limit. Default 10.
+        qr_service_mode:
+          type: string
+          enum: [pickup, table]
+          description: How a QR order reaches the guest (PRD v3 Q3). pickup (default) collected at the bar; table brought by staff.
 
     InitiatePaymentResponse:
       type: object

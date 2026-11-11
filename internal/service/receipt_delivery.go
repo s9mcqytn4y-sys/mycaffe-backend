@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/mail"
+	"slices"
 	"strings"
 	"time"
 
@@ -120,12 +121,11 @@ func (s *ReceiptDeliveryService) send(ctx context.Context, storeID, orderID uuid
 		// The row lock serializes sends of one order, so the per-order limit holds under double taps.
 		var order struct {
 			OrderNumber    string     `db:"order_number"`
-			TotalAmount    int64      `db:"total_amount"`
 			PaymentStatus  string     `db:"payment_status"`
 			GuestSessionID *uuid.UUID `db:"guest_session_id"`
 			StoreName      string     `db:"store_name"`
 		}
-		err := tx.GetContext(ctx, &order, `SELECT o.order_number, o.total_amount, o.payment_status, o.guest_session_id, s.name AS store_name
+		err := tx.GetContext(ctx, &order, `SELECT o.order_number, o.payment_status, o.guest_session_id, s.name AS store_name
 			FROM orders o JOIN stores s ON s.id = o.store_id WHERE o.store_id = $1 AND o.id = $2 FOR UPDATE OF o`, storeID, orderID)
 		if errors.Is(err, sql.ErrNoRows) || (err == nil && guestSessionID != nil &&
 			(order.GuestSessionID == nil || *order.GuestSessionID != *guestSessionID)) {
@@ -166,10 +166,11 @@ func (s *ReceiptDeliveryService) send(ctx context.Context, storeID, orderID uuid
 		ref := orderID.String()
 		switch channel {
 		case "email":
-			err = s.email.EnqueueTx(ctx, tx, storeID, mailer.TemplateReceipt, to, "", ref, mailer.Data{
-				ActionURL: link.URL, ActionLabel: "Lihat struk", OrderNumber: order.OrderNumber,
-				TotalLabel: rupiah(order.TotalAmount), ExpiresAt: link.ExpiresAt.Format("02/01/2006"),
-			})
+			r, berr := s.receipts.buildTx(ctx, tx, storeID, orderID, ReceiptKindSale, nil)
+			if berr != nil {
+				return berr
+			}
+			err = s.email.EnqueueTx(ctx, tx, storeID, mailer.TemplateReceipt, to, "", ref, receiptEmailData(r, link))
 		case "whatsapp":
 			// Template parameters, one per line: {{1}} store, {{2}} order number, {{3}} link.
 			err = s.messages.EnqueueWhatsAppTx(ctx, tx, storeID, to, "receipt", order.StoreName+"\n"+order.OrderNumber+"\n"+link.URL, ref)
@@ -195,4 +196,41 @@ func (s *ReceiptDeliveryService) send(ctx context.Context, storeID, orderID uuid
 		return nil, err
 	}
 	return out, nil
+}
+
+// receiptEmailData fills the receipt email from the stored receipt, so lines and totals match the paper
+// receipt. The link opens the web receipt page, which also shows the order's current status (PRD v3 N8).
+func receiptEmailData(r *Receipt, link *ReceiptLink) mailer.Data {
+	d := mailer.Data{
+		ActionURL: link.URL, ActionLabel: "Lihat struk dan status pesanan",
+		OrderNumber: r.OrderNumber, TotalLabel: rupiah(r.Total), ExpiresAt: link.ExpiresAt.Format("02/01/2006"),
+		IssuedAt: formatLocalTime(r.IssuedAt), SubtotalItemsLabel: rupiah(r.Subtotal),
+	}
+	// r.Payments holds only payments that took money; split bills may repeat a method.
+	methods := []string{}
+	for _, p := range r.Payments {
+		if label := methodLabel(p.Method); !slices.Contains(methods, label) {
+			methods = append(methods, label)
+		}
+	}
+	d.PaymentMethod = strings.Join(methods, ", ")
+	if r.Discount > 0 {
+		d.DiscountLabel = rupiah(r.Discount)
+	}
+	if r.Service > 0 {
+		d.ServiceFeeLabel = rupiah(r.Service)
+	}
+	if r.Tax > 0 {
+		d.TaxLabel = rupiah(r.Tax)
+	}
+	for _, l := range r.Lines {
+		details := l.Options
+		if l.Variant != "" {
+			details = append([]string{l.Variant}, details...)
+		}
+		d.Items = append(d.Items, mailer.ReceiptItem{
+			Name: l.Name, Details: strings.Join(details, ", "), Quantity: l.Quantity, SubtotalLabel: rupiah(l.Amount),
+		})
+	}
+	return d
 }

@@ -6,7 +6,7 @@ Metode : {{.PaymentMethod}}
 ========================================
 Total Pembayaran: {{.TotalLabel}}
 
-Lihat dan unduh struk digital resmi Anda:
+Lihat struk dan status pesanan terbaru:
 {{.ActionURL}}
 
 © {{.Year}} {{.StoreName}} • Didukung oleh Cassy POS by AzureDevID (Usaha Perorangan)

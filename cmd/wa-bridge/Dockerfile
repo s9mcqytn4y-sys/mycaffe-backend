@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.4
 # wa-bridge (decision W12): demo/development WhatsApp relay via whatsmeow. Pure Go (modernc SQLite), no cgo.
-FROM golang:1.27.3-alpine AS builder
+FROM golang:1.27.4-alpine AS builder
 WORKDIR /build
 COPY go.mod go.sum ./
 RUN go mod download

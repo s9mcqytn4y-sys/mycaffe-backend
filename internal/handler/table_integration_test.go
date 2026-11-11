@@ -194,6 +194,8 @@ func TestTablesIteration5aIntegration(t *testing.T) {
 		} else if got := strings.Join(out.PaymentMethods, ","); got != "qris,gopay,shopeepay" {
 			// central-cafe also enables bank_transfer, cash and EDC; a guest must only see the three it can use.
 			t.Fatalf("guest payment methods: got %q", got)
+		} else if out.ServiceMode != domain.QRServicePickup {
+			t.Fatalf("service mode must default to pickup, got %q", out.ServiceMode)
 		}
 
 		// A store with no open shift is closed.

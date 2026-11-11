@@ -32,6 +32,7 @@ type StoreSettingsPatch struct {
 	GatewayPartialRefunds    *bool   `json:"gateway_partial_refunds"`
 	TableTimeLimitMinutes    *int    `json:"table_time_limit_minutes"`
 	TableTimerWarningMinutes *int    `json:"table_timer_warning_minutes"`
+	QRServiceMode            *string `json:"qr_service_mode"`
 }
 
 // SettingsService lets owners change operating policies without a developer (owner decision K3).
@@ -119,6 +120,9 @@ func (s *SettingsService) Update(ctx context.Context, actor *AuthenticatedStaff,
 		if patch.TableTimerWarningMinutes != nil {
 			after.TableTimerWarningMinutes = *patch.TableTimerWarningMinutes
 		}
+		if patch.QRServiceMode != nil {
+			after.QRServiceMode = *patch.QRServiceMode
+		}
 		if err := validateStoreSettings(after); err != nil {
 			return err
 		}
@@ -163,6 +167,8 @@ func validateStoreSettings(s domain.StoreSettings) error {
 		return errors.Join(ErrInvalidSettings, errors.New("batas waktu refund owner tidak boleh lebih pendek dari kasir"))
 	case s.StaticQRISFallbackMode != domain.StaticQRISFallbackOff && s.StaticQRISFallbackMode != domain.StaticQRISFallbackAuto && s.StaticQRISFallbackMode != domain.StaticQRISFallbackForced:
 		return errors.Join(ErrInvalidSettings, errors.New("mode QRIS statis harus off, auto, atau forced"))
+	case s.QRServiceMode != domain.QRServicePickup && s.QRServiceMode != domain.QRServiceTable:
+		return errors.Join(ErrInvalidSettings, errors.New("mode layanan QR harus pickup atau table"))
 	}
 	return nil
 }

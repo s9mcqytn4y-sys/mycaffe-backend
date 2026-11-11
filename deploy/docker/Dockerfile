@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.4
 # Stage 1: Build statically linked binaries (API & Migrator)
-FROM golang:1.27.3-alpine AS builder
+FROM golang:1.27.4-alpine AS builder
 
 WORKDIR /build
 

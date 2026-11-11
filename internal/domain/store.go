@@ -222,14 +222,23 @@ type StoreSettings struct {
 	// Table timer (decision W6): 0 turns it off; warnings only, orders are never refused.
 	TableTimeLimitMinutes    int `json:"table_time_limit_minutes" db:"table_time_limit_minutes"`
 	TableTimerWarningMinutes int `json:"table_timer_warning_minutes" db:"table_timer_warning_minutes"`
+	// QRServiceMode says how a QR order reaches the guest: picked up at the bar or brought to the table.
+	QRServiceMode string `json:"qr_service_mode" db:"qr_service_mode"`
 }
 
-// DefaultStoreSettings mirrors the column defaults of migration 000007.
+// QR service modes (PRD v3 Q3).
+const (
+	QRServicePickup = "pickup"
+	QRServiceTable  = "table"
+)
+
+// DefaultStoreSettings mirrors the column defaults of migration 000007 and later additions.
 func DefaultStoreSettings(storeID uuid.UUID) StoreSettings {
 	return StoreSettings{
 		StoreID: storeID, VoidRefundOwnerThreshold: 100000, CashierMaxDiscountBPS: 1000, CashVarianceTolerance: 5000,
 		TableIdleCloseMinutes: 30, StaticQRISFallbackMode: StaticQRISFallbackAuto,
 		RefundWindowCashierDays: 0, RefundWindowOwnerDays: 7, TableTimerWarningMinutes: 10,
+		QRServiceMode: QRServicePickup,
 	}
 }
 

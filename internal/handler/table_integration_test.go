@@ -196,6 +196,8 @@ func TestTablesIteration5aIntegration(t *testing.T) {
 			t.Fatalf("guest payment methods: got %q", got)
 		} else if out.ServiceMode != domain.QRServicePickup {
 			t.Fatalf("service mode must default to pickup, got %q", out.ServiceMode)
+		} else if out.SplitEnabled {
+			t.Fatal("bill splitting must stay off unless GUEST_SPLIT_ENABLED is set")
 		}
 
 		// A store with no open shift is closed.

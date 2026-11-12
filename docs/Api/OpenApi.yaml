@@ -7804,6 +7804,9 @@ components:
           type: string
           enum: [pickup, table]
           description: How an order reaches the guest; changes only the guest page wording, notices and sound.
+        split_enabled:
+          type: boolean
+          description: True only when GUEST_SPLIT_ENABLED is on, so the guest page offers an equal split before paying.
     CashDrawer:
       type: object
       properties:

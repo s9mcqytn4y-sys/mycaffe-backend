@@ -606,6 +606,20 @@ func TestGovernanceIntegration(t *testing.T) {
 		if pubCMS.Code != http.StatusOK || !strings.Contains(pubCMS.Body.String(), "Specialty Coffee") {
 			t.Fatalf("expected public CMS endpoint to serve bilingual copy, got %d: %s", pubCMS.Code, pubCMS.Body.String())
 		}
+
+		// PRD v4 Q9: an outlet that clears its colours stores none, so clients fall back to neutral ink.
+		cleared := call("PUT", "/api/v1/store/cms", ownerA, map[string]any{"default_locale": "id-ID"})
+		if cleared.Code != http.StatusOK {
+			t.Fatalf("expected 200 saving CMS without colours, got %d: %s", cleared.Code, cleared.Body.String())
+		}
+		pubCleared := call("GET", "/api/v1/public/stores/central-cafe/cms", nil, nil)
+		if body := pubCleared.Body.String(); !strings.Contains(body, `"primary_hex":""`) || !strings.Contains(body, `"accent_hex":""`) {
+			t.Fatalf("expected empty colours after clearing, got %s", body)
+		}
+		badHex := call("PUT", "/api/v1/store/cms", ownerA, map[string]any{"default_locale": "id-ID", "primary_hex": "#2C1A1"})
+		if badHex.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("expected 422 for a malformed colour, got %d", badHex.Code)
+		}
 	})
 
 	t.Run("BYONotificationsNetworkNodesAndFaultSimulation", func(t *testing.T) {

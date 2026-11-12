@@ -375,10 +375,11 @@ func defaultStoreCMS(storeID uuid.UUID, now time.Time) *domain.StoreCMSConfig {
 		StoreID:          storeID,
 		DefaultLocale:    "id-ID",
 		SupportedLocales: json.RawMessage(`["id-ID","en-US"]`),
-		PrimaryHex:       "#2C1A12",
-		AccentHex:        "#C68B59",
-		OperatingHours:   json.RawMessage(`{}`),
-		UpdatedAt:        now,
+		// Empty colours let each client use its neutral fallback (PRD v4 Q9).
+		PrimaryHex:     "",
+		AccentHex:      "",
+		OperatingHours: json.RawMessage(`{}`),
+		UpdatedAt:      now,
 	}
 }
 
@@ -1023,17 +1024,11 @@ func (s *GovernanceService) UpsertStoreCMSConfig(ctx context.Context, actor *Aut
 		}
 	}
 	primaryHex := strings.ToUpper(strings.TrimSpace(in.PrimaryHex))
-	if primaryHex == "" {
-		primaryHex = "#2C1A12"
-	}
-	if !hexColorPattern.MatchString(primaryHex) {
+	if primaryHex != "" && !hexColorPattern.MatchString(primaryHex) {
 		f.add("primary_hex", "wajib format warna hex #RRGGBB")
 	}
 	accentHex := strings.ToUpper(strings.TrimSpace(in.AccentHex))
-	if accentHex == "" {
-		accentHex = "#C68B59"
-	}
-	if !hexColorPattern.MatchString(accentHex) {
+	if accentHex != "" && !hexColorPattern.MatchString(accentHex) {
 		f.add("accent_hex", "wajib format warna hex #RRGGBB")
 	}
 	// Anti-slop R-02 gate: reject em-dash characters in customer-facing CMS copy.

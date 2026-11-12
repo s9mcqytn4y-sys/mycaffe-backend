@@ -312,15 +312,15 @@ func TestGovernanceIntegration(t *testing.T) {
 			}
 		}
 
-		// Guest texts (N6): only v1.1 is shown, its hash matches the text, and it names the new methods.
+		// Guest texts (N6, W3): only the reviewed final 1.1.0 is shown, without the draft line; its hash matches the text.
 		guestShown := map[domain.LegalDocumentType]int{}
 		for _, d := range legalBody.Documents {
 			if d.DocType != domain.LegalDocGuestPrivacy && d.DocType != domain.LegalDocGuestTerms {
 				continue
 			}
 			guestShown[d.DocType]++
-			if d.Version != "1.1.0-draft" {
-				t.Fatalf("guest %s shows version %s, want 1.1.0-draft", d.DocType, d.Version)
+			if d.Version != "1.1.0" || strings.HasPrefix(d.ContentMarkdown, "Draf") {
+				t.Fatalf("guest %s shows version %s, want the final 1.1.0 without a draft line", d.DocType, d.Version)
 			}
 			sum := sha256.Sum256([]byte(d.ContentMarkdown))
 			if hex.EncodeToString(sum[:]) != strings.TrimSpace(d.ContentSHA256) {
@@ -332,6 +332,12 @@ func TestGovernanceIntegration(t *testing.T) {
 		}
 		if guestShown[domain.LegalDocGuestPrivacy] != 1 || guestShown[domain.LegalDocGuestTerms] != 1 {
 			t.Fatalf("want exactly one active guest privacy and terms document, got %v", guestShown)
+		}
+		// Tenant terms 1.0.1 only renames the product to Cassy; the body hash is unchanged, so acceptances stay valid.
+		for _, d := range legalBody.Documents {
+			if d.DocType == domain.LegalDocTermsOfService && (d.Version != "1.0.1" || strings.Contains(d.Title, "MyCaffe")) {
+				t.Fatalf("tenant terms shows %s %q, want 1.0.1 titled for Cassy", d.Version, d.Title)
+			}
 		}
 
 		idemKey := "onboard-" + uuid.NewString()

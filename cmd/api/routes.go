@@ -139,6 +139,7 @@ func wireHandlers(workerCtx context.Context, cfg *config.Config, db *sqlx.DB, hu
 
 	h.tab = handler.NewTabHandler(service.NewTabService(db, postgres.NewTabRepository(), orderRepo))
 	tableService := service.NewTableService(db)
+	tableService.GuestSplit = cfg.GuestSplitEnabled
 	h.table = handler.NewTableHandler(tableService)
 	// Table timer warnings (v0.9 PR 9.2, W6).
 	go tableService.StartTimerWorker(workerCtx, 30*time.Second)

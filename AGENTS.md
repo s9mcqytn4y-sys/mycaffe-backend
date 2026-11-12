@@ -1,9 +1,11 @@
-# Cassy by AzureDevID: Workspace Instructions
+# Cassy by AzureDevID: backend agent instructions
+
+Single source of agent instructions for this repo. `CLAUDE.md` and `GEMINI.md` only import this file. Topic rules live in `.agents/rules/`.
 
 ## Product Context
-Cassy (formerly MyCaffe; the name survives in database roles, migrations, buckets and a few paths) is a configurable, multi-tenant, white-label QR table ordering, Point of Sale (POS), Kitchen Display System (KDS), queue display, and owner backoffice product for cafes and restaurants. Business rules, branding, taxes, service charges, modifier groups, payment methods, and operating policies are fully configurable per store/tenant rather than hardcoded. See [Brand Guidelines & Product Knowledge](docs/Product/BrandAndProductKnowledge.md) for the brand identity, default visual tokens (*Espresso & Crema*), entity numbering conventions, and operational product knowledge.
+Cassy (formerly MyCaffe; the name survives in database roles, migrations, buckets and a few paths) is a configurable, multi-tenant, white-label QR table ordering, Point of Sale (POS), Kitchen Display System (KDS), queue display, and owner backoffice product for food and beverage businesses (restaurants, cafes, bakeries, food courts, cloud kitchens, kiosks). Business rules, branding, taxes, service charges, modifier groups, payment methods, and operating policies are fully configurable per store/tenant rather than hardcoded. See [Brand Guidelines & Product Knowledge](docs/Product/BrandAndProductKnowledge.md) for entity numbering conventions and operational product knowledge. The current brand (PRD v4: pandan, kunyit, putih tulang, tinta; no brown) lives in the client repo at `packages/design-tokens/tokens.json` and `docs/PrdCassyV4.md`; an outlet without its own colour stores none and clients fall back to neutral ink.
 
-This workspace is `mycaffe-backend`. Treat it as the backend repository. The frontend is a separate Next.js App Router + TypeScript + Tailwind CSS/PWA repository. Do not create or modify frontend code directly within this backend repository.
+This workspace is `mycaffe-backend`. Treat it as the backend repository. Clients (Next.js guest PWA, Android POS, iOS printer bridge) live in the separate `MyCaffeClient` monorepo. Do not create or modify client code in this repository.
 
 ## Before Changing Code
 1. Inspect the current repository, `go.mod`, directory structure, current Git status, and existing tests before proposing implementation.
@@ -83,20 +85,17 @@ This workspace is `mycaffe-backend`. Treat it as the backend repository. The fro
   - Modifying production deployment configurations, infrastructure manifests, or DNS.
   - Executing secret/credential rotation or editing live `.env` files.
 
+## Facts carried over from the old CLAUDE.md and GEMINI.md
+- Midtrans Core API runs in two phases: `payments.id.String()` is both `provider_order_id` and the `Idempotency-Key`; never hold a DB transaction or lock during the HTTP call; reconcile with `CheckTransaction`.
+- In `staging` and `production`, endpoints without full tenant binding or durable persistence fail closed with `503`. WebSockets (`internal/realtime/hub.go`) enforce origin checks, per-tenant channels, read limits, ping/pong deadlines and graceful shutdown.
+- Storage: R2 `mycaffe-media` (public, `https://cdn.abbdullaziz.online`) and `mycaffe-backups` (private, encrypted `pg_dump`), with separate credentials.
+- Demo runs locally in WSL behind the `https://demo.abbdullaziz.online` tunnel; there is no VPS yet.
+- Before reporting completion also run `govulncheck ./...` and `gitleaks git --verbose` when dependencies or secrets-adjacent code change.
+
 ## Communication
 Respond to the owner in Bahasa Indonesia unless English is needed for code/API terminology. Be direct about risks, trade-offs, assumptions, and unverified facts. Distinguish implemented behavior from a proposal using the four-tier classification (*Implemented & Tested*, *Guarded / Fail-Closed*, *Planned*, *Blocked by Dependency*).
 
 ## Ecosystem Directory Map
 See [docs/Setup/WorkspaceDirectoryMap.md](docs/Setup/WorkspaceDirectoryMap.md). There are two repositories: this backend (including the WhatsApp bridge in `cmd/wa-bridge`) and the client monorepo. Current re-alignment decisions: [docs/Product/ReAlignment2026-11.md](docs/Product/ReAlignment2026-11.md).
 
-<!-- antislop:start -->
-## antislop
-For UI, copy, people, mobile layout, or code comments work, read `antislop.md` (core) and then the skill for the task:
-- UI / visual: `skills/antislop-ui/SKILL.md`
-- Copy & text: `skills/antislop-copywriting/SKILL.md`
-- People: `skills/antislop-human/SKILL.md`
-- Mobile / responsive: `skills/antislop-layoutmobile/SKILL.md`
-- Code comments: `skills/antislop-code/SKILL.md`
-Before starting, ask the user when antislop applies: during the work, or after it is done.
-<!-- antislop:end -->
 

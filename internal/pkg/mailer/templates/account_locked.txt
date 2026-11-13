@@ -1,13 +1,11 @@
 Halo {{.RecipientName}},
 
-Akun {{.StaffName}} ({{.RoleLabel}}) di {{.StoreName}} dikunci otomatis karena
-PIN salah dimasukkan beberapa kali berturut-turut.
+Akun {{.StaffName}} ({{.RoleLabel}}) di {{.StoreName}} dikunci otomatis karena percobaan PIN salah berulang kali.
 
-Terkunci sampai: {{.ExpiresAt}}
+Terkunci hingga: {{.ExpiresAt}}
 Waktu kejadian : {{.EventAt}}
 
-Jika ini bukan staf Anda yang lupa PIN, periksa siapa yang mencoba masuk dan
-pertimbangkan untuk mengatur ulang PIN staf tersebut dari backoffice.
+Bila bukan staf Anda yang lupa PIN, cek log aktivitas dan atur ulang PIN staf dari Backoffice.
 
 --
-{{.StoreName}} (MyCaffe). Email otomatis, mohon tidak dibalas.
+{{.StoreName}} | Cassy by AzureDevID. Email otomatis, jangan dibalas.

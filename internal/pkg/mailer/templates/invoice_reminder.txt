@@ -3,9 +3,9 @@ Halo {{.RecipientName}},
 Invoice {{.InvoiceNumber}} dari {{.StoreName}} {{.DueStatus}}.
 
 Sisa tagihan: {{.TotalLabel}}
-Jatuh tempo: {{.DueDate}}
+Jatuh tempo : {{.DueDate}}
 
-Mohon abaikan pesan ini bila pembayaran sudah dilakukan.
+Abaikan pesan ini bila Anda sudah menyelesaikan pembayaran.
 
 --
-{{.StoreName}}. Email otomatis, mohon tidak dibalas.
+{{.StoreName}} | Cassy by AzureDevID. Email otomatis, jangan dibalas.

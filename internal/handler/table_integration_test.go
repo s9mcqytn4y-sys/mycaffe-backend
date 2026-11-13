@@ -191,8 +191,8 @@ func TestTablesIteration5aIntegration(t *testing.T) {
 		})
 		if code, out := resolve(table.QRToken); code != http.StatusOK || !out.OrderingOpen {
 			t.Fatalf("store with an open shift must accept QR orders: %d %+v", code, out)
-		} else if got := strings.Join(out.PaymentMethods, ","); got != "qris,gopay,shopeepay" {
-			// central-cafe also enables bank_transfer, cash and EDC; a guest must only see the three it can use.
+		} else if got := strings.Join(out.PaymentMethods, ","); got != "qris,gopay,shopeepay,bank_transfer" {
+			// central-cafe also enables cash and EDC; a guest must only see the online gateway methods it can use.
 			t.Fatalf("guest payment methods: got %q", got)
 		} else if out.ServiceMode != domain.QRServicePickup {
 			t.Fatalf("service mode must default to pickup, got %q", out.ServiceMode)

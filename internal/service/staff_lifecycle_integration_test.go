@@ -199,7 +199,7 @@ func TestStaffLifecycleIntegration(t *testing.T) {
 			t.Fatalf("reset must revoke existing sessions: %v", err)
 		}
 		deliver(t)
-		if msg, _ := sender.last(strings.ToLower(invitedEmail)); !strings.Contains(msg.Subject, "telah diubah") {
+		if msg, _ := sender.last(strings.ToLower(invitedEmail)); !strings.Contains(msg.Subject, "diubah") {
 			t.Fatalf("expected PIN-changed notice, got %q", msg.Subject)
 		}
 	})

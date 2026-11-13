@@ -17,21 +17,41 @@ import (
 	"github.com/midtrans/midtrans-go/coreapi"
 	"github.com/s9mcqytn4y-sys/cassy-backend/internal/config"
 	"github.com/s9mcqytn4y-sys/cassy-backend/internal/domain"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/pkg/metrics"
 )
+
+// sharedMidtransHTTPClient reuses TLS keep-alive connections to Midtrans Core API across calls
+// while keeping a strict 12-second total timeout per request.
+var sharedMidtransHTTPClient = &http.Client{
+	Timeout: 12 * time.Second,
+	Transport: &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment,
+		MaxIdleConns:          64,
+		MaxIdleConnsPerHost:   32,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   5 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	},
+}
 
 type Client struct {
 	serverKey              string
 	env                    midtrans.EnvironmentType
 	defaultNotificationURL string
+	qrisAcquirer           string
 }
 
 func NewClient(cfg *config.Config) *Client {
+	if cfg == nil {
+		return NewClientWithKey("", false)
+	}
 	c := NewClientWithKey(cfg.MidtransServerKey, cfg.MidtransIsProduction)
-	if cfg != nil {
-		base := strings.TrimRight(strings.TrimSpace(cfg.AppPublicURL), "/")
-		if strings.HasPrefix(strings.ToLower(base), "https://") {
-			c.defaultNotificationURL = base + "/api/v1/payments/midtrans/webhook"
-		}
+	base := strings.TrimRight(strings.TrimSpace(cfg.AppPublicURL), "/")
+	if strings.HasPrefix(strings.ToLower(base), "https://") {
+		c.defaultNotificationURL = base + "/api/v1/payments/midtrans/webhook"
+	}
+	if acq := normalizeQRISAcquirer(cfg.MidtransQRISAcquirer); acq != "" {
+		c.qrisAcquirer = acq
 	}
 	return c
 }
@@ -45,9 +65,40 @@ func NewClientWithKey(serverKey string, isProduction bool) *Client {
 	}
 
 	return &Client{
-		serverKey: strings.TrimSpace(serverKey),
-		env:       env,
+		serverKey:    strings.TrimSpace(serverKey),
+		env:          env,
+		qrisAcquirer: "gopay",
 	}
+}
+
+// WithQRISAcquirer returns a shallow copy configured with the allowed QRIS acquirer ("gopay" or "airpay shopee").
+func (c *Client) WithQRISAcquirer(acquirer string) *Client {
+	if c == nil {
+		return nil
+	}
+	cp := *c
+	if norm := normalizeQRISAcquirer(acquirer); norm != "" {
+		cp.qrisAcquirer = norm
+	}
+	return &cp
+}
+
+func normalizeQRISAcquirer(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "gopay":
+		return "gopay"
+	case "airpay shopee", "shopeepay":
+		return "airpay shopee"
+	default:
+		return ""
+	}
+}
+
+func (c *Client) resolvedQRISAcquirer() string {
+	if norm := normalizeQRISAcquirer(c.qrisAcquirer); norm != "" {
+		return norm
+	}
+	return "gopay"
 }
 
 // WithDefaultNotificationURL returns a shallow copy of the Client configured to send
@@ -83,14 +134,12 @@ type ChargeRequest struct {
 }
 
 // newCoreAPIClient creates a per-call SDK client so mutable SDK options are never shared
-// between concurrent payment attempts. SDK v1.3.8 has an 80s default timeout; use a
-// bounded client timeout because its ConfigOptions.SetContext currently does not replace
-// the request returned by http.Request.WithContext.
+// between concurrent payment attempts, while reusing sharedMidtransHTTPClient connections.
 func (c *Client) newCoreAPIClient() coreapi.Client {
 	client := coreapi.Client{}
 	client.New(c.serverKey, c.env)
 	client.HttpClient = &midtrans.HttpClientImplementation{
-		HttpClient: &http.Client{Timeout: 12 * time.Second},
+		HttpClient: sharedMidtransHTTPClient,
 		// Errors only: the SDK's sandbox default logs raw request/response bodies (QR strings, merchant id).
 		Logger: &midtrans.LoggerImplementation{LogLevel: midtrans.LogError},
 	}
@@ -125,7 +174,7 @@ func (c *Client) ChargeCoreAPI(ctx context.Context, input ChargeRequest) (*corea
 	switch input.Method {
 	case domain.PaymentMethodQRIS:
 		req.PaymentType = coreapi.PaymentTypeQris
-		req.Qris = &coreapi.QrisDetails{Acquirer: "gopay"}
+		req.Qris = &coreapi.QrisDetails{Acquirer: c.resolvedQRISAcquirer()}
 	case domain.PaymentMethodGoPay:
 		req.PaymentType = coreapi.PaymentTypeGopay
 		req.Gopay = &coreapi.GopayDetails{EnableCallback: input.CallbackURL != "", CallbackUrl: input.CallbackURL}
@@ -163,10 +212,14 @@ func (c *Client) ChargeCoreAPI(ctx context.Context, input ChargeRequest) (*corea
 	if notifURL != "" {
 		client.Options.SetPaymentOverrideNotification(notifURL)
 	}
+	start := time.Now()
 	resp, midtransErr := client.ChargeTransaction(req)
+	metrics.MidtransDuration.WithLabelValues("charge").Observe(time.Since(start).Seconds())
 	if midtransErr != nil {
+		metrics.MidtransRequests.WithLabelValues("charge", string(input.Method), "error").Inc()
 		return nil, fmt.Errorf("midtrans charge failed (status %d): %s", midtransErr.StatusCode, midtransErr.Message)
 	}
+	metrics.MidtransRequests.WithLabelValues("charge", string(input.Method), "ok").Inc()
 	return resp, nil
 }
 
@@ -183,10 +236,14 @@ func (c *Client) CheckTransaction(ctx context.Context, providerOrderID string) (
 		return nil, errors.New("provider order ID is required")
 	}
 	client := c.newCoreAPIClient()
+	start := time.Now()
 	resp, midtransErr := client.CheckTransaction(providerOrderID)
+	metrics.MidtransDuration.WithLabelValues("status").Observe(time.Since(start).Seconds())
 	if midtransErr != nil {
+		metrics.MidtransRequests.WithLabelValues("status", "unknown", "error").Inc()
 		return nil, fmt.Errorf("midtrans status lookup failed (status %d): %s", midtransErr.StatusCode, midtransErr.Message)
 	}
+	metrics.MidtransRequests.WithLabelValues("status", "unknown", "ok").Inc()
 	return resp, nil
 }
 
@@ -202,13 +259,18 @@ func (c *Client) DirectRefund(ctx context.Context, providerOrderID, refundKey st
 	if len(reason) > 255 {
 		reason = reason[:255]
 	}
+	start := time.Now()
 	resp, midtransErr := c.newCoreAPIClient().DirectRefundTransaction(providerOrderID, &coreapi.RefundReq{RefundKey: refundKey, Amount: amount, Reason: reason})
+	metrics.MidtransDuration.WithLabelValues("refund").Observe(time.Since(start).Seconds())
 	if midtransErr != nil {
 		if resp != nil && resp.StatusCode != "" {
+			metrics.MidtransRequests.WithLabelValues("refund", "unknown", "ok").Inc()
 			return resp, nil // a business answer (406, 412, 414) in a non-2xx envelope
 		}
+		metrics.MidtransRequests.WithLabelValues("refund", "unknown", "error").Inc()
 		return nil, fmt.Errorf("midtrans direct refund failed (status %d): %s", midtransErr.StatusCode, midtransErr.Message)
 	}
+	metrics.MidtransRequests.WithLabelValues("refund", "unknown", "ok").Inc()
 	return resp, nil
 }
 

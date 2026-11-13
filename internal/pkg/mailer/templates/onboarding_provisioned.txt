@@ -1,7 +1,7 @@
-Selamat datang, {{.RecipientName}}!
+Selamat datang, {{.RecipientName}}
 
-Ruang kerja gerai {{.StoreName}} (kode login gerai: {{.StoreSlug}}) telah berhasil diprovisi pada platform MyCaffe by AzureDevID dengan status awal KYB Belum Terverifikasi (Mode Sandbox Aktif).
+Gerai {{.StoreName}} (kode login: {{.StoreSlug}}) sudah aktif di Cassy by AzureDevID dalam mode Sandbox awal.
 {{if .ActionURL}}
-Masuk ke Backoffice & POS: {{.ActionURL}}
+Masuk ke Backoffice & Cassy POS: {{.ActionURL}}
 {{end}}
-Anda sudah dapat mengatur katalog menu, meja QR, kredensial Midtrans Sandbox BYOK, serta skrip jaringan MikroTik RouterOS v7 (.rsc). Segera ubah PIN awal Anda setelah masuk pertama kali.
+Anda sudah dapat mengatur katalog menu, mencetak QR meja, menguji Midtrans Sandbox BYOK, dan mengunduh skrip MikroTik RouterOS v7 (.rsc). Ubah PIN Owner awal setelah masuk pertama kali.

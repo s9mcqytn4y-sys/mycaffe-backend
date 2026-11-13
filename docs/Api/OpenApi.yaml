@@ -1,19 +1,20 @@
 openapi: 3.1.0
 info:
-  title: MyCaffe Core POS API
-  version: 0.4.0
+  title: Cassy Core POS API
+  version: 0.4.1
   summary: Multi-tenant QR Table Ordering, POS Cashier, Kitchen Display System (KDS), and Payment Reconciliation API
   description: |
-    Official OpenAPI 3.1 contract for **MyCaffe Core POS** backend (`mycaffe-backend`).
+    Official OpenAPI 3.1 contract for **Cassy by AzureDevID** backend (`mycaffe-backend` / `com.azuredevid.cassy`).
     All monetary values are represented as whole integer Indonesian Rupiah (`int64`, e.g. `24000` = Rp 24.000) without floating-point numbers.
     Percentage rates (PB1 tax, service charge, QRIS MDR) are represented in Basis Points (`1% = 100 bps`).
   contact:
-    name: MyCaffe Platform Engineering
+    name: AzureDevID Platform Engineering
+    email: admin@abbdullaziz.online
 servers:
   - url: http://localhost:8080
     description: Local Development API Server
-  - url: https://api.example.com
-    description: Production Single-VPS Hostinger KVM 2 Reverse Proxy (Nginx TLS)
+  - url: https://demo.abbdullaziz.online
+    description: Live Staging Demo Server (Cloudflare Tunnel)
 tags:
   - name: Health
     description: Liveness and readiness probes for Docker Compose and Nginx

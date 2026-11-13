@@ -1,14 +1,11 @@
 Halo {{.RecipientName}},
 
-PIN Owner salah dimasukkan berkali-kali di kasir {{.StoreName}}.
-Percobaan terakhir oleh {{.StaffName}}. Semua persetujuan PIN Owner (void,
-refund, stok, selisih kas) diblokir sementara.
+PIN Owner salah dimasukkan berulang kali di kasir {{.StoreName}} (percobaan terakhir oleh {{.StaffName}}). Persetujuan PIN Owner diblokir sementara.
 
-Diblokir sampai: {{.ExpiresAt}}
+Diblokir hingga: {{.ExpiresAt}}
 Waktu kejadian : {{.EventAt}}
 
-Akun Anda tidak dikunci. Jika ini bukan Anda, periksa log audit dan
-pertimbangkan untuk mengganti PIN Owner.
+Akun Anda tidak terkunci. Bila bukan Anda yang mencoba, periksa log audit dan segera ganti PIN Owner.
 
 --
-{{.StoreName}} (MyCaffe). Email otomatis, mohon tidak dibalas.
+{{.StoreName}} | Cassy by AzureDevID. Email otomatis, jangan dibalas.

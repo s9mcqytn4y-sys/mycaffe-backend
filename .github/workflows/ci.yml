@@ -284,7 +284,7 @@ jobs:
         run: |
           # Same command as ./scripts/dev.ps1 test-int: every package, so a new integration test cannot be left out.
           set -o pipefail
-          go test -v -race -count=1 -timeout 10m ./... | tee go-test.log
+          go test -v -race -count=1 -p 1 -timeout 10m ./... | tee go-test.log
           # With a database available, a skipped DB test means its env wiring broke: fail instead of passing silently.
           if grep -E -- '--- SKIP: Test[A-Za-z0-9_]*(Integration|RLS)' go-test.log; then
             echo "Integration tests were skipped although TEST_APP_DATABASE_URL is set." >&2

@@ -1,5 +1,5 @@
 -- db/seeds/test_fixtures.sql (CI & Integration Test Fixtures Only - APP_ENV=test)
--- Development & Demo Seed Data for MyCaffe Core POS
+-- Development & Demo Seed Data for Cassy Core POS (by AzureDevID)
 -- Multi-tenant realistic catalog with Indonesian Rupiah whole integer amounts, Basis Points (BPS),
 -- WebP studio media assets on Cloudflare R2 CDN (https://cdn.abbdullaziz.online/seeds/...),
 -- and ZERO pre-seeded orders/transactions so demo environments start with a clean financial ledger.
@@ -17,7 +17,7 @@ VALUES
     (
         '11111111-1111-4111-8111-111111111111',
         'central-cafe',
-        'MyCaffe Flagship Roastery - Senopati',
+        'Cassy Roastery Senopati',
         'Jl. Senopati No. 88, Kebayoran Baru, Jakarta Selatan 12190',
         '021-52908811',
         'Asia/Jakarta',
@@ -35,7 +35,7 @@ VALUES
     (
         '22222222-2222-4222-8222-222222222222',
         'express-counter',
-        'MyCaffe Express Grab & Go - Sudirman MRT',
+        'Cassy Express Sudirman MRT',
         'Stasiun MRT Istora Mandiri Pintu B, Jl. Jend. Sudirman Kav. 52-53, Jakarta Selatan 12190',
         '021-57901122',
         'Asia/Jakarta',
@@ -60,20 +60,20 @@ ON CONFLICT (id) DO UPDATE SET
 -- =============================================================================
 -- 2. USERS (STAFF - 4 Operational Roles: owner, cashier, barista, kitchen)
 -- Development-only PIN for every seeded user: 482913 (argon2id, ADR-003 D2).
--- Owner email is kept strictly as abdulaziz543333@gmail.com.
+-- Owner email is kept strictly as abdulaziz543333@gmail.com with verified test phone +628567060477.
 -- =============================================================================
 INSERT INTO users (id, store_id, email, full_name, role, phone, pin_hash, is_active, pin_set_at)
 VALUES
-    -- Store 1: MyCaffe Flagship Roastery - Senopati
-    ('a0000001-0000-4000-8000-000000000001', '11111111-1111-4111-8111-111111111111', 'abdulaziz543333@gmail.com', 'Abdul Aziz (Owner & Principal Roaster)', 'owner', '+628119008811', '$argon2id$v=19$m=19456,t=2,p=1$asaQjWwUQ7vf35jdVNPtlw$giPi5ZwfklHxgmJ2rcCuvkNw3zn5mEfDTdbaGvy+sFY', true, NOW()),
+    -- Store 1: Cassy Roastery Senopati
+    ('a0000001-0000-4000-8000-000000000001', '11111111-1111-4111-8111-111111111111', 'abdulaziz543333@gmail.com', 'Abdul Aziz (Owner & Principal Roaster)', 'owner', '+628567060477', '$argon2id$v=19$m=19456,t=2,p=1$asaQjWwUQ7vf35jdVNPtlw$giPi5ZwfklHxgmJ2rcCuvkNw3zn5mEfDTdbaGvy+sFY', true, NOW()),
     ('a0000002-0000-4000-8000-000000000002', '11111111-1111-4111-8111-111111111111', 'kitchen.central@mycaffe.local', 'Chef Rendra Pratama (Head Kitchen)', 'kitchen', '+628129008812', '$argon2id$v=19$m=19456,t=2,p=1$asaQjWwUQ7vf35jdVNPtlw$giPi5ZwfklHxgmJ2rcCuvkNw3zn5mEfDTdbaGvy+sFY', true, NOW()),
     ('a0000003-0000-4000-8000-000000000003', '11111111-1111-4111-8111-111111111111', 'cashier.central@mycaffe.local', 'Nadya Kusuma (Senior Cashier)', 'cashier', '+628129008813', '$argon2id$v=19$m=19456,t=2,p=1$asaQjWwUQ7vf35jdVNPtlw$giPi5ZwfklHxgmJ2rcCuvkNw3zn5mEfDTdbaGvy+sFY', true, NOW()),
     ('a0000004-0000-4000-8000-000000000004', '11111111-1111-4111-8111-111111111111', 'barista.central@mycaffe.local', 'Dimas Saputra (Head Barista)', 'barista', '+628129008814', '$argon2id$v=19$m=19456,t=2,p=1$asaQjWwUQ7vf35jdVNPtlw$giPi5ZwfklHxgmJ2rcCuvkNw3zn5mEfDTdbaGvy+sFY', true, NOW()),
     ('a0000006-0000-4000-8000-000000000006', '11111111-1111-4111-8111-111111111111', 'barista.roastery@abbdullaziz.online', 'Bagas Adi Nugroho (Specialty Barista)', 'barista', '+628129008816', '$argon2id$v=19$m=19456,t=2,p=1$asaQjWwUQ7vf35jdVNPtlw$giPi5ZwfklHxgmJ2rcCuvkNw3zn5mEfDTdbaGvy+sFY', true, NOW()),
-    ('a0000007-0000-4000-8000-000000000007', '11111111-1111-4111-8111-111111111111', 'pastry.senopati@abbdullaziz.online', 'kezia Maharani (Pastry & Viennoiserie Chef)', 'kitchen', '+628129008817', '$argon2id$v=19$m=19456,t=2,p=1$asaQjWwUQ7vf35jdVNPtlw$giPi5ZwfklHxgmJ2rcCuvkNw3zn5mEfDTdbaGvy+sFY', true, NOW()),
-    -- Store 2: MyCaffe Express Grab & Go - Sudirman MRT
+    ('a0000007-0000-4000-8000-000000000007', '11111111-1111-4111-8111-111111111111', 'pastry.senopati@abbdullaziz.online', 'Kezia Maharani (Pastry & Viennoiserie Chef)', 'kitchen', '+628129008817', '$argon2id$v=19$m=19456,t=2,p=1$asaQjWwUQ7vf35jdVNPtlw$giPi5ZwfklHxgmJ2rcCuvkNw3zn5mEfDTdbaGvy+sFY', true, NOW()),
+    -- Store 2: Cassy Express Sudirman MRT
     ('a0000005-0000-4000-8000-000000000005', '22222222-2222-4222-8222-222222222222', 'cashier.express@mycaffe.local', 'Larasati Putri (Express Cashier)', 'cashier', '+628129008821', '$argon2id$v=19$m=19456,t=2,p=1$asaQjWwUQ7vf35jdVNPtlw$giPi5ZwfklHxgmJ2rcCuvkNw3zn5mEfDTdbaGvy+sFY', true, NOW()),
-    ('a0000008-0000-4000-8000-000000000008', '22222222-2222-4222-8222-222222222222', 'abdulaziz543333@gmail.com', 'Abdul Aziz (Owner & Principal Roaster)', 'owner', '+628119008822', '$argon2id$v=19$m=19456,t=2,p=1$asaQjWwUQ7vf35jdVNPtlw$giPi5ZwfklHxgmJ2rcCuvkNw3zn5mEfDTdbaGvy+sFY', true, NOW()),
+    ('a0000008-0000-4000-8000-000000000008', '22222222-2222-4222-8222-222222222222', 'abdulaziz543333@gmail.com', 'Abdul Aziz (Owner & Principal Roaster)', 'owner', '+628567060477', '$argon2id$v=19$m=19456,t=2,p=1$asaQjWwUQ7vf35jdVNPtlw$giPi5ZwfklHxgmJ2rcCuvkNw3zn5mEfDTdbaGvy+sFY', true, NOW()),
     ('a0000009-0000-4000-8000-000000000009', '22222222-2222-4222-8222-222222222222', 'barista.express@abbdullaziz.online', 'Rizky Ramadhan (Express Barista)', 'barista', '+628129008823', '$argon2id$v=19$m=19456,t=2,p=1$asaQjWwUQ7vf35jdVNPtlw$giPi5ZwfklHxgmJ2rcCuvkNw3zn5mEfDTdbaGvy+sFY', true, NOW())
 ON CONFLICT (id) DO UPDATE SET
     email = EXCLUDED.email,
@@ -183,7 +183,7 @@ VALUES
 
     -- Store 2: Express Croissant & Morning Bakery (c0000011)
     ('d0000036-0000-4000-8000-000000000036', '22222222-2222-4222-8222-222222222222', 'c0000011-0000-4000-8000-000000000011', 'Smoked Beef & Cheddar Croissant', 'Butter croissant hangat berisi irisan daging sapi asap dan keju red cheddar leleh', 34000, 'https://cdn.abbdullaziz.online/seeds/products/smoked-beef-cheddar-croissant-1x1.webp', 'ready_to_serve', 'bar', 1, true, true, 20),
-    ('d0000037-0000-4000-8000-000000000037', '22222222-2222-4222-8222-222222222222', 'c0000011-0000-4000-8000-000000000011', 'Cinnamon Sugar Brioche Cruffin', 'kombinasi croissant dan muffin berlapis gula kayu manis dengan isian krim vanila', 26000, 'https://cdn.abbdullaziz.online/seeds/products/cinnamon-sugar-cruffin-1x1.webp', 'ready_to_serve', 'bar', 2, true, true, 18),
+    ('d0000037-0000-4000-8000-000000000037', '22222222-2222-4222-8222-222222222222', 'c0000011-0000-4000-8000-000000000011', 'Cinnamon Sugar Brioche Cruffin', 'Kombinasi croissant dan muffin berlapis gula kayu manis dengan isian krim vanila', 26000, 'https://cdn.abbdullaziz.online/seeds/products/cinnamon-sugar-cruffin-1x1.webp', 'ready_to_serve', 'bar', 2, true, true, 18),
     ('d0000038-0000-4000-8000-000000000038', '22222222-2222-4222-8222-222222222222', 'c0000011-0000-4000-8000-000000000011', 'Banana Walnut Espresso Loaf', 'Bolu pisang raja panggang lembap dengan campuran kenari California dan sentuhan espresso', 24000, 'https://cdn.abbdullaziz.online/seeds/products/banana-walnut-coffee-cake-1x1.webp', 'ready_to_serve', 'bar', 3, true, true, 22)
 ON CONFLICT (id) DO UPDATE SET
     category_id = EXCLUDED.category_id,

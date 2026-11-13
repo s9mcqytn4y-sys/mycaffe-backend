@@ -35,6 +35,27 @@ var (
 		Name: "mycaffe_email_send_failures_total",
 		Help: "Failed email deliveries; permanent=true means the email will not be retried.",
 	}, []string{"permanent"})
+
+	MidtransRequests = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "cassy_midtrans_requests_total",
+		Help: "Midtrans Core API calls by operation, payment method, and status.",
+	}, []string{"operation", "method", "status"})
+
+	MidtransDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "cassy_midtrans_request_duration_seconds",
+		Help:    "Midtrans Core API call latency by operation.",
+		Buckets: prometheus.DefBuckets,
+	}, []string{"operation"})
+
+	MidtransWebhookEvents = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "cassy_midtrans_webhook_events_total",
+		Help: "Midtrans webhook notifications by lane and outcome.",
+	}, []string{"lane", "outcome"})
+
+	RealtimeClients = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "cassy_realtime_ws_clients",
+		Help: "Currently connected WebSocket clients across KDS, Cashier, and Order Tracker.",
+	})
 )
 
 // WorkerSucceeded records a completed worker cycle.

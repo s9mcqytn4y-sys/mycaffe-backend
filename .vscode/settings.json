@@ -6,6 +6,22 @@
   "files.eol": "\n",
   "files.trimTrailingWhitespace": true,
   "files.insertFinalNewline": true,
+  "[markdown]": {
+    "files.trimTrailingWhitespace": false
+  },
+  "[html]": {
+    "editor.formatOnSave": false
+  },
+  "markdownlint.config": {
+    "default": true,
+    "MD013": false,
+    "MD033": false,
+    "MD060": false,
+    "MD024": {
+      "siblings_only": true
+    }
+  },
+  "antislop.runOn": "save",
   "files.exclude": {
     "**/.git": true,
     "**/bin": true,

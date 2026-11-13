@@ -1,10 +1,9 @@
 Halo {{.RecipientName}},
 
 PIN akun Anda di {{.StoreName}} telah diubah pada {{.EventAt}}.
-Semua perangkat yang sebelumnya masuk sudah dikeluarkan.
+Seluruh sesi perangkat aktif sudah dikeluarkan.
 
-BUKAN ANDA? Segera hubungi pemilik toko agar akun Anda dinonaktifkan
-dan PIN diatur ulang.
+BUKAN ANDA? Hubungi pemilik toko sekarang agar akun dinonaktifkan dan PIN diatur ulang.
 
 --
-{{.StoreName}} (MyCaffe). Email otomatis, mohon tidak dibalas.
+{{.StoreName}} | Cassy by AzureDevID. Email otomatis, jangan dibalas.

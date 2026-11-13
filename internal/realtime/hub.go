@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/pkg/metrics"
 )
 
 const (
@@ -124,6 +125,7 @@ func (h *Hub) RunWithContext(ctx context.Context) {
 		case client := <-h.register:
 			h.mu.Lock()
 			h.clients[client] = true
+			metrics.RealtimeClients.Set(float64(len(h.clients)))
 			h.mu.Unlock()
 		case client := <-h.unregister:
 			h.removeClient(client)
@@ -134,12 +136,27 @@ func (h *Hub) RunWithContext(ctx context.Context) {
 				continue
 			}
 
+			// Avoid JSON marshaling cost when no client for this store/channel is connected.
+			h.mu.RLock()
+			hasSubscriber := false
+			for client := range h.clients {
+				if client.storeID == message.StoreID && client.subscribed(message.Channels) {
+					hasSubscriber = true
+					break
+				}
+			}
+			h.mu.RUnlock()
+			if !hasSubscriber {
+				continue
+			}
+
 			data, err := json.Marshal(message)
 			if err != nil {
 				log.Printf("[REALTIME] Error marshaling event: %v", err)
 				continue
 			}
 
+			var slowClients []*Client
 			h.mu.RLock()
 			for client := range h.clients {
 				// Strict tenant isolation plus channel routing.
@@ -147,12 +164,15 @@ func (h *Hub) RunWithContext(ctx context.Context) {
 					select {
 					case client.send <- data:
 					default:
-						// Slow client or blocked channel: safely unregister
-						go h.removeClient(client)
+						// Slow client or blocked channel: collect outside RLock and remove once.
+						slowClients = append(slowClients, client)
 					}
 				}
 			}
 			h.mu.RUnlock()
+			for _, slow := range slowClients {
+				h.removeClient(slow)
+			}
 		}
 	}
 }
@@ -175,6 +195,7 @@ func (h *Hub) closeAllClients() {
 			_ = client.conn.Close()
 		}
 	}
+	metrics.RealtimeClients.Set(0)
 }
 
 func (h *Hub) removeClient(client *Client) {
@@ -185,6 +206,7 @@ func (h *Hub) removeClient(client *Client) {
 			close(client.send)
 		}
 	}
+	metrics.RealtimeClients.Set(float64(len(h.clients)))
 	h.mu.Unlock()
 }
 

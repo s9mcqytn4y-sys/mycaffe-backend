@@ -1,14 +1,13 @@
 Halo {{.RecipientName}},
 
-Ada permintaan untuk mengatur ulang PIN akun Anda di {{.StoreName}}{{if .ActorName}} (diminta oleh {{.ActorName}}){{end}}.
-Buat PIN 6 digit yang baru melalui tautan berikut:
+Ada permintaan atur ulang PIN untuk akun Anda di {{.StoreName}}{{if .ActorName}} oleh {{.ActorName}}{{end}}.
+Buat PIN 6 digit baru melalui tautan berikut:
 
 {{.ActionURL}}
 
-Tautan berlaku sampai {{.ExpiresAt}} dan hanya bisa dipakai sekali.
-Setelah PIN baru dibuat, semua perangkat yang sedang masuk akan dikeluarkan.
+Tautan berlaku hingga {{.ExpiresAt}} (satu kali pakai). Setelah PIN disimpan, semua perangkat yang masuk akan dikeluarkan.
 
-Tidak meminta reset? Abaikan email ini. PIN lama Anda tetap berlaku.
+Abaikan email ini bila Anda tidak meminta reset PIN.
 
 --
-{{.StoreName}} (MyCaffe). Email otomatis, mohon tidak dibalas.
+{{.StoreName}} | Cassy by AzureDevID. Email otomatis, jangan dibalas.

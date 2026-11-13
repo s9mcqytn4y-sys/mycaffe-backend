@@ -12,6 +12,7 @@ import (
 	"github.com/getsentry/sentry-go"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/pkg/logging"
 	"github.com/s9mcqytn4y-sys/cassy-backend/internal/pkg/metrics"
 )
 
@@ -59,16 +60,26 @@ func ScrubSentryEvent(event *sentry.Event, _ *sentry.EventHint) *sentry.Event {
 	return event
 }
 
-// RequestID propagates a well-formed inbound X-Request-ID (e.g. from Nginx) or creates one, and
-// echoes it on the response so a cashier's error report can be matched to server logs.
+// RequestID propagates a well-formed inbound X-Request-ID and W3C traceparent header (or creates them),
+// echoing both on the response so support, frontend telemetry, Sentry, and server logs correlate cleanly.
 func RequestID() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.GetHeader(RequestIDHeader)
 		if !safeRequestID.MatchString(id) {
 			id = uuid.NewString()
 		}
+		traceID, spanID, ok := logging.ParseTraceparent(c.GetHeader(logging.TraceparentHeader))
+		var traceparent string
+		if ok {
+			traceparent = strings.ToLower(strings.TrimSpace(c.GetHeader(logging.TraceparentHeader)))
+		} else {
+			traceID, spanID, traceparent = logging.NewTraceparent()
+		}
 		c.Set(RequestIDHeader, id)
+		c.Set(logging.TraceIDKey, traceID)
+		c.Set(logging.SpanIDKey, spanID)
 		c.Header(RequestIDHeader, id)
+		c.Header(logging.TraceparentHeader, traceparent)
 		c.Next()
 	}
 }
@@ -89,8 +100,10 @@ func AccessLog() gin.HandlerFunc {
 		metrics.HTTPDuration.WithLabelValues(c.Request.Method, route).Observe(elapsed.Seconds())
 
 		reqID := c.GetString(RequestIDHeader)
+		traceID := c.GetString(logging.TraceIDKey)
 		attrs := []any{
 			"request_id", reqID,
+			"trace_id", traceID,
 			"method", c.Request.Method,
 			"route", route,
 			"status", status,
@@ -120,15 +133,19 @@ func Recover() gin.HandlerFunc {
 		defer func() {
 			if r := recover(); r != nil {
 				reqID := c.GetString(RequestIDHeader)
+				traceID := c.GetString(logging.TraceIDKey)
 				route := c.FullPath()
 				if route == "" {
 					route = "unmatched"
 				}
-				slog.Error("panic", "request_id", reqID, "route", route, "panic", r, "stack", string(debug.Stack()))
+				slog.Error("panic", "request_id", reqID, "trace_id", traceID, "route", route, "panic", r, "stack", string(debug.Stack()))
 
 				hub := sentry.CurrentHub().Clone()
 				hub.ConfigureScope(func(scope *sentry.Scope) {
 					scope.SetTag("request_id", reqID)
+					if traceID != "" {
+						scope.SetTag("trace_id", traceID)
+					}
 					scope.SetTag("route", route)
 					scope.SetTag("method", c.Request.Method)
 					if staff := currentStaff(c); staff != nil {
@@ -152,6 +169,9 @@ func captureRequestErrorToSentry(c *gin.Context, reqID, route, storeID string, s
 	hub := sentry.CurrentHub().Clone()
 	hub.ConfigureScope(func(scope *sentry.Scope) {
 		scope.SetTag("request_id", reqID)
+		if traceID := c.GetString(logging.TraceIDKey); traceID != "" {
+			scope.SetTag("trace_id", traceID)
+		}
 		scope.SetTag("route", route)
 		scope.SetTag("method", c.Request.Method)
 		scope.SetTag("http.status_code", strconv.Itoa(status))

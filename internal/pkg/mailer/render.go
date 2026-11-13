@@ -26,6 +26,40 @@ const (
 	TemplateOnboardingProvisioned = "onboarding_provisioned"
 )
 
+var allTemplateNames = []string{
+	TemplateStaffInvite,
+	TemplatePINReset,
+	TemplatePINChanged,
+	TemplateAccountLocked,
+	TemplateOwnerPINAttempts,
+	TemplateReceipt,
+	TemplateInvoiceReminder,
+	TemplateOnboardingOTP,
+	TemplateOnboardingProvisioned,
+}
+
+type compiledTemplatePair struct {
+	html *htmltemplate.Template
+	text *texttemplate.Template
+}
+
+var compiledTemplates map[string]compiledTemplatePair
+
+func init() {
+	compiledTemplates = make(map[string]compiledTemplatePair, len(allTemplateNames))
+	for _, name := range allTemplateNames {
+		htmlTmpl, err := htmltemplate.ParseFS(templateFS, "templates/layout.html", "templates/"+name+".html")
+		if err != nil {
+			panic(fmt.Sprintf("mailer: compile html template %s: %v", name, err))
+		}
+		textTmpl, err := texttemplate.ParseFS(templateFS, "templates/"+name+".txt")
+		if err != nil {
+			panic(fmt.Sprintf("mailer: compile text template %s: %v", name, err))
+		}
+		compiledTemplates[name] = compiledTemplatePair{html: htmlTmpl, text: textTmpl}
+	}
+}
+
 // ReceiptItem represents an itemized line in a digital receipt.
 type ReceiptItem struct {
 	Name          string
@@ -78,26 +112,23 @@ type Rendered struct {
 	Text    string
 }
 
-// Render produces subject, HTML (auto-escaped by html/template) and plain-text bodies.
+// Render produces subject, HTML (auto-escaped by html/template) and plain-text bodies
+// using pre-compiled embedded templates.
 func Render(name string, data Data) (Rendered, error) {
-	htmlTmpl, err := htmltemplate.ParseFS(templateFS, "templates/layout.html", "templates/"+name+".html")
-	if err != nil {
-		return Rendered{}, fmt.Errorf("parse %s html template: %w", name, err)
+	pair, ok := compiledTemplates[name]
+	if !ok {
+		return Rendered{}, fmt.Errorf("unknown mailer template %q", name)
 	}
 	var subject, html bytes.Buffer
-	if err := htmlTmpl.ExecuteTemplate(&subject, "subject", data); err != nil {
+	if err := pair.html.ExecuteTemplate(&subject, "subject", data); err != nil {
 		return Rendered{}, fmt.Errorf("render %s subject: %w", name, err)
 	}
-	if err := htmlTmpl.ExecuteTemplate(&html, "layout", data); err != nil {
+	if err := pair.html.ExecuteTemplate(&html, "layout.html", data); err != nil {
 		return Rendered{}, fmt.Errorf("render %s html: %w", name, err)
 	}
 
-	textTmpl, err := texttemplate.ParseFS(templateFS, "templates/"+name+".txt")
-	if err != nil {
-		return Rendered{}, fmt.Errorf("parse %s text template: %w", name, err)
-	}
 	var text bytes.Buffer
-	if err := textTmpl.Execute(&text, data); err != nil {
+	if err := pair.text.Execute(&text, data); err != nil {
 		return Rendered{}, fmt.Errorf("render %s text: %w", name, err)
 	}
 	// html/template escapes the subject for HTML; the Subject header needs the plain string.

@@ -1,0 +1,18 @@
+preset: default
+
+maxConsecutiveShortSentences: 5
+shortSentenceWordThreshold: 6
+
+rules:
+  vocab.banned:
+    enabled: true
+    severity: warning
+  phrases.banned:
+    enabled: true
+    severity: warning
+  punctuation.emDash:
+    enabled: true
+    severity: error
+  pattern.negativeParallelism:
+    enabled: true
+    severity: error

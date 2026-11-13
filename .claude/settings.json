@@ -8,6 +8,10 @@
       "Bash(go build *)",
       "Bash(go run *)",
       "Bash(go mod tidy*)",
+      "Bash(go list *)",
+      "Bash(govulncheck *)",
+      "Bash(gitleaks *)",
+      "Bash(curl *)",
       "Bash(git status*)",
       "Bash(git diff*)",
       "Bash(git log*)",
@@ -37,14 +41,8 @@
       "Bash(blender -b *)"
     ],
     "deny": [
-      "Read(./.env)",
-      "Read(./.env.demo)",
-      "Read(./.env.local)",
-      "Read(./.env.production)",
-      "Edit(./.env)",
-      "Edit(./.env.demo)",
-      "Edit(./.env.local)",
-      "Edit(./.env.production)",
+      "Read(./.env*)",
+      "Edit(./.env*)",
       "Bash(rm -rf /)",
       "Bash(git push --force*)",
       "Bash(git reset --hard*)"

@@ -50,9 +50,16 @@ func TestSendHandler(t *testing.T) {
 	if code := post(h, "Bearer "+testToken, ok); code != http.StatusNoContent {
 		t.Fatalf("send must be 204, got %d", code)
 	}
-	want := "+6281234567890|Terima kasih sudah berbelanja di Kafe Uji. Struk digital pesanan ORD-1 bisa dilihat di https://x/receipts/a. Tautan berlaku 90 hari."
+	want := "+6281234567890|Terima kasih sudah memesan di Kafe Uji via Cassy. Struk digital pesanan ORD-1 dapat dilihat di https://x/receipts/a. Tautan berlaku 90 hari."
 	if len(f.sent) != 1 || f.sent[0] != want {
 		t.Fatalf("unexpected message %v", f.sent)
+	}
+
+	if code := post(h, "Bearer "+testToken, `{"to":"+6281234567890","template":"cassy_order_receipt","params":["Aziz","ORD-2","Cassy Senopati","Rp50.000","QRIS","https://x/receipts/b"]}`); code != http.StatusNoContent {
+		t.Fatalf("6-param cassy_order_receipt must be 204, got %d", code)
+	}
+	if code := post(h, "Bearer "+testToken, `{"to":"+6281234567890","template":"tagihan_invoice","params":["Cassy Senopati","INV-1","Rp299.000","2026-12-01","Jatuh tempo"]}`); code != http.StatusNoContent {
+		t.Fatalf("tagihan_invoice must be 204, got %d", code)
 	}
 
 	f.err = ErrNotOnWhatsApp

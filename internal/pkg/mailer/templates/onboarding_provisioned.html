@@ -1,7 +1,7 @@
-{{define "subject"}}Gerai {{.StoreName}} Telah Aktif di MyCaffe{{end}}
-{{define "preheader"}}Akun Owner gerai {{.StoreSlug}} siap digunakan untuk konfigurasi menu, meja QR, dan Midtrans Sandbox.{{end}}
-{{define "html_body"}}<h1 style="margin:0 0 16px 0;font-size:22px;line-height:30px;color:#2C1810;">Selamat datang, {{.RecipientName}}!</h1>
-<p style="margin:0 0 16px 0;">Ruang kerja gerai <strong>{{.StoreName}}</strong> (kode login gerai: <code>{{.StoreSlug}}</code>) telah berhasil diprovisi pada platform <strong>MyCaffe by AzureDevID</strong> dengan status awal <strong>KYB Belum Terverifikasi (Mode Sandbox Aktif)</strong>.</p>
+{{define "subject"}}Gerai {{.StoreName}} Siap Digunakan di Cassy{{end}}
+{{define "preheader"}}Akun Owner gerai {{.StoreSlug}} aktif dalam mode Sandbox untuk uji menu, meja QR, dan Midtrans.{{end}}
+{{define "html_body"}}<h1 style="margin:0 0 12px 0;font-size:22px;line-height:30px;color:#17211E;">Selamat datang, {{.RecipientName}}</h1>
+<p style="margin:0 0 16px 0;">Gerai <strong>{{.StoreName}}</strong> (kode login: <code>{{.StoreSlug}}</code>) sudah aktif di platform <strong>Cassy by AzureDevID</strong> dengan mode awal <strong>Sandbox</strong> sementara tim memverifikasi dokumen usaha Anda.</p>
 {{if .ActionURL}}{{template "button" .}}{{end}}
-<p style="margin:0 0 16px 0;font-size:14px;line-height:22px;">Anda sudah dapat masuk ke POS &amp; Backoffice menggunakan email terdaftar dan PIN Owner awal Anda untuk mengatur katalog menu, mencetak meja QR, menguji kredensial <strong>Midtrans Sandbox BYOK</strong>, serta mengunduh skrip jaringan <strong>MikroTik RouterOS v7 (.rsc)</strong> sementara tim kami memverifikasi dokumen legalitas usaha Anda.</p>
-<p style="margin:0;font-size:14px;line-height:22px;color:#6B5B52;">Segera ubah PIN awal Anda pada menu Pengaturan Staf setelah berhasil masuk pertama kali.</p>{{end}}
+<p style="margin:0 0 12px 0;font-size:14px;line-height:22px;">Masuk ke Backoffice atau Cassy POS dengan email terdaftar dan PIN Owner awal untuk mengatur menu, mencetak QR meja, mencoba kredensial <strong>Midtrans Sandbox BYOK</strong>, serta mengunduh skrip <strong>MikroTik RouterOS v7 (.rsc)</strong>.</p>
+<p style="margin:0;font-size:14px;line-height:22px;color:#4A5954;">Ubah PIN Owner awal segera di menu Pengaturan Staf setelah masuk pertama kali.</p>{{end}}

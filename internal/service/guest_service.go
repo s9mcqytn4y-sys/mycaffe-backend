@@ -315,10 +315,19 @@ func (s *GuestService) ListOrders(ctx context.Context, g *GuestIdentity) ([]post
 
 // guestPaymentMethods are the gateway methods a guest may pick; the store must also have enabled them.
 var guestPaymentMethods = map[string]domain.PaymentMethod{
-	"":          domain.PaymentMethodQRIS,
-	"qris":      domain.PaymentMethodQRIS,
-	"gopay":     domain.PaymentMethodGoPay,
-	"shopeepay": domain.PaymentMethodShopeePay,
+	"":              domain.PaymentMethodQRIS,
+	"qris":          domain.PaymentMethodQRIS,
+	"gopay":         domain.PaymentMethodGoPay,
+	"shopeepay":     domain.PaymentMethodShopeePay,
+	"bank_transfer": domain.PaymentMethodBankTransfer,
+}
+
+var allowedVABanks = map[string]bool{
+	"bca":     true,
+	"bni":     true,
+	"bri":     true,
+	"mandiri": true,
+	"permata": true,
 }
 
 // SetPublicURL sets the WPA origin that e-wallet apps return the guest to after paying.
@@ -326,14 +335,18 @@ func (s *GuestService) SetPublicURL(publicURL string) {
 	s.publicURL = strings.TrimRight(publicURL, "/")
 }
 
-// InitiatePayment charges one of the guest's own orders through QRIS, GoPay or ShopeePay (Midtrans).
+// InitiatePayment charges one of the guest's own orders through QRIS, GoPay, ShopeePay, or Bank Transfer VA (Midtrans).
 // The e-wallet return URL is built here from the guest's own table, never taken from the request.
-func (s *GuestService) InitiatePayment(ctx context.Context, g *GuestIdentity, orderID uuid.UUID, idempotencyKey, method string) (*InitiatePaymentResult, error) {
+func (s *GuestService) InitiatePayment(ctx context.Context, g *GuestIdentity, orderID uuid.UUID, idempotencyKey, method, bank string) (*InitiatePaymentResult, error) {
 	f := fieldErrors{}
 	key := f.text("idempotency_key", idempotencyKey, 1, maxGuestIdempotentKey)
 	chosen, known := guestPaymentMethods[strings.ToLower(strings.TrimSpace(method))]
 	if !known {
-		f.add("method", "harus qris, gopay, atau shopeepay")
+		f.add("method", "harus qris, gopay, shopeepay, atau bank_transfer")
+	}
+	normalizedBank := strings.ToLower(strings.TrimSpace(bank))
+	if chosen == domain.PaymentMethodBankTransfer && !allowedVABanks[normalizedBank] {
+		f.add("bank", "harus bca, bni, bri, mandiri, atau permata")
 	}
 	if err := f.err(); err != nil {
 		return nil, err
@@ -347,7 +360,7 @@ func (s *GuestService) InitiatePayment(ctx context.Context, g *GuestIdentity, or
 		if owner == nil || *owner != g.SessionID {
 			return ErrGuestOrderNotFound
 		}
-		if chosen == domain.PaymentMethodQRIS {
+		if chosen == domain.PaymentMethodQRIS || chosen == domain.PaymentMethodBankTransfer {
 			return nil
 		}
 		return tx.GetContext(ctx, &qrToken, `SELECT qr_token FROM tables WHERE store_id = $1 AND id = $2`, g.StoreID, g.TableID)
@@ -362,6 +375,7 @@ func (s *GuestService) InitiatePayment(ctx context.Context, g *GuestIdentity, or
 		OrderID:        orderID,
 		IdempotencyKey: "g:" + g.SessionID.String() + ":" + key,
 		Method:         chosen,
+		Bank:           normalizedBank,
 	}
 	if qrToken != "" && s.publicURL != "" {
 		input.CallbackURL = s.publicURL + "/order/" + url.PathEscape(qrToken)

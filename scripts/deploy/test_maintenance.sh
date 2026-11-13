@@ -27,10 +27,10 @@ docker run -d --name "${NET}-nginx" --network "${NET}" \
 sleep 2
 
 fail=0
-# expect <path> <status> <body substring> [Retry-After]
+# expect <path> <status> <body substring> [Retry-After] [method]
 expect() {
-  local out code
-  out="$(docker run --rm --network "${NET}" curlimages/curl:8.11.1 -s -i "http://${NET}-nginx$1" | tr -d '\r')"
+  local out code method="${5:-GET}"
+  out="$(docker run --rm --network "${NET}" curlimages/curl:8.11.1 -s -i -X "${method}" "http://${NET}-nginx$1" | tr -d '\r')"
   code="$(echo "${out}" | head -1 | awk '{print $2}')"
   if [[ "${code}" != "$2" ]] || ! grep -qF -- "$3" <<<"${out}" || { [[ -n "${4:-}" ]] && ! grep -qi "^Retry-After: $4" <<<"${out}"; }; then
     echo "FAIL $1: want $2 '$3' ${4:+Retry-After $4}, got ${code}"; fail=1
@@ -48,8 +48,9 @@ echo "== switch on"
 expect /order/abc 503 "pemeliharaan singkat" 120
 expect /api/v1/public/qr/x 503 '"code":"MAINTENANCE"' 120
 expect /ws 503 '"code":"MAINTENANCE"' 120
-expect /api/v1/payments/midtrans/webhook 200 upstream
-expect /api/v1/payments/midtrans/webhook/central-cafe 200 upstream
+expect /api/v1/payments/midtrans/webhook 403 "" "" GET
+expect /api/v1/payments/midtrans/webhook 200 upstream "" POST
+expect /api/v1/payments/midtrans/webhook/central-cafe 200 upstream "" POST
 expect /health/ready 200 upstream
 expect /_maintenance.html 404 "Not Found"
 

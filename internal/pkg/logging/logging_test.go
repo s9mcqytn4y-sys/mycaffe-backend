@@ -14,7 +14,7 @@ func TestRedactAttrAndString(t *testing.T) {
 		"pin", "123456",
 		"jwt_token", "dummy-test-token",
 		"authorization", "Bearer dummy-auth-value",
-		"msg_detail", "failed using Mid-server-" + "testvalue",
+		"msg_detail", "failed using Mid-server-"+"testvalue",
 		"store_id", "store-01",
 	)
 

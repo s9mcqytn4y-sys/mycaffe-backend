@@ -177,7 +177,7 @@ func (h *GuestHandler) ListOrders(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"orders": orders})
 }
 
-// InitiatePayment handles POST /api/v1/public/guest/orders/:id/payments (dynamic QRIS only).
+// InitiatePayment handles POST /api/v1/public/guest/orders/:id/payments (QRIS, GoPay, ShopeePay, or Bank Transfer VA).
 func (h *GuestHandler) InitiatePayment(c *gin.Context) {
 	orderID, ok := pathID(c, "id")
 	if !ok {
@@ -193,11 +193,12 @@ func (h *GuestHandler) InitiatePayment(c *gin.Context) {
 	var req struct {
 		IdempotencyKey string `json:"idempotency_key"`
 		Method         string `json:"method"`
+		Bank           string `json:"bank"`
 	}
 	if !bindJSON(c, &req) {
 		return
 	}
-	res, err := h.guests.InitiatePayment(c.Request.Context(), currentGuest(c), orderID, req.IdempotencyKey, req.Method)
+	res, err := h.guests.InitiatePayment(c.Request.Context(), currentGuest(c), orderID, req.IdempotencyKey, req.Method, req.Bank)
 	if err != nil {
 		writeGuestPaymentError(c, err)
 		return

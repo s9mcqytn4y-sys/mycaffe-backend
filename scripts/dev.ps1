@@ -166,7 +166,7 @@ switch ($Command) {
             Invoke-Native go @('run', './cmd/migrate', '-action=seed', '-seed-file=db/seeds/test_fixtures.sql')
             $env:TEST_APP_DATABASE_URL = "postgres://mycaffe_app:it_app@127.0.0.1:$TestPort/mycaffe_test?sslmode=disable"
             $env:TEST_MIGRATOR_DATABASE_URL = $migrator
-            Invoke-Native go @('test', '-race', '-count=1', './...')
+            Invoke-Native go @('test', '-race', '-count=1', '-p', '1', './...')
         }
         finally {
             docker rm -f $TestContainer 2>$null | Out-Null

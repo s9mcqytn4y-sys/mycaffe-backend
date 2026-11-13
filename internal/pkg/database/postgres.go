@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"net/url"
 	"time"
@@ -44,10 +45,30 @@ func NewPostgresDB(cfg *config.Config) (*sqlx.DB, error) {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
-	db.SetMaxOpenConns(25)
-	db.SetMaxIdleConns(10)
-	db.SetConnMaxLifetime(15 * time.Minute)
-	db.SetConnMaxIdleTime(5 * time.Minute)
+	maxOpen := cfg.DBMaxOpenConns
+	if maxOpen <= 0 {
+		maxOpen = 25
+	}
+	maxIdle := cfg.DBMaxIdleConns
+	if maxIdle <= 0 {
+		maxIdle = 10
+	}
+	if maxIdle > maxOpen {
+		maxIdle = maxOpen
+	}
+	connMaxLife := cfg.DBConnMaxLifetime
+	if connMaxLife <= 0 {
+		connMaxLife = 15 * time.Minute
+	}
+	connMaxIdle := cfg.DBConnMaxIdleTime
+	if connMaxIdle <= 0 {
+		connMaxIdle = 5 * time.Minute
+	}
+
+	db.SetMaxOpenConns(maxOpen)
+	db.SetMaxIdleConns(maxIdle)
+	db.SetConnMaxLifetime(connMaxLife)
+	db.SetConnMaxIdleTime(connMaxIdle)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -85,6 +106,36 @@ func WithTenantTx(ctx context.Context, db *sqlx.DB, storeID uuid.UUID, fn func(t
 
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit tenant transaction: %w", err)
+	}
+
+	return nil
+}
+
+// WithReadOnlyTenantTx executes fn inside a read-only ACID transaction with PostgreSQL RLS
+// session-local tenant context set, preventing accidental writes on catalog/report read paths.
+func WithReadOnlyTenantTx(ctx context.Context, db *sqlx.DB, storeID uuid.UUID, fn func(tx *sqlx.Tx) error) error {
+	if storeID == uuid.Nil {
+		return fmt.Errorf("tenant store_id cannot be nil")
+	}
+
+	tx, err := db.BeginTxx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return fmt.Errorf("failed to begin read-only transaction: %w", err)
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
+
+	if _, err := tx.ExecContext(ctx, "SELECT set_config('app.current_store_id', $1, true)", storeID.String()); err != nil {
+		return fmt.Errorf("failed to set tenant RLS context: %w", err)
+	}
+
+	if err := fn(tx); err != nil {
+		return err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit read-only tenant transaction: %w", err)
 	}
 
 	return nil

@@ -1,16 +1,15 @@
 Halo {{.RecipientName}},
 
-{{.ActorName}} menambahkan Anda sebagai {{.RoleLabel}} di {{.StoreName}}.
-Buat PIN 6 digit untuk mulai masuk ke aplikasi kasir:
+{{.ActorName}} mengundang Anda sebagai {{.RoleLabel}} di {{.StoreName}}.
+Buat PIN 6 digit untuk mulai masuk ke Cassy POS:
 
 {{.ActionURL}}
 
-Kode toko     : {{.StoreSlug}}
+Kode gerai    : {{.StoreSlug}}
 Email masuk   : {{.RecipientEmail}}
-Berlaku sampai: {{.ExpiresAt}}
+Berlaku hingga: {{.ExpiresAt}}
 
-Jangan bagikan PIN kepada siapa pun, termasuk pemilik toko.
-Jika Anda tidak merasa diundang, abaikan email ini.
+Jangan bagikan PIN kepada siapa pun. Abaikan email ini bila Anda tidak merasa diundang.
 
 --
-{{.StoreName}} (MyCaffe). Email otomatis, mohon tidak dibalas.
+{{.StoreName}} | Cassy by AzureDevID. Email otomatis, jangan dibalas.

@@ -14,10 +14,17 @@
 
 name: mycaffe-demo
 
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   postgres:
     image: postgres:18-alpine
     restart: unless-stopped
+    logging: *default-logging
     environment:
       POSTGRES_DB: ${DB_NAME:-mycaffe_demo}
       POSTGRES_USER: ${DB_SUPERUSER:-postgres}
@@ -68,6 +75,7 @@ services:
   api:
     image: mycaffe-api:demo
     restart: unless-stopped
+    logging: *default-logging
     depends_on:
       postgres:
         condition: service_healthy
@@ -109,7 +117,8 @@ services:
       SMTP_USERNAME: ${SMTP_USERNAME:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       EMAIL_FROM_ADDRESS: ${EMAIL_FROM_ADDRESS:-}
-      EMAIL_FROM_NAME: ${EMAIL_FROM_NAME:-MyCaffe Demo}
+      EMAIL_FROM_NAME: ${EMAIL_FROM_NAME:-Cassy Demo}
+      MIDTRANS_QRIS_ACQUIRER: ${MIDTRANS_QRIS_ACQUIRER:-gopay}
       APP_PUBLIC_URL: ${APP_PUBLIC_URL:-https://demo.abbdullaziz.online}
       DEFAULT_STORE_SLUG: ${DEFAULT_STORE_SLUG:-central-cafe}
       STORAGE_DRIVER: ${STORAGE_DRIVER:-local}
@@ -134,6 +143,7 @@ services:
   nginx:
     image: nginx:1.27-alpine
     restart: unless-stopped
+    logging: *default-logging
     ports:
       - "127.0.0.1:${DEMO_HTTP_PORT:-8088}:80"
     volumes:
@@ -160,7 +170,7 @@ services:
     # For an ephemeral Quick Tunnel without a token, set CLOUDFLARE_TUNNEL_COMMAND="--url http://nginx:80".
     environment:
       TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
-    command: tunnel --no-autoupdate --metrics 0.0.0.0:2000 ${CLOUDFLARE_TUNNEL_COMMAND:-run}
+    command: tunnel --no-autoupdate --metrics 127.0.0.1:2000 ${CLOUDFLARE_TUNNEL_COMMAND:-run}
     depends_on:
       nginx:
         condition: service_healthy

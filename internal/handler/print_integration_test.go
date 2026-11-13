@@ -315,11 +315,17 @@ func TestPrintQueueIntegration(t *testing.T) {
 			t.Fatalf("a failure must retry later, got %+v", j)
 		}
 		inStore(func(tx *sqlx.Tx) error {
-			_, err := tx.ExecContext(ctx, `UPDATE print_jobs SET attempts = 4, next_attempt_at = NOW() - INTERVAL '1 second' WHERE store_id = $1 AND id = $2`, storeID, job.ID)
+			_, err := tx.ExecContext(ctx, `UPDATE print_jobs SET attempts = 4, next_attempt_at = NOW() - INTERVAL '1 hour' WHERE store_id = $1 AND id = $2`, storeID, job.ID)
 			return err
 		})
-		_, job = claimOwn(kitchen.AgentToken)
-		call("POST", fmt.Sprintf("/print-agent/jobs/%s/ack", job.ID), "Printer "+kitchen.AgentToken, map[string]any{"status": "failed", "error": "paper out"})
+		var code int
+		code, job = claimOwn(kitchen.AgentToken)
+		if code != http.StatusOK {
+			t.Fatalf("fifth claim failed: %d", code)
+		}
+		if res := call("POST", fmt.Sprintf("/print-agent/jobs/%s/ack", job.ID), "Printer "+kitchen.AgentToken, map[string]any{"status": "failed", "error": "paper out"}); res.Code != http.StatusNoContent {
+			t.Fatalf("fifth failed ack: %d", res.Code)
+		}
 		if j := jobs()[kitchen.ID]; j.Status != "dead" || events("print_job.failed", job.ID) != 1 {
 			t.Fatalf("the fifth failure must go dead with an event, got %+v", j)
 		}

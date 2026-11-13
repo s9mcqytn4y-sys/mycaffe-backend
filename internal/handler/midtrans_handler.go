@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/pkg/metrics"
 	"github.com/s9mcqytn4y-sys/cassy-backend/internal/pkg/midtrans"
 	"github.com/s9mcqytn4y-sys/cassy-backend/internal/realtime"
 	"github.com/s9mcqytn4y-sys/cassy-backend/internal/repository/postgres"
@@ -219,6 +220,13 @@ func (h *MidtransHandler) processVerifiedNotification(c *gin.Context, body []byt
 	if h.governanceService != nil {
 		platRes, platErr := h.governanceService.ProcessPlatformInvoiceWebhook(c.Request.Context(), webhookInput)
 		if platErr == nil {
+			outcome := "ok"
+			if platRes.Duplicate {
+				outcome = "duplicate"
+			} else if platRes.Ignored {
+				outcome = "ignored"
+			}
+			metrics.MidtransWebhookEvents.WithLabelValues("platform", outcome).Inc()
 			c.JSON(http.StatusOK, gin.H{
 				"status":         "ok",
 				"lane":           "platform_subscription",
@@ -229,10 +237,12 @@ func (h *MidtransHandler) processVerifiedNotification(c *gin.Context, body []byt
 			return
 		}
 		if errors.Is(platErr, service.ErrInvalidMidtransWebhook) {
+			metrics.MidtransWebhookEvents.WithLabelValues("platform", "invalid").Inc()
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid platform invoice payment notification"})
 			return
 		}
 		if !errors.Is(platErr, service.ErrGovernanceNotFound) {
+			metrics.MidtransWebhookEvents.WithLabelValues("platform", "error").Inc()
 			log.Printf("[WEBHOOK ERROR] lane=platform provider_order_id=%s amount=%d error=%v", trimmedOrderID, grossAmountIDR, platErr)
 			c.Header("Retry-After", "60")
 			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "deferred", "message": "platform invoice notification could not be committed; provider retry requested"})
@@ -266,22 +276,32 @@ func (h *MidtransHandler) processVerifiedNotification(c *gin.Context, body []byt
 	result, err := h.paymentService.ProcessMidtransWebhook(c.Request.Context(), webhookInput, string(sanitizedBytes))
 	if err != nil {
 		if errors.Is(err, service.ErrInvalidMidtransWebhook) {
+			metrics.MidtransWebhookEvents.WithLabelValues("tenant", "invalid").Inc()
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payment notification"})
 			return
 		}
 		if errors.Is(err, postgres.ErrPaymentNotFound) {
+			metrics.MidtransWebhookEvents.WithLabelValues("tenant", "not_found").Inc()
 			c.JSON(http.StatusNotFound, gin.H{"error": "payment attempt not found"})
 			return
 		}
+		metrics.MidtransWebhookEvents.WithLabelValues("tenant", "error").Inc()
 		log.Printf("[WEBHOOK ERROR] provider_order_id=%s amount=%d error=%v", trimmedOrderID, grossAmountIDR, err)
 		c.Header("Retry-After", "60")
 		c.JSON(http.StatusServiceUnavailable, gin.H{"status": "deferred", "message": "payment notification could not be committed; provider retry requested"})
 		return
 	}
 
+	outcome := "ok"
 	if result.Anomaly {
+		outcome = "anomaly"
 		log.Printf("[WEBHOOK ANOMALY] provider_order_id=%s amount=%d status=%s; durable event stored for reconciliation", trimmedOrderID, grossAmountIDR, result.Status)
+	} else if result.Duplicate {
+		outcome = "duplicate"
+	} else if result.Ignored {
+		outcome = "ignored"
 	}
+	metrics.MidtransWebhookEvents.WithLabelValues("tenant", outcome).Inc()
 	c.JSON(http.StatusOK, gin.H{
 		"status":    "ok",
 		"duplicate": result.Duplicate,

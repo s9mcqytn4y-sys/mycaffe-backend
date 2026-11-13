@@ -1,5 +1,5 @@
 -- db/seeds/development.sql
--- Global Platform Reference Seed for MyCaffe by AzureDevID.
+-- Global Platform Reference Seed for Cassy by AzureDevID.
 --
 -- POLICY: ZERO dummy tenants (stores, users, categories, products, tables, or orders) are seeded here.
 -- Every tenant store in local development, public demo, and staging must be created through:
@@ -33,7 +33,7 @@ INSERT INTO legal_documents (doc_type, version, locale, title, content_markdown,
 VALUES
     (
         'terms_of_service', '1.0.0', 'id-ID',
-        'Syarat dan Ketentuan Layanan SaaS MyCaffe by AzureDevID',
+        'Syarat dan Ketentuan Layanan SaaS Cassy by AzureDevID',
         'AzureDevID bertindak murni sebagai penyedia perangkat lunak (SaaS Provider) dengan skema Bring Your Own Key (BYOK) dan 0% komisi per transaksi. Dana transaksi menu mengalir langsung ke rekening masing-masing Tenant.',
         encode(sha256('tos-mycaffe-azuredevid-v1.0.0-id'::bytea), 'hex')
     ),
@@ -57,7 +57,7 @@ VALUES
     ),
     (
         'terms_of_service', '1.0.0', 'en-US',
-        'MyCaffe by AzureDevID SaaS Terms of Service',
+        'Cassy by AzureDevID SaaS Terms of Service',
         'AzureDevID operates strictly as a pure Software-as-a-Service (SaaS) provider using Bring Your Own Key (BYOK) gateway credentials with 0% transaction commission. Customer menu payments settle directly to each Tenant merchant account.',
         encode(sha256('tos-mycaffe-azuredevid-v1.0.0-en'::bytea), 'hex')
     ),
@@ -67,4 +67,6 @@ VALUES
         'Guest and staff personal data are isolated per tenant using PostgreSQL 18 Row-Level Security and AES-256-GCM credential encryption in compliance with Indonesia PDP Law No. 27/2022.',
         encode(sha256('pdp-mycaffe-azuredevid-v1.0.0-en'::bytea), 'hex')
     )
-ON CONFLICT (doc_type, version, locale) DO NOTHING;
+ON CONFLICT (doc_type, version, locale) DO UPDATE SET
+    title = EXCLUDED.title,
+    content_markdown = EXCLUDED.content_markdown;

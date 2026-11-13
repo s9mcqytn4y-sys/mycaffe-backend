@@ -3,11 +3,18 @@
 # Target OS: Ubuntu 24.04 LTS
 # Pulls GHCR images by digest (immutable) via scripts/deploy/deploy.sh; no source compilation on the VPS.
 
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   postgres:
     image: postgres:18-alpine
     container_name: mycaffe-postgres
     restart: unless-stopped
+    logging: *default-logging
     environment:
       POSTGRES_DB: ${DB_NAME:?DB_NAME must be set}
       POSTGRES_USER: ${DB_SUPERUSER:-postgres}
@@ -72,6 +79,7 @@ services:
     image: ghcr.io/s9mcqytn4y-sys/mycaffe-api@${API_IMAGE_DIGEST:?API_IMAGE_DIGEST must be set (use scripts/deploy/deploy.sh)}
     container_name: mycaffe-api
     restart: unless-stopped
+    logging: *default-logging
     depends_on:
       postgres:
         condition: service_healthy
@@ -114,7 +122,8 @@ services:
       SMTP_USERNAME: ${SMTP_USERNAME:?SMTP_USERNAME must be set}
       SMTP_PASSWORD: ${SMTP_PASSWORD:?SMTP_PASSWORD must be set}
       EMAIL_FROM_ADDRESS: ${EMAIL_FROM_ADDRESS:?EMAIL_FROM_ADDRESS must be set}
-      EMAIL_FROM_NAME: ${EMAIL_FROM_NAME:-MyCaffe}
+      EMAIL_FROM_NAME: ${EMAIL_FROM_NAME:-Cassy}
+      MIDTRANS_QRIS_ACQUIRER: ${MIDTRANS_QRIS_ACQUIRER:-gopay}
       APP_PUBLIC_URL: ${APP_PUBLIC_URL:?APP_PUBLIC_URL must be set}
       # Slug created by cmd/migrate -action=bootstrap-store; empty for multi-branch.
       DEFAULT_STORE_SLUG: ${DEFAULT_STORE_SLUG:-}
@@ -175,6 +184,7 @@ services:
     image: nginx:1.27-alpine
     container_name: mycaffe-nginx
     restart: unless-stopped
+    logging: *default-logging
     # No published ports (IN1, P0-07): only the tunnel reaches Nginx on the edge network.
     volumes:
       - ../nginx/nginx.prod.conf:/etc/nginx/nginx.conf:ro
@@ -201,7 +211,7 @@ services:
     image: cloudflare/cloudflared:2026.10.2
     container_name: mycaffe-tunnel
     restart: unless-stopped
-    command: tunnel --no-autoupdate --metrics 0.0.0.0:2000 run
+    command: tunnel --no-autoupdate --metrics 127.0.0.1:2000 run
     environment:
       TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?CLOUDFLARE_TUNNEL_TOKEN must be set (docs/Setup/Deploy.md)}
     depends_on:

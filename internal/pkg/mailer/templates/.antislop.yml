@@ -1,0 +1,13 @@
+preset: default
+
+rules:
+  structure.parataxis:
+    enabled: false
+  structure.uniformLength:
+    enabled: false
+  punctuation.emDash:
+    enabled: true
+    severity: error
+  vocab.banned:
+    enabled: true
+    severity: warning

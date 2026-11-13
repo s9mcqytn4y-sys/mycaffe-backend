@@ -324,7 +324,7 @@ func (s *TableService) ResolveQR(ctx context.Context, token string) (*PublicTabl
 		out = &PublicTable{StoreName: store.Name, StoreSlug: store.Slug, TableNumber: t.TableNumber, Label: t.Label,
 			OrderingOpen: reason == "", ClosedReason: reason, PaymentMethods: []string{}, ServiceMode: settings.QRServiceMode,
 			SplitEnabled: s.GuestSplit}
-		for _, m := range []domain.PaymentMethod{domain.PaymentMethodQRIS, domain.PaymentMethodGoPay, domain.PaymentMethodShopeePay} {
+		for _, m := range []domain.PaymentMethod{domain.PaymentMethodQRIS, domain.PaymentMethodGoPay, domain.PaymentMethodShopeePay, domain.PaymentMethodBankTransfer} {
 			if isPaymentMethodEnabled(store.EnabledPaymentMethods, m) {
 				out.PaymentMethods = append(out.PaymentMethods, string(m))
 			}

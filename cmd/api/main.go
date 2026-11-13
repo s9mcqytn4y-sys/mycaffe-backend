@@ -18,6 +18,7 @@ import (
 	"github.com/s9mcqytn4y-sys/cassy-backend/internal/config"
 	"github.com/s9mcqytn4y-sys/cassy-backend/internal/handler"
 	"github.com/s9mcqytn4y-sys/cassy-backend/internal/pkg/database"
+	"github.com/s9mcqytn4y-sys/cassy-backend/internal/pkg/logging"
 	"github.com/s9mcqytn4y-sys/cassy-backend/internal/pkg/mailer"
 	"github.com/s9mcqytn4y-sys/cassy-backend/internal/pkg/metrics"
 	"github.com/s9mcqytn4y-sys/cassy-backend/internal/pkg/sms"
@@ -25,13 +26,13 @@ import (
 	"github.com/s9mcqytn4y-sys/cassy-backend/internal/service"
 )
 
-// @title MyCaffe Core POS API
+// @title Cassy Core POS API
 // @version 1.0
-// @description Backend API untuk Multi-Tenant QR Ordering, POS, KDS, & TV Queue Display (MyCaffe Platform).
+// @description Backend API untuk Multi-Tenant QR Ordering, POS, KDS, & TV Queue Display (Cassy by AzureDevID).
 // @BasePath /
 func main() {
-	// JSON logs; slog.SetDefault also routes every existing log.Printf through this handler.
-	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, nil)))
+	// Structured JSON logs with credential/PII redaction; slog.SetDefault also routes stdlib log.Printf.
+	slog.SetDefault(logging.NewJSONLogger(os.Stderr))
 
 	cfg, err := config.LoadConfig()
 	if err != nil {
@@ -91,24 +92,24 @@ func main() {
 	}
 
 	// Internal metrics listener (IN3): separate port, not routed by Nginx, scraped by Grafana Alloy.
+	var metricsSrv *http.Server
 	if cfg.MetricsAddr != "" {
 		var sqlDB *sql.DB
 		if db != nil {
 			sqlDB = db.DB
 		}
-		metricsSrv := &http.Server{Addr: cfg.MetricsAddr, Handler: metrics.Handler(sqlDB), ReadHeaderTimeout: 5 * time.Second}
+		metricsSrv = &http.Server{Addr: cfg.MetricsAddr, Handler: metrics.Handler(sqlDB), ReadHeaderTimeout: 5 * time.Second}
 		go func() {
 			log.Printf("[METRICS] Serving /metrics on %s", cfg.MetricsAddr)
 			if err := metricsSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 				log.Printf("[METRICS] listener stopped: %v", err)
 			}
 		}()
-		defer metricsSrv.Close()
 	}
 
 	// Graceful shutdown setup
 	go func() {
-		log.Printf("[SERVER] Starting MyCaffe Backend on port :%s (env: %s)", cfg.Port, cfg.AppEnv)
+		log.Printf("[SERVER] Starting Cassy Backend on port :%s (env: %s)", cfg.Port, cfg.AppEnv)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("[SERVER] Listen error: %s\n", err)
 		}
@@ -124,6 +125,11 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
+	if metricsSrv != nil {
+		if err := metricsSrv.Shutdown(ctx); err != nil {
+			log.Printf("[METRICS] listener shutdown error: %v", err)
+		}
+	}
 	if err := srv.Shutdown(ctx); err != nil {
 		log.Fatalf("[SERVER] Server forced to shutdown: %v", err)
 	}

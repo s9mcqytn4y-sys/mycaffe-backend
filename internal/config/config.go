@@ -71,11 +71,18 @@ type Config struct {
 	// (owner decision Q3, single-tenant MVP). Multi-branch deployments leave it empty.
 	DefaultStoreSlug string
 
+	// Database pool tuning
+	DBMaxOpenConns    int
+	DBMaxIdleConns    int
+	DBConnMaxLifetime time.Duration
+	DBConnMaxIdleTime time.Duration
+
 	// Midtrans Core API (Default Store / Tenant Fallback)
 	MidtransMerchantID   string
 	MidtransServerKey    string
 	MidtransClientKey    string
 	MidtransIsProduction bool
+	MidtransQRISAcquirer string
 
 	// Multi-Tenant SaaS Governance & Dual-Lane Billing (ADR-009)
 	// CredentialEncryptionKey seals tenant BYOK Midtrans, SMTP, and WhatsApp secrets via AES-256-GCM.
@@ -225,13 +232,18 @@ func LoadConfig() (*Config, error) {
 		SMTPPassword:                 getEnv("SMTP_PASSWORD", ""),
 		SMTPTLSMode:                  smtpTLSMode,
 		EmailFromEmail:               getEnv("EMAIL_FROM_ADDRESS", getEnv("SMTP_USERNAME", "")),
-		EmailFromName:                getEnv("EMAIL_FROM_NAME", "MyCaffe"),
+		EmailFromName:                getEnv("EMAIL_FROM_NAME", "Cassy"),
 		AppPublicURL:                 strings.TrimRight(getEnv("APP_PUBLIC_URL", frontendURL), "/"),
 		DefaultStoreSlug:             strings.ToLower(strings.TrimSpace(getEnv("DEFAULT_STORE_SLUG", ""))),
+		DBMaxOpenConns:               positiveInt("DB_MAX_OPEN_CONNS", "25"),
+		DBMaxIdleConns:               positiveInt("DB_MAX_IDLE_CONNS", "10"),
+		DBConnMaxLifetime:            duration("DB_CONN_MAX_LIFETIME", "15m"),
+		DBConnMaxIdleTime:            duration("DB_CONN_MAX_IDLE_TIME", "5m"),
 		MidtransMerchantID:           getEnv("MIDTRANS_MERCHANT_ID", ""),
 		MidtransServerKey:            getEnv("MIDTRANS_SERVER_KEY", ""),
 		MidtransClientKey:            getEnv("MIDTRANS_CLIENT_KEY", ""),
 		MidtransIsProduction:         isProd,
+		MidtransQRISAcquirer:         strings.ToLower(strings.TrimSpace(getEnv("MIDTRANS_QRIS_ACQUIRER", "gopay"))),
 		CredentialEncryptionKey:      strings.TrimSpace(getEnv("CREDENTIAL_ENCRYPTION_KEY", "")),
 		PlatformAdminAPIKey:          strings.TrimSpace(getEnv("PLATFORM_ADMIN_API_KEY", "")),
 		PlatformMidtransServerKey:    strings.TrimSpace(getEnv("PLATFORM_MIDTRANS_SERVER_KEY", getEnv("MIDTRANS_SERVER_KEY", ""))),
@@ -398,6 +410,14 @@ func ValidateConfig(cfg *Config) error {
 				return fmt.Errorf("[SECURITY FAIL-CLOSED] localhost origin %q is forbidden in production", origin)
 			}
 		}
+	}
+
+	cfg.MidtransQRISAcquirer = strings.ToLower(strings.TrimSpace(cfg.MidtransQRISAcquirer))
+	if cfg.MidtransQRISAcquirer == "" {
+		cfg.MidtransQRISAcquirer = "gopay"
+	}
+	if cfg.MidtransQRISAcquirer != "gopay" && cfg.MidtransQRISAcquirer != "airpay shopee" {
+		return fmt.Errorf("[SECURITY FAIL-CLOSED] invalid MIDTRANS_QRIS_ACQUIRER %q: allowed values are gopay, airpay shopee", cfg.MidtransQRISAcquirer)
 	}
 
 	if err := validateSMSConfig(cfg); err != nil {

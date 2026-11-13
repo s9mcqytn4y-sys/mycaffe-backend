@@ -55,6 +55,10 @@ func (qrisGateway) ChargeCoreAPI(_ context.Context, in midtrans.ChargeRequest) (
 	if in.Method == domain.PaymentMethodGoPay || in.Method == domain.PaymentMethodShopeePay {
 		res.Actions = []coreapi.Action{{Name: "deeplink-redirect", Method: "GET", URL: "https://simulator.sandbox.midtrans.com/pay/" + in.OrderID}}
 	}
+	if in.Method == domain.PaymentMethodBankTransfer {
+		res.QRString = ""
+		res.VaNumbers = []coreapi.VANumber{{Bank: in.Bank, VANumber: "880012345678"}}
+	}
 	return res, nil
 }
 
@@ -376,6 +380,26 @@ func TestGuestQROrderingIteration5bIntegration(t *testing.T) {
 		charge := lastGuestCharge()
 		if want := "https://wpa.test/order/" + qrToken; charge.CallbackURL != want {
 			t.Fatalf("return link must come from the guest's table, got %q want %q", charge.CallbackURL, want)
+		}
+		if res := call("POST", url, req{cookie: deviceA, csrf: true}, map[string]any{"idempotency_key": "pay-va-bad", "method": "bank_transfer", "bank": "cimb"}); res.Code != http.StatusUnprocessableEntity && res.Code != http.StatusBadRequest {
+			t.Fatalf("an unsupported bank must be refused, got %d: %s", res.Code, res.Body.String())
+		}
+		vaRes := call("POST", url, req{cookie: deviceA, csrf: true}, map[string]any{
+			"idempotency_key": "pay-va-bca", "method": "bank_transfer", "bank": "bca",
+		})
+		if vaRes.Code != http.StatusOK {
+			t.Fatalf("VA payment failed: %d: %s", vaRes.Code, vaRes.Body.String())
+		}
+		var vaOut struct {
+			Payment struct {
+				Method   string `json:"method"`
+				Bank     string `json:"bank"`
+				VANumber string `json:"va_number"`
+			} `json:"payment"`
+		}
+		_ = json.Unmarshal(vaRes.Body.Bytes(), &vaOut)
+		if vaOut.Payment.Method != "bank_transfer" || vaOut.Payment.Bank != "bca" || vaOut.Payment.VANumber != "880012345678" {
+			t.Fatalf("expected BCA VA payment, got %+v", vaOut.Payment)
 		}
 	})
 

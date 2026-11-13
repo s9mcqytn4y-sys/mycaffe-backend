@@ -1,11 +1,11 @@
-{{define "subject"}}[Keamanan] Banyak percobaan PIN Owner salah di {{.StoreName}}{{end}}
-{{define "preheader"}}Persetujuan PIN Owner diblokir sementara sampai {{.ExpiresAt}}.{{end}}
-{{define "html_body"}}<h1 style="margin:0 0 16px 0;font-size:22px;line-height:30px;color:#2C1810;">Halo {{.RecipientName}},</h1>
-<p style="margin:0 0 16px 0;">PIN Owner salah dimasukkan berkali-kali di kasir <strong>{{.StoreName}}</strong>. Percobaan terakhir oleh <strong>{{.StaffName}}</strong>. Semua persetujuan PIN Owner (void, refund, stok, selisih kas) diblokir sementara.</p>
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 16px 0;background-color:#FEF3C7;border-radius:6px;">
-  <tr><td style="padding:14px 16px;font-size:14px;line-height:22px;color:#78350F;">
-    <strong>Diblokir sampai:</strong> {{.ExpiresAt}}<br>
+{{define "subject"}}[Keamanan] Percobaan PIN Owner gagal di {{.StoreName}}{{end}}
+{{define "preheader"}}Persetujuan PIN Owner diblokir sementara hingga {{.ExpiresAt}}.{{end}}
+{{define "html_body"}}<h1 style="margin:0 0 12px 0;font-size:22px;line-height:30px;color:#17211E;">Halo {{.RecipientName}},</h1>
+<p style="margin:0 0 16px 0;">PIN Owner salah dimasukkan berulang kali di kasir <strong>{{.StoreName}}</strong> (percobaan terakhir oleh <strong>{{.StaffName}}</strong>). Persetujuan PIN Owner diblokir sementara.</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 16px 0;background-color:#FEF6E6;border:1px solid #E9A23B;border-radius:8px;">
+  <tr><td style="padding:14px 16px;font-size:14px;line-height:22px;color:#6E4409;">
+    <strong>Diblokir hingga:</strong> {{.ExpiresAt}}<br>
     <strong>Waktu kejadian:</strong> {{.EventAt}}
   </td></tr>
 </table>
-<p style="margin:0;font-size:14px;line-height:22px;color:#6B5B52;">Akun Anda tidak dikunci. Jika ini bukan Anda, periksa log audit dan pertimbangkan untuk mengganti PIN Owner.</p>{{end}}
+<p style="margin:0;font-size:14px;line-height:22px;color:#4A5954;">Akun Anda tidak terkunci. Bila bukan Anda yang mencoba, periksa log audit dan segera ganti PIN Owner.</p>{{end}}

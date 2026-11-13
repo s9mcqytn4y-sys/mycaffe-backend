@@ -3,6 +3,8 @@
     "golang.go",
     "redhat.vscode-yaml",
     "ms-azuretools.vscode-docker",
-    "editorconfig.editorconfig"
+    "editorconfig.editorconfig",
+    "davidanson.vscode-markdownlint",
+    "skeinllc.anti-slop"
   ]
 }
